@@ -3,6 +3,7 @@
   import { onMount } from 'svelte';
   import SettingsManager from './SettingsManager.svelte';
   import KillmailViewer from './KillmailViewer.svelte';
+  import { clearKills } from './store.js';
   import Login from './Login.svelte';
 
   import { killmails, settings } from './store'; // Import the stores
@@ -17,6 +18,15 @@
 
   $: kills = $killmails;
   $: userSettings = $settings;
+
+  function clearAllKills() {
+    clearKills(); // Clear kills from the store
+    if (socket) {
+      socket.emit('clearKills'); // Notify the server to clear kills in memory
+    } else {
+      console.error('Socket is not initialized');
+    }
+  }
 
   function handleLogin(event) {
     username = event.detail.username;
@@ -36,12 +46,6 @@
       socket.emit('updateSettings', newSettings);
     } else {
       console.error('Socket is not initialized');
-    }
-  }
-
-  function clearKills() {
-    if (socket) {
-      socket.emit('clearKills');
     }
   }
 
@@ -67,7 +71,8 @@
     <button on:click={() => handleLogin({ detail: { username, password } })}>Login</button>
   </div>
 {:else}
-  <KillmailViewer {kills} clearKills={clearKills} />
+  <KillmailViewer {kills}/>
+  <button on:click={clearAllKills}>Clear All Kills</button>
   <SettingsManager on:updateSettings={updateSettings} {settings} />
 {/if}
 

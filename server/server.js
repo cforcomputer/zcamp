@@ -89,10 +89,14 @@ io.on('connection', (socket) => {
     });
   });
 
-  socket.on('clearKills', () => {
-    killmails = [];
-    io.emit('initialData', { killmails, settings: accounts[socket.username].settings });
-  }); // implement this
+    // server.js
+  io.on('connection', (socket) => {
+    socket.on('clearKills', () => {
+      // Clear killmails from server memory (this depends on how you store them)
+      killmails = []; // Clear the server-side memory
+      socket.emit('killmailsCleared'); // Optionally, notify the client that kills were cleared
+    });
+  });
 
   setInterval(() => {
     io.emit('testEvent', { message: 'Hello from server' });
@@ -116,7 +120,7 @@ async function pollRedisQ() {
   } catch (error) {
     console.error('Error polling RedisQ:', error);
   }
-  setTimeout(pollRedisQ, 1000);
+  setTimeout(pollRedisQ, 100);
 }
 
 server.listen(3000, () => {
