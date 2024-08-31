@@ -116,7 +116,7 @@ async function pollRedisQ() {
   } catch (error) {
     console.error('Error polling RedisQ:', error);
   }
-  setTimeout(pollRedisQ, 5000);
+  setTimeout(pollRedisQ, 1000);
 }
 
 server.listen(3000, () => {
