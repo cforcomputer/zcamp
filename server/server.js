@@ -8,6 +8,9 @@ const bcrypt = require('bcrypt');
 const app = express();
 const server = http.createServer(app);
 const io = socketIo(server);
+app.use(express.static('public'));
+app.use(express.json());
+
 
 const REDISQ_URL = "https://redisq.zkillboard.com/listen.php?queueID=KM_hunter";
 let killmails = [];
@@ -26,9 +29,6 @@ const db = new sqlite3.Database('./km_hunter.db', (err) => {
     )`);
   }
 });
-
-app.use(express.static('public'));
-app.use(express.json());
 
 // Account routes
 app.post('/api/login', (req, res) => {
@@ -89,23 +89,17 @@ io.on('connection', (socket) => {
     });
   });
 
-    // server.js
-  io.on('connection', (socket) => {
-    socket.on('clearKills', () => {
-      // Clear killmails from server memory (this depends on how you store them)
-      killmails = []; // Clear the server-side memory
-      socket.emit('killmailsCleared'); // Optionally, notify the client that kills were cleared
-    });
+  socket.on('clearKills', () => {
+    // Clear killmails from server memory
+    killmails = []; // Clear the server-side memory
+    socket.emit('killmailsCleared'); // Notify the client that kills were cleared
   });
-
-  setInterval(() => {
-    io.emit('testEvent', { message: 'Hello from server' });
-  }, 3000);
 
   socket.on('disconnect', () => {
     console.log('Client disconnected');
   });
 });
+
 
 async function pollRedisQ() {
   try {
@@ -120,7 +114,7 @@ async function pollRedisQ() {
   } catch (error) {
     console.error('Error polling RedisQ:', error);
   }
-  setTimeout(pollRedisQ, 100);
+  setTimeout(pollRedisQ, 10); // 10 ms --> hit as hard as you want, but only one connection
 }
 
 server.listen(3000, () => {

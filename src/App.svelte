@@ -76,6 +76,12 @@
   <SettingsManager on:updateSettings={updateSettings} {settings} />
 {/if}
 
+<head>
+  <link rel="stylesheet" href="/global.css">
+  <link rel="stylesheet" href="build/public/build/bundle.css"> 
+  <script src="/build/bundle.js"></script>
+</head>
+
 <style>
   .login-form {
     margin: 20px;

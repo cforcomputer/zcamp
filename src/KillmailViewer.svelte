@@ -32,35 +32,43 @@
 </script>
 
 <div class="killmail-viewer">
-  <table>
-    <thead>
-      <tr>
-        <th>Dropped Value</th>
-        <th>Occurred</th>
-        <th>URL</th>
-        <th>Map</th>
-      </tr>
-    </thead>
-    <tbody>
-      {#each kills as killmail}
+  <div class="scroll-box">
+    <table>
+      <thead>
         <tr>
-          <td>{formatDroppedValue(killmail.zkb.droppedValue)}</td>
-          <td>{calculateTimeDifference(killmail.killmail.killmail_time)}</td>
-          <td><a href={`https://zkillboard.com/kill/${killmail.killID}/`} target="_blank">View</a></td>
-          <td><button on:click={() => viewMap(killmail.killID)}>Map</button></td>
+          <th>Dropped Value</th>
+          <th>Occurred</th>
+          <th>URL</th>
+          <th>Map</th>
         </tr>
-      {/each}
-    </tbody>
-  </table>
-</div>
+      </thead>
+      <tbody>
+        {#each kills as killmail}
+          <tr>
+            <td>{formatDroppedValue(killmail.zkb.droppedValue)}</td>
+            <td>{calculateTimeDifference(killmail.killmail.killmail_time)}</td>
+            <td><a href={`https://zkillboard.com/kill/${killmail.killID}/`} target="_blank">View</a></td>
+            <td><button on:click={() => viewMap(killmail.killID)}>Map</button></td>
+          </tr>
+        {/each}
+      </tbody>
+    </table>
+  </div>
 
-{#if selectedKillmailId}
-  <MapVisualization killmailId={selectedKillmailId} />
-{/if}
+  {#if selectedKillmailId}
+    <MapVisualization killmailId={selectedKillmailId} />
+  {/if}
+</div>
 
 <style>
   .killmail-viewer {
     margin-top: 20px;
+  }
+
+  .scroll-box {
+    height: 400px; /* Fixed height */
+    overflow-y: auto; /* Scroll vertically if content overflows */
+    border: 1px solid #ddd; /* Optional: adds a border around the scrollable area */
   }
 
   table {
