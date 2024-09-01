@@ -11,7 +11,6 @@ const io = socketIo(server);
 app.use(express.static('public'));
 app.use(express.json());
 
-
 const REDISQ_URL = "https://redisq.zkillboard.com/listen.php?queueID=KM_hunter";
 let killmails = [];
 
@@ -53,6 +52,11 @@ app.post('/api/login', (req, res) => {
 // Account registration route
 app.post('/api/register', (req, res) => {
   const { username, password } = req.body;
+
+  if (!username || !password) {
+    return res.status(400).json({ success: false, message: 'Username and password are required' });
+  }
+
   // Hash the password before storing it in the database
   bcrypt.hash(password, 10, (err, hashedPassword) => {
     if (err) {
@@ -90,7 +94,6 @@ io.on('connection', (socket) => {
   });
 
   socket.on('clearKills', () => {
-    // Clear killmails from server memory
     killmails = []; // Clear the server-side memory
     socket.emit('killmailsCleared'); // Notify the client that kills were cleared
   });
@@ -100,7 +103,7 @@ io.on('connection', (socket) => {
   });
 });
 
-
+// Function to poll for new killmails from RedisQ
 async function pollRedisQ() {
   try {
     const response = await axios.get(REDISQ_URL);
@@ -114,10 +117,10 @@ async function pollRedisQ() {
   } catch (error) {
     console.error('Error polling RedisQ:', error);
   }
-  setTimeout(pollRedisQ, 10); // 10 ms --> hit as hard as you want, but only one connection
+  setTimeout(pollRedisQ, 10); // Poll every 10ms
 }
 
 server.listen(3000, () => {
   console.log('Server running on http://localhost:3000');
-  pollRedisQ();
+  pollRedisQ(); // Start polling RedisQ
 });

@@ -3,22 +3,21 @@
   import { onMount } from 'svelte';
   import SettingsManager from './SettingsManager.svelte';
   import KillmailViewer from './KillmailViewer.svelte';
-  import { clearKills } from './store.js';
-  import Login from './Login.svelte';
-
-  import { killmails, settings } from './store'; // Import the stores
+  import { clearKills, killmails, settings } from './store'; // Import the stores and clearKills function
+  import Login from './Login.svelte'; // Import the Login component
 
   let loggedIn = false;
   let username = '';
-  let password = '';
 
   // Subscribe to stores
   let userSettings = {};
   let kills = [];
 
+  // Reactive statements for stores
   $: kills = $killmails;
   $: userSettings = $settings;
 
+  // Function to clear all kills
   function clearAllKills() {
     clearKills(); // Clear kills from the store
     if (socket) {
@@ -28,18 +27,19 @@
     }
   }
 
+  // Handle login event from Login.svelte
   function handleLogin(event) {
     username = event.detail.username;
-    password = event.detail.password;
     loggedIn = true;
 
     if (socket) {
-      socket.emit('login', { username, password });
+      socket.emit('login', { username, password: event.detail.password });
     } else {
       console.error('Socket is not initialized');
     }
   }
 
+  // Handle settings update event from SettingsManager
   function updateSettings(event) {
     const newSettings = event.detail;
     if (socket) {
@@ -49,48 +49,19 @@
     }
   }
 
+  // Lifecycle hook
   onMount(() => {
     if (!socket) {
       console.error('Socket is not initialized on mount');
     }
-
-    // Note: Socket events are handled centrally in socket.js, so no need to handle them here
   });
 </script>
 
+<!-- Render the login form or the main app based on login status -->
 {#if !loggedIn}
-  <div class="login-form">
-    <label>
-      Username:
-      <input type="text" bind:value={username} />
-    </label>
-    <label>
-      Password:
-      <input type="password" bind:value={password} />
-    </label>
-    <button on:click={() => handleLogin({ detail: { username, password } })}>Login</button>
-  </div>
+  <Login on:login={handleLogin} /> <!-- Use the Login component and listen for the login event -->
 {:else}
   <KillmailViewer {kills}/>
   <button on:click={clearAllKills}>Clear All Kills</button>
   <SettingsManager on:updateSettings={updateSettings} {settings} />
 {/if}
-
-<head>
-  <link rel="stylesheet" href="/global.css">
-  <link rel="stylesheet" href="build/public/build/bundle.css"> 
-  <script src="/build/bundle.js"></script>
-</head>
-
-<style>
-  .login-form {
-    margin: 20px;
-  }
-  label {
-    display: block;
-    margin-bottom: 10px;
-  }
-  button {
-    padding: 5px 10px;
-  }
-</style>

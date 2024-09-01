@@ -1,85 +1,78 @@
+<!-- settingsmanager.svelte -->
 <script>
   import { createEventDispatcher } from 'svelte';
-  import socket from './socket.js'; // Import the initialized socket instance
+  import socket from './socket'; // Import the socket instance
+  import { settings } from './store'; // Import the settings store
+  import { onMount } from 'svelte';
 
-  export let settings = {};
   const dispatch = createEventDispatcher();
 
-  let audio = new Audio('audio_files/alert.wav'); 
+  // Local copy of settings to bind to inputs
+  let localSettings;
 
-  // Function to play sound
-  function playSound() {
-    if (settings.audio_alerts_enabled) {
-      audio.play().catch(err => {
-        console.error('Error playing audio:', err);
-      });
-    }
-  }
+  // Subscribe to the settings store and keep the local copy in sync
+  settings.subscribe(value => {
+    localSettings = { ...value };
+  });
 
   // Function to update a single setting
   function updateSetting(key, value) {
-    const newSettings = { ...settings };
-    newSettings[key] = value;
-    dispatch('updateSettings', newSettings); // Emit event to parent component
+    localSettings[key] = value;
+    settings.set(localSettings); // Update the store with new settings
+    socket.emit('updateSettings', localSettings); // Emit the updated settings to the server
   }
 
   // Function to update settings inside a filter list
   function updateFilterList(index, key, value) {
-    if (settings.filter_lists) {
-      const newSettings = { ...settings };
-      newSettings.filter_lists = [...settings.filter_lists];
-      newSettings.filter_lists[index] = { ...newSettings.filter_lists[index] };
-      newSettings.filter_lists[index][key] = value;
-      dispatch('updateSettings', newSettings); // Emit event to parent component
+    if (localSettings.filter_lists) {
+      localSettings.filter_lists = [...localSettings.filter_lists];
+      localSettings.filter_lists[index] = { ...localSettings.filter_lists[index], [key]: value };
+      settings.set(localSettings); // Update the store
+      console.log(localSettings);
+      socket.emit('updateSettings', localSettings); // Emit updated settings to server
     }
   }
-
-  // Listen for new killmails or other events where audio alerts might be triggered
-  socket.on('newKillmail', (data) => {
-    // Assuming this is where you handle new killmails
-    playSound();
-  });
 </script>
 
 <div class="settings-manager">
   <h2>Settings</h2>
-  {#if settings}
+  {#if localSettings}
     <label>
-      <input type="checkbox" bind:checked={settings.dropped_value_enabled} on:change={() => updateSetting('dropped_value_enabled', settings.dropped_value_enabled)}>
+      <input type="checkbox" bind:checked={localSettings.dropped_value_enabled} on:change={() => updateSetting('dropped_value_enabled', localSettings.dropped_value_enabled)}>
       Enable Dropped Value Filter
     </label>
     <label>
-      <input type="checkbox" bind:checked={settings.time_threshold_enabled} on:change={() => updateSetting('time_threshold_enabled', settings.time_threshold_enabled)}>
+      <input type="checkbox" bind:checked={localSettings.time_threshold_enabled} on:change={() => updateSetting('time_threshold_enabled', localSettings.time_threshold_enabled)}>
       Enable Time Threshold
     </label>
     <label>
       Time Threshold (seconds):
-      <input type="number" bind:value={settings.time_threshold} on:input={() => updateSetting('time_threshold', settings.time_threshold)}>
+      <input type="number" bind:value={localSettings.time_threshold} on:input={() => updateSetting('time_threshold', localSettings.time_threshold)}>
     </label>
     <label>
       Minimum Dropped Value:
-      <input type="number" bind:value={settings.dropped_value} on:input={() => updateSetting('dropped_value', settings.dropped_value)}>
+      <input type="number" bind:value={localSettings.dropped_value} on:input={() => updateSetting('dropped_value', localSettings.dropped_value)}>
     </label>
     <label>
-      <input type="checkbox" bind:checked={settings.audio_alerts_enabled} on:change={() => updateSetting('audio_alerts_enabled', settings.audio_alerts_enabled)}>
+      <input type="checkbox" bind:checked={localSettings.audio_alerts_enabled} on:change={() => updateSetting('audio_alerts_enabled', localSettings.audio_alerts_enabled)}>
       Enable Audio Alerts
     </label>
     <label>
-      <input type="checkbox" bind:checked={settings.npc_only} on:change={() => updateSetting('npc_only', settings.npc_only)}>
+      <input type="checkbox" bind:checked={localSettings.npc_only} on:change={() => updateSetting('npc_only', localSettings.npc_only)}>
       NPC Only
     </label>
     <label>
-      <input type="checkbox" bind:checked={settings.solo} on:change={() => updateSetting('solo', settings.solo)}>
+      <input type="checkbox" bind:checked={localSettings.solo} on:change={() => updateSetting('solo', localSettings.solo)}>
       Solo Only
     </label>
     <label>
-      <input type="checkbox" bind:checked={settings.triangulation_check} on:change={() => updateSetting('triangulation_check', settings.triangulation_check)}>
+      <input type="checkbox" bind:checked={localSettings.triangulation_check} on:change={() => updateSetting('triangulation_check', localSettings.triangulation_check)}>
       Triangulation Check
     </label>
 
     <h3>Filter Lists</h3>
-    {#if settings.filter_lists}
-      {#each settings.filter_lists as filter, index}
+    {#if localSettings.filter_lists}
+      {#each localSettings.filter_lists as filter, index}
         <div class="filter-list">
           <h4>{filter.file}</h4>
           <label>
