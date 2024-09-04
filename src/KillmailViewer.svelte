@@ -1,22 +1,18 @@
 <script>
-  import { killmails } from './store';
-  import MapVisualization from './MapVisualization.svelte';
+  import { filteredKillmails } from "./store";
+  import MapVisualization from "./MapVisualization.svelte";
 
   let selectedKillmailId = null;
-
-  // Subscribe to the killmails store
-  let kills = [];
-  $: kills = $killmails;
 
   function viewMap(killID) {
     selectedKillmailId = killID;
   }
 
   function formatDroppedValue(value) {
-    if (isNaN(value) || value === null || value === undefined) return '0';
+    if (isNaN(value) || value === null || value === undefined) return "0";
     const magnitude = Math.floor(Math.log10(value) / 3);
     const scaled = value / Math.pow(1000, magnitude);
-    return scaled.toFixed(2) + ['', 'K', 'M', 'B', 'T'][magnitude];
+    return scaled.toFixed(2) + ["", "K", "M", "B", "T"][magnitude];
   }
 
   function calculateTimeDifference(killmailTime) {
@@ -43,12 +39,20 @@
         </tr>
       </thead>
       <tbody>
-        {#each kills as killmail}
+        {#each $filteredKillmails as killmail}
           <tr>
             <td>{formatDroppedValue(killmail.zkb.droppedValue)}</td>
             <td>{calculateTimeDifference(killmail.killmail.killmail_time)}</td>
-            <td><a href={`https://zkillboard.com/kill/${killmail.killID}/`} target="_blank">View</a></td>
-            <td><button on:click={() => viewMap(killmail.killID)}>Map</button></td>
+            <td
+              ><a
+                href={`https://zkillboard.com/kill/${killmail.killID}/`}
+                target="_blank">View</a
+              ></td
+            >
+            <td
+              ><button on:click={() => viewMap(killmail.killID)}>Map</button
+              ></td
+            >
           </tr>
         {/each}
       </tbody>
@@ -76,7 +80,8 @@
     border-collapse: collapse;
   }
 
-  th, td {
+  th,
+  td {
     border: 1px solid #ddd;
     padding: 8px;
     text-align: left;
