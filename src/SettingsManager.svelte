@@ -1,11 +1,16 @@
 <script>
   import { createEventDispatcher } from "svelte";
   import socket from "./socket";
-  import { settings } from "./store";
+  import { settings, filterLists } from "./store";
+  import FilterListManager from "./FilterListManager.svelte";
 
   const dispatch = createEventDispatcher();
 
   let localSettings;
+  let newListName = '';
+  let newListIds = '';
+  let newListIsExclude = false;
+  let newListFilterType = '';
 
   settings.subscribe((value) => {
     localSettings = { ...value };
@@ -17,16 +22,25 @@
     socket.emit("updateSettings", localSettings);
   }
 
-  function updateFilterList(index, key, value) {
-    if (localSettings.filter_lists) {
-      localSettings.filter_lists = [...localSettings.filter_lists];
-      localSettings.filter_lists[index] = {
-        ...localSettings.filter_lists[index],
-        [key]: value,
-      };
-      settings.set(localSettings);
-      socket.emit("updateSettings", localSettings);
-    }
+  function createFilterList() {
+    const ids = newListIds.split(',').map(id => id.trim());
+    socket.emit("createFilterList", { 
+      name: newListName, 
+      ids, 
+      enabled: false, 
+      is_exclude: newListIsExclude, 
+      filter_type: newListFilterType 
+    });
+    newListName = '';
+    newListIds = '';
+    newListIsExclude = false;
+    newListFilterType = '';
+  }
+
+  function handleFilterListsUpdate(event) {
+    const updatedFilterLists = event.detail.filterLists;
+    filterLists.set(updatedFilterLists);
+    socket.emit("updateFilterLists", updatedFilterLists);
   }
 </script>
 
@@ -377,70 +391,28 @@
       />
     </label>
 
-    <h3>Filter Lists</h3>
-    {#if localSettings.filter_lists}
-      {#each localSettings.filter_lists as filter, index}
-        <div class="filter-list">
-          <h4>{filter.file}</h4>
-          <label>
-            <input
-              type="checkbox"
-              bind:checked={filter.enabled}
-              on:change={() =>
-                updateFilterList(index, "enabled", filter.enabled)}
-            />
-            Enabled
-          </label>
-          <label>
-            Color:
-            <input
-              type="text"
-              bind:value={filter.color}
-              on:input={() => updateFilterList(index, "color", filter.color)}
-            />
-          </label>
-          <label>
-            <input
-              type="checkbox"
-              bind:checked={filter.webhook}
-              on:change={() =>
-                updateFilterList(index, "webhook", filter.webhook)}
-            />
-            Webhook
-          </label>
-          <label>
-            Sound:
-            <input
-              type="text"
-              bind:value={filter.sound}
-              on:input={() => updateFilterList(index, "sound", filter.sound)}
-            />
-          </label>
-          <label>
-            <input
-              type="checkbox"
-              bind:checked={filter.ignore_dropped_value}
-              on:change={() =>
-                updateFilterList(
-                  index,
-                  "ignore_dropped_value",
-                  filter.ignore_dropped_value
-                )}
-            />
-            Ignore Dropped Value
-          </label>
-          <label>
-            List Check ID:
-            <input
-              type="text"
-              bind:value={filter.list_check_id}
-              on:input={() =>
-                updateFilterList(index, "list_check_id", filter.list_check_id)}
-            />
-          </label>
-        </div>
-      {/each}
-    {/if}
+    <h3>Create New Filter List</h3>
+    <div>
+      <input bind:value={newListName} placeholder="New list name" />
+      <input bind:value={newListIds} placeholder="Comma-separated IDs" />
+      <label>
+        <input type="checkbox" bind:checked={newListIsExclude} />
+        Exclude
+      </label>
+      <select bind:value={newListFilterType}>
+        <option value="">Select filter type</option>
+        <option value="attacker_alliance">Attacker Alliance</option>
+        <option value="attacker_corporation">Attacker Corporation</option>
+        <option value="attacker_ship_type">Attacker Ship Type</option>
+        <option value="victim_alliance">Victim Alliance</option>
+        <option value="victim_corporation">Victim Corporation</option>
+        <option value="ship_type">Ship Type</option>
+        <option value="solar_system">Solar System</option>
+      </select>
+      <button on:click={createFilterList}>Create New List</button>
+    </div>
+    
+    <FilterListManager on:updateFilterLists={handleFilterListsUpdate} />
   {/if}
 </div>
 
@@ -455,15 +427,21 @@
     margin-bottom: 10px;
   }
 
-  input[type="number"],
-  input[type="text"] {
+  input[type="number"]{
     width: 100px;
   }
 
-  .filter-list {
-    margin-bottom: 20px;
-    padding: 10px;
-    border: 1px solid #ccc;
-    border-radius: 5px;
+  h3 {
+    margin-top: 20px;
+    margin-bottom: 10px;
+  }
+
+  button {
+    margin-top: 10px;
+    margin-right: 10px;
+  }
+
+  select {
+    margin-top: 5px;
   }
 </style>

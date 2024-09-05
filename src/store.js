@@ -2,11 +2,47 @@ import { writable, derived } from "svelte/store";
 
 export const killmails = writable([]);
 export const settings = writable({});
+export const filterLists = writable([]);
 
 export const filteredKillmails = derived(
-  [killmails, settings],
-  ([$killmails, $settings]) => {
+  [killmails, settings, filterLists],
+  ([$killmails, $settings, $filterLists]) => {
     return $killmails.filter((killmail) => {
+      // Apply filter lists
+      for (let list of $filterLists) {
+        if (!list.enabled) continue;  // Skip disabled filter lists
+
+        const ids = JSON.parse(list.ids);
+        let match = false;
+
+        switch (list.filter_type) {
+          case 'attacker_alliance':
+            match = killmail.killmail.attackers.some(attacker => ids.includes(attacker.alliance_id?.toString()));
+            break;
+          case 'attacker_corporation':
+            match = killmail.killmail.attackers.some(attacker => ids.includes(attacker.corporation_id?.toString()));
+            break;
+          case 'attacker_ship_type':
+            match = killmail.killmail.attackers.some(attacker => ids.includes(attacker.ship_type_id?.toString()));
+            break;
+          case 'victim_alliance':
+            match = ids.includes(killmail.killmail.victim.alliance_id?.toString());
+            break;
+          case 'victim_corporation':
+            match = ids.includes(killmail.killmail.victim.corporation_id?.toString());
+            break;
+          case 'ship_type':
+            match = ids.includes(killmail.killmail.victim.ship_type_id?.toString());
+            break;
+          case 'solar_system':
+            match = ids.includes(killmail.killmail.solar_system_id?.toString());
+            break;
+        }
+
+        if (list.is_exclude && match) return false;
+        if (!list.is_exclude && !match) return false;
+      }
+
       // Dropped Value Filter
       if (
         $settings.dropped_value_enabled &&
@@ -158,4 +194,16 @@ export const filteredKillmails = derived(
 
 export function clearKills() {
   killmails.set([]);
+}
+
+export function addFilterList(list) {
+  filterLists.update(lists => [...lists, list]);
+}
+
+export function updateFilterList(updatedList) {
+  filterLists.update(lists => lists.map(list => list.id === updatedList.id ? updatedList : list));
+}
+
+export function deleteFilterList(id) {
+  filterLists.update(lists => lists.filter(list => list.id !== id));
 }

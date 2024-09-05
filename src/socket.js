@@ -1,6 +1,6 @@
 // socket.js
 import { io } from 'socket.io-client';
-import { killmails, settings } from './store';
+import { killmails, settings, filterLists, addFilterList } from './store';
 
 // Initialize the socket connection to your server
 const socket = io('http://localhost:3000'); // Replace with your actual server URL
@@ -17,9 +17,11 @@ socket.on('disconnect', () => {
 // Handle initial data received from the server
 socket.on('initialData', (data) => {
   console.log('Received initialData:', data);
-  settings.set(data.settings); // Set user settings in the store
-  killmails.set(data.killmails); // Set killmails in the store
+  settings.set(data.settings);
+  killmails.set(data.killmails);
+  filterLists.set(data.filterLists);
 });
+
 
 let audio = new Audio('audio_files/alert.wav'); 
 
@@ -36,6 +38,12 @@ function playSound() {
     });
   }
 }
+
+// Handle filter list creation response
+socket.on('filterListCreated', (newFilterList) => {
+  console.log('New filter list created:', newFilterList);
+  addFilterList(newFilterList);
+});
 
 // Handle new killmails received from the server
 socket.on('newKillmail', (killmail) => {

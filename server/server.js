@@ -26,6 +26,16 @@ const db = new sqlite3.Database('./km_hunter.db', (err) => {
       password TEXT,
       settings TEXT
     )`);
+    db.run(`CREATE TABLE IF NOT EXISTS filter_lists (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER,
+      name TEXT,
+      ids TEXT,
+      enabled BOOLEAN,
+      is_exclude BOOLEAN,
+      filter_type TEXT,
+      FOREIGN KEY(user_id) REFERENCES users(id)
+    )`);
   }
 });
 
@@ -37,18 +47,42 @@ function isWithinLast24Hours(killmailTime) {
   return timeDiff <= 24 * 60 * 60 * 1000; // 24 hours in milliseconds
 }
 
+// Function to get the total size of a user's filter lists
+function getFilterListsSize(userId) {
+  return new Promise((resolve, reject) => {
+    db.all('SELECT ids FROM filter_lists WHERE user_id = ?', [userId], (err, rows) => {
+      if (err) {
+        reject(err);
+      } else {
+        const totalSize = rows.reduce((sum, row) => sum + JSON.stringify(row).length, 0);
+        resolve(totalSize);
+      }
+    });
+  });
+}
+
 // Account routes
 app.post('/api/login', (req, res) => {
   const { username, password } = req.body;
-  db.get('SELECT * FROM users WHERE username = ?', [username], (err, row) => {
+  db.get('SELECT * FROM users WHERE username = ?', [username], (err, user) => {
     if (err) {
       res.status(500).json({ success: false, message: 'Server error' });
-    } else if (!row) {
+    } else if (!user) {
       res.status(401).json({ success: false, message: 'Invalid credentials' });
     } else {
-      bcrypt.compare(password, row.password, (err, result) => {
+      bcrypt.compare(password, user.password, (err, result) => {
         if (result) {
-          res.json({ success: true, settings: JSON.parse(row.settings) });
+          db.all('SELECT * FROM filter_lists WHERE user_id = ?', [user.id], (err, filterLists) => {
+            if (err) {
+              res.status(500).json({ success: false, message: 'Error fetching filter lists' });
+            } else {
+              res.json({ 
+                success: true, 
+                settings: JSON.parse(user.settings),
+                filterLists: filterLists
+              });
+            }
+          });
         } else {
           res.status(401).json({ success: false, message: 'Invalid credentials' });
         }
@@ -85,19 +119,130 @@ app.post('/api/register', (req, res) => {
   });
 });
 
+// New route to create a filter list
+app.post('/api/filter-list', async (req, res) => {
+  const { userId, name, ids, enabled, isExclude, filterType } = req.body;
+  
+  try {
+    // Check if user has reached the maximum number of filter lists
+    const [listCount] = await db.get('SELECT COUNT(*) as count FROM filter_lists WHERE user_id = ?', [userId]);
+    if (listCount.count >= 100) {
+      return res.status(400).json({ success: false, message: 'Maximum number of filter lists reached' });
+    }
+
+    // Check if adding this list would exceed the size limit
+    const currentSize = await getFilterListsSize(userId);
+    const newListSize = JSON.stringify({ name, ids, enabled, isExclude, filterType }).length;
+    if (currentSize + newListSize > 1024 * 1024) { // 1MB limit
+      return res.status(400).json({ success: false, message: 'Filter lists size limit exceeded' });
+    }
+
+    db.run('INSERT INTO filter_lists (user_id, name, ids, enabled, is_exclude, filter_type) VALUES (?, ?, ?, ?, ?, ?)', 
+      [userId, name, JSON.stringify(ids), enabled, isExclude, filterType], 
+      function(err) {
+        if (err) {
+          res.status(500).json({ success: false, message: 'Error creating filter list' });
+        } else {
+          const newFilterList = {
+            id: this.lastID,
+            user_id: userId,
+            name,
+            ids: JSON.stringify(ids),
+            enabled,
+            is_exclude: isExclude,
+            filter_type: filterType
+          };
+          res.json({ success: true, filterList: newFilterList });
+          // Emit the new filter list to all connected clients for this user
+          io.to(userId.toString()).emit('filterListCreated', newFilterList);
+        }
+      }
+    );
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// New route to get all filter lists for a user
+app.get('/api/filter-lists/:userId', (req, res) => {
+  const userId = req.params.userId;
+  db.all('SELECT * FROM filter_lists WHERE user_id = ?', [userId], (err, rows) => {
+    if (err) {
+      res.status(500).json({ success: false, message: 'Error fetching filter lists' });
+    } else {
+      res.json({ success: true, filterLists: rows });
+    }
+  });
+});
+
+// New route to update a filter list
+app.put('/api/filter-list/:id', async (req, res) => {
+  const { name, ids, enabled, isExclude, filterType } = req.body;
+  const id = req.params.id;
+
+  try {
+    // Get the user ID for this filter list
+    const [filterList] = await db.get('SELECT user_id FROM filter_lists WHERE id = ?', [id]);
+    if (!filterList) {
+      return res.status(404).json({ success: false, message: 'Filter list not found' });
+    }
+
+    // Check if updating this list would exceed the size limit
+    const currentSize = await getFilterListsSize(filterList.user_id);
+    const newListSize = JSON.stringify({ name, ids, enabled, isExclude, filterType }).length;
+    const oldListSize = JSON.stringify(await db.get('SELECT * FROM filter_lists WHERE id = ?', [id])).length;
+    if (currentSize - oldListSize + newListSize > 1024 * 1024) { // 1MB limit
+      return res.status(400).json({ success: false, message: 'Filter lists size limit exceeded' });
+    }
+
+    db.run('UPDATE filter_lists SET name = ?, ids = ?, enabled = ?, is_exclude = ?, filter_type = ? WHERE id = ?', 
+      [name, JSON.stringify(ids), enabled, isExclude, filterType, id], 
+      function(err) {
+        if (err) {
+          res.status(500).json({ success: false, message: 'Error updating filter list' });
+        } else {
+          res.json({ success: true });
+        }
+      }
+    );
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// New route to delete a filter list
+app.delete('/api/filter-list/:id', (req, res) => {
+  const id = req.params.id;
+  db.run('DELETE FROM filter_lists WHERE id = ?', [id], function(err) {
+    if (err) {
+      res.status(500).json({ success: false, message: 'Error deleting filter list' });
+    } else {
+      res.json({ success: true });
+    }
+  });
+});
+
 io.on('connection', (socket) => {
   console.log('New client connected');
 
   socket.on('login', ({ username, password }) => {
     socket.username = username;
-    db.get('SELECT settings FROM users WHERE username = ?', [username], (err, row) => {
+    db.get('SELECT id, settings FROM users WHERE username = ?', [username], (err, user) => {
       if (err) {
         console.error('Error fetching user settings', err);
-      } else if (row) {
-        console.log("Sending user settings and killmail data");
-        socket.emit('initialData', { 
-          killmails: killmails.filter(km => isWithinLast24Hours(km.killmail.killmail_time)), 
-          settings: JSON.parse(row.settings) 
+      } else if (user) {
+        // Fetch filter lists for the user
+        db.all('SELECT * FROM filter_lists WHERE user_id = ?', [user.id], (err, filterLists) => {
+          if (err) {
+            console.error('Error fetching filter lists', err);
+          } else {
+            console.log("Sending user settings, filter lists, and killmail data");
+            socket.emit('initialData', { 
+              killmails: killmails.filter(km => isWithinLast24Hours(km.killmail.killmail_time)), 
+              settings: JSON.parse(user.settings),
+              filterLists: filterLists
+            });
+          }
         });
       }
     });
@@ -106,6 +251,65 @@ io.on('connection', (socket) => {
   socket.on('clearKills', () => {
     killmails = []; // Clear the server-side memory
     socket.emit('killmailsCleared'); // Notify the client that kills were cleared
+  });
+
+  socket.on('updateSettings', (newSettings) => {
+    if (socket.username) {
+      db.run('UPDATE users SET settings = ? WHERE username = ?', 
+        [JSON.stringify(newSettings), socket.username], 
+        (err) => {
+          if (err) {
+            console.error('Error updating settings:', err);
+          } else {
+            console.log('Settings updated for user:', socket.username);
+          }
+        }
+      );
+    }
+  });
+
+  socket.on('createFilterList', ({ name, ids, enabled, isExclude, filterType }) => {
+    if (socket.username) {
+      db.get('SELECT id FROM users WHERE username = ?', [socket.username], (err, row) => {
+        if (err) {
+          console.error('Error fetching user id:', err);
+        } else if (row) {
+          db.run('INSERT INTO filter_lists (user_id, name, ids, enabled, is_exclude, filter_type) VALUES (?, ?, ?, ?, ?, ?)', 
+            [row.id, name, JSON.stringify(ids), enabled, isExclude, filterType], 
+            function(err) {
+              if (err) {
+                console.error('Error creating filter list:', err);
+              } else {
+                socket.emit('filterListCreated', { id: this.lastID, name, ids, enabled, is_exclude: isExclude, filter_type: filterType });
+              }
+            }
+          );
+        }
+      });
+    }
+  });
+
+  socket.on('updateFilterList', ({ id, name, ids, enabled, is_exclude, filter_type }) => {
+    db.run('UPDATE filter_lists SET name = ?, ids = ?, enabled = ?, is_exclude = ?, filter_type = ? WHERE id = ?', 
+      [name, JSON.stringify(ids), enabled, is_exclude, filter_type, id], 
+      (err) => {
+        if (err) {
+          console.error('Error updating filter list:', err);
+        } else {
+          socket.emit('filterListUpdated', { id, name, ids, enabled, is_exclude, filter_type });
+        }
+      }
+    );
+  });
+
+  socket.on('deleteFilterList', ({ id }) => {
+    db.run('DELETE FROM filter_lists WHERE id = ?', [id], (err) => {
+      if (err) {
+        console.error('Error deleting filter list:', err);
+      } else {
+        socket.emit('filterListDeleted', { id });
+      }
+    });
   });
 
   socket.on('disconnect', () => {
