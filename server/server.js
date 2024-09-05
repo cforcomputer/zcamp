@@ -36,6 +36,13 @@ const db = new sqlite3.Database('./km_hunter.db', (err) => {
       filter_type TEXT,
       FOREIGN KEY(user_id) REFERENCES users(id)
     )`);
+    db.run(`CREATE TABLE IF NOT EXISTS user_profiles (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER,
+      name TEXT,
+      settings TEXT,
+      FOREIGN KEY(user_id) REFERENCES users(id)
+    )`);
   }
 });
 
@@ -236,11 +243,19 @@ io.on('connection', (socket) => {
           if (err) {
             console.error('Error fetching filter lists', err);
           } else {
-            console.log("Sending user settings, filter lists, and killmail data");
-            socket.emit('initialData', { 
-              killmails: killmails.filter(km => isWithinLast24Hours(km.killmail.killmail_time)), 
-              settings: JSON.parse(user.settings),
-              filterLists: filterLists
+            // Fetch profiles for the user
+            db.all('SELECT id, name FROM user_profiles WHERE user_id = ?', [user.id], (err, profiles) => {
+              if (err) {
+                console.error('Error fetching user profiles', err);
+              } else {
+                console.log("Sending user settings, filter lists, profiles, and killmail data");
+                socket.emit('initialData', { 
+                  killmails: killmails.filter(km => isWithinLast24Hours(km.killmail.killmail_time)), 
+                  settings: JSON.parse(user.settings),
+                  filterLists: filterLists,
+                  profiles: profiles
+                });
+              }
             });
           }
         });
@@ -308,6 +323,85 @@ io.on('connection', (socket) => {
         console.error('Error deleting filter list:', err);
       } else {
         socket.emit('filterListDeleted', { id });
+      }
+    });
+  });
+
+  socket.on('saveProfile', (data) => {
+    console.log('Received saveProfile event:', data);
+    if (socket.username) {
+      db.get('SELECT id FROM users WHERE username = ?', [socket.username], (err, row) => {
+        if (err) {
+          console.error('Error fetching user id:', err);
+          socket.emit('error', { message: 'Error saving profile' });
+        } else if (row) {
+          const userId = row.id;
+          const { name, settings, filterLists } = data;
+          const profileData = JSON.stringify({ settings, filterLists });
+          
+          db.get('SELECT id FROM user_profiles WHERE user_id = ? AND name = ?', [userId, name], (err, profileRow) => {
+            if (err) {
+              console.error('Error checking for existing profile:', err);
+              socket.emit('error', { message: 'Error saving profile' });
+            } else if (profileRow) {
+              // Update existing profile
+              db.run('UPDATE user_profiles SET settings = ? WHERE id = ?', 
+                [profileData, profileRow.id], 
+                (err) => {
+                  if (err) {
+                    console.error('Error updating profile:', err);
+                    socket.emit('error', { message: 'Error updating profile' });
+                  } else {
+                    console.log('Profile updated successfully');
+                    socket.emit('profileSaved', { id: profileRow.id, name, message: 'Profile updated' });
+                  }
+                }
+              );
+            } else {
+              // Create new profile
+              db.run('INSERT INTO user_profiles (user_id, name, settings) VALUES (?, ?, ?)', 
+                [userId, name, profileData], 
+                function(err) {
+                  if (err) {
+                    console.error('Error saving new profile:', err);
+                    socket.emit('error', { message: 'Error saving new profile' });
+                  } else {
+                    console.log('New profile created successfully');
+                    socket.emit('profileSaved', { id: this.lastID, name, message: 'New profile created' });
+                  }
+                }
+              );
+            }
+          });
+        } else {
+          console.error('User not found');
+          socket.emit('error', { message: 'User not found' });
+        }
+      });
+    } else {
+      console.error('No username associated with socket');
+      socket.emit('error', { message: 'Not logged in' });
+    }
+  });
+
+  socket.on('loadProfile', (profileId) => {
+    db.get('SELECT settings FROM user_profiles WHERE id = ?', [profileId], (err, row) => {
+      if (err) {
+        console.error('Error loading profile:', err);
+        socket.emit('error', { message: 'Error loading profile' });
+      } else if (row) {
+        try {
+          const profileData = JSON.parse(row.settings);
+          socket.emit('profileLoaded', {
+            settings: profileData.settings,
+            filterLists: profileData.filterLists
+          });
+        } catch (parseError) {
+          console.error('Error parsing profile data:', parseError);
+          socket.emit('error', { message: 'Error parsing profile data' });
+        }
+      } else {
+        socket.emit('error', { message: 'Profile not found' });
       }
     });
   });

@@ -12,7 +12,7 @@ export const filteredKillmails = derived(
       for (let list of $filterLists) {
         if (!list.enabled) continue;  // Skip disabled filter lists
 
-        const ids = JSON.parse(list.ids);
+        const ids = Array.isArray(list.ids) ? list.ids : JSON.parse(list.ids);
         let match = false;
 
         switch (list.filter_type) {

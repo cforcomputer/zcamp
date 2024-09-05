@@ -1,36 +1,39 @@
 <script>
   import { createEventDispatcher } from "svelte";
-  import socket from "./socket";
   import { settings, filterLists } from "./store";
   import FilterListManager from "./FilterListManager.svelte";
 
   const dispatch = createEventDispatcher();
 
-  let localSettings;
+  export let socket;
+  export let profiles = [];
+
   let newListName = '';
   let newListIds = '';
   let newListIsExclude = false;
   let newListFilterType = '';
+  let selectedProfile = null;
+  let newProfileName = '';
 
-  settings.subscribe((value) => {
-    localSettings = { ...value };
-  });
+  $: localSettings = $settings;
+  $: localFilterLists = $filterLists;
 
   function updateSetting(key, value) {
-    localSettings[key] = value;
-    settings.set(localSettings);
-    socket.emit("updateSettings", localSettings);
+    settings.update(s => ({ ...s, [key]: value }));
+    socket.emit("updateSettings", $settings);
   }
 
   function createFilterList() {
     const ids = newListIds.split(',').map(id => id.trim());
-    socket.emit("createFilterList", { 
+    const newList = { 
       name: newListName, 
       ids, 
       enabled: false, 
       is_exclude: newListIsExclude, 
       filter_type: newListFilterType 
-    });
+    };
+    socket.emit("createFilterList", newList);
+    filterLists.update(lists => [...lists, newList]);
     newListName = '';
     newListIds = '';
     newListIsExclude = false;
@@ -38,24 +41,88 @@
   }
 
   function handleFilterListsUpdate(event) {
-    const updatedFilterLists = event.detail.filterLists;
-    filterLists.set(updatedFilterLists);
-    socket.emit("updateFilterLists", updatedFilterLists);
+    filterLists.set(event.detail.filterLists);
+    socket.emit("updateFilterLists", $filterLists);
+  }
+
+  function saveProfile() {
+    console.log('Save profile function called');
+    console.log('New profile name:', newProfileName);
+    console.log('Current settings:', $settings);
+    console.log('Current filter lists:', $filterLists);
+
+    if (newProfileName) {
+      const profileData = {
+        name: newProfileName,
+        settings: $settings,
+        filterLists: $filterLists
+      };
+      console.log('Sending profile data:', profileData);
+      socket.emit("saveProfile", profileData);
+      newProfileName = ''; // Clear the input after saving
+    } else {
+      console.log('No profile name provided');
+    }
+  }
+
+  function loadProfile() {
+    if (selectedProfile) {
+      socket.emit("loadProfile", selectedProfile);
+    }
+  }
+
+  socket.on('profileSaved', (profile) => {
+    console.log('Profile saved event received:', profile);
+    const existingIndex = profiles.findIndex(p => p.id === profile.id);
+    if (existingIndex !== -1) {
+      profiles[existingIndex] = profile;
+    } else {
+      profiles = [...profiles, profile];
+    }
+    selectedProfile = profile.id;
+    profiles = [...profiles]; // Trigger reactivity
+    console.log('Updated profiles:', profiles);
+  });
+
+  socket.on('profileLoaded', (data) => {
+    settings.set(data.settings);
+    filterLists.set(data.filterLists);
+  });
+
+  socket.on('filterListCreated', (newList) => {
+    filterLists.update(lists => [...lists, newList]);
+  });
+
+  export function setProfiles(newProfiles) {
+    profiles = newProfiles;
+    console.log('Profiles updated in SettingsManager:', profiles);
   }
 </script>
 
 <div class="settings-manager">
   <h2>Settings</h2>
+  
+  <div class="profile-section">
+    <h3>Profiles</h3>
+    <select bind:value={selectedProfile}>
+      <option value={null}>Select a profile</option>
+      {#each profiles as profile (profile.id)}
+        <option value={profile.id}>{profile.name}</option>
+      {/each}
+    </select>
+    <button on:click={loadProfile}>Load Profile</button>
+    
+    <input bind:value={newProfileName} placeholder="New profile name" />
+    <button on:click={saveProfile}>Save Current Settings as New Profile</button>
+  </div>
+  
   {#if localSettings}
+    <!-- Existing settings inputs remain the same -->
     <label>
       <input
         type="checkbox"
         bind:checked={localSettings.dropped_value_enabled}
-        on:change={() =>
-          updateSetting(
-            "dropped_value_enabled",
-            localSettings.dropped_value_enabled
-          )}
+        on:change={() => updateSetting("dropped_value_enabled", localSettings.dropped_value_enabled)}
       />
       Enable Dropped Value Filter
     </label>
@@ -64,8 +131,7 @@
       <input
         type="number"
         bind:value={localSettings.dropped_value}
-        on:input={() =>
-          updateSetting("dropped_value", localSettings.dropped_value)}
+        on:input={() => updateSetting("dropped_value", localSettings.dropped_value)}
       />
     </label>
 
@@ -390,30 +456,30 @@
           )}
       />
     </label>
-
-    <h3>Create New Filter List</h3>
-    <div>
-      <input bind:value={newListName} placeholder="New list name" />
-      <input bind:value={newListIds} placeholder="Comma-separated IDs" />
-      <label>
-        <input type="checkbox" bind:checked={newListIsExclude} />
-        Exclude
-      </label>
-      <select bind:value={newListFilterType}>
-        <option value="">Select filter type</option>
-        <option value="attacker_alliance">Attacker Alliance</option>
-        <option value="attacker_corporation">Attacker Corporation</option>
-        <option value="attacker_ship_type">Attacker Ship Type</option>
-        <option value="victim_alliance">Victim Alliance</option>
-        <option value="victim_corporation">Victim Corporation</option>
-        <option value="ship_type">Ship Type</option>
-        <option value="solar_system">Solar System</option>
-      </select>
-      <button on:click={createFilterList}>Create New List</button>
-    </div>
+    {/if}
     
-    <FilterListManager on:updateFilterLists={handleFilterListsUpdate} />
-  {/if}
+    <h3>Create New Filter List</h3>
+  <div>
+    <input bind:value={newListName} placeholder="New list name" />
+    <input bind:value={newListIds} placeholder="Comma-separated IDs" />
+    <label>
+      <input type="checkbox" bind:checked={newListIsExclude} />
+      Exclude
+    </label>
+    <select bind:value={newListFilterType}>
+      <option value="">Select filter type</option>
+      <option value="attacker_alliance">Attacker Alliance</option>
+      <option value="attacker_corporation">Attacker Corporation</option>
+      <option value="attacker_ship_type">Attacker Ship Type</option>
+      <option value="victim_alliance">Victim Alliance</option>
+      <option value="victim_corporation">Victim Corporation</option>
+      <option value="ship_type">Ship Type</option>
+      <option value="solar_system">Solar System</option>
+    </select>
+    <button on:click={createFilterList}>Create New List</button>
+  </div>
+  
+  <FilterListManager on:updateFilterLists={handleFilterListsUpdate} />
 </div>
 
 <style>
@@ -443,5 +509,12 @@
 
   select {
     margin-top: 5px;
+  }
+
+  .profile-section {
+    margin-bottom: 20px;
+    padding: 10px;
+    border: 1px solid #ddd;
+    border-radius: 5px;
   }
 </style>

@@ -22,7 +22,6 @@ socket.on('initialData', (data) => {
   filterLists.set(data.filterLists);
 });
 
-
 let audio = new Audio('audio_files/alert.wav'); 
 
 // Function to play sound for new killmails
@@ -50,6 +49,18 @@ socket.on('newKillmail', (killmail) => {
   console.log('Received new killmail:', killmail);
   killmails.update(currentKillmails => [...currentKillmails, killmail]); // Update killmails store
   playSound();
+});
+
+// Handle profile saved response
+socket.on('profileSaved', (profile) => {
+  console.log('Profile saved:', profile);
+  // You might want to update a profiles store here if you create one
+});
+
+// Handle profile loaded response
+socket.on('profileLoaded', (loadedSettings) => {
+  console.log('Profile loaded:', loadedSettings);
+  settings.set(loadedSettings);
 });
 
 export default socket;

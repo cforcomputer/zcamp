@@ -1,6 +1,6 @@
 <script>
-  import socket from './socket.js';
   import { onMount } from 'svelte';
+  import socket from './socket.js';
   import SettingsManager from './SettingsManager.svelte';
   import KillmailViewer from './KillmailViewer.svelte';
   import { clearKills, killmails, settings, filterLists } from './store';
@@ -8,54 +8,53 @@
 
   let loggedIn = false;
   let username = '';
+  let settingsManagerComponent;
+  let userProfiles = [];
 
   // Subscribe to stores
-  let userSettings = {};
-  let kills = [];
-  let userFilterLists = [];
-
-  // Reactive statements for stores
-  $: kills = $killmails;
   $: userSettings = $settings;
+  $: kills = $killmails;
   $: userFilterLists = $filterLists;
 
   // Function to clear all kills
   function clearAllKills() {
     clearKills();
-    if (socket) {
-      socket.emit('clearKills');
-    } else {
-      console.error('Socket is not initialized');
-    }
+    socket.emit('clearKills');
   }
 
   // Handle login event from Login.svelte
   function handleLogin(event) {
     username = event.detail.username;
     loggedIn = true;
-
-    if (socket) {
-      socket.emit('login', { username, password: event.detail.password });
-    } else {
-      console.error('Socket is not initialized');
-    }
-  }
-
-  // Handle settings update event from SettingsManager
-  function updateSettings(event) {
-    const newSettings = event.detail;
-    if (socket) {
-      socket.emit('updateSettings', newSettings);
-    } else {
-      console.error('Socket is not initialized');
-    }
+    socket.emit('login', { username, password: event.detail.password });
   }
 
   // Lifecycle hook
   onMount(() => {
-    if (!socket) {
-      console.error('Socket is not initialized on mount');
-    }
+    socket.on('connect', () => {
+      console.log('Connected to server');
+    });
+
+    socket.on('disconnect', () => {
+      console.log('Disconnected from server');
+    });
+
+    socket.on('initialData', (data) => {
+      killmails.set(data.killmails);
+      settings.set(data.settings);
+      filterLists.set(data.filterLists);
+      userProfiles = data.profiles;
+      console.log('Initial profiles received:', userProfiles);
+      if (settingsManagerComponent) {
+        settingsManagerComponent.setProfiles(userProfiles);
+      }
+    });
+
+    return () => {
+      socket.off('connect');
+      socket.off('disconnect');
+      socket.off('initialData');
+    };
   });
 </script>
 
@@ -68,9 +67,11 @@
     <div class="dashboard">
       <div class="settings-section">
         <SettingsManager 
-          on:updateSettings={updateSettings} 
+          bind:this={settingsManagerComponent}
           {userSettings}
           {userFilterLists}
+          {socket}
+          profiles={userProfiles}
         />
       </div>
       <div class="killmail-section">
