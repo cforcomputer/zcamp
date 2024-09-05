@@ -30,15 +30,16 @@
       ids, 
       enabled: false, 
       is_exclude: newListIsExclude, 
-      filter_type: newListFilterType 
+      filter_type: newListFilterType
     };
+    console.log('Creating new filter list:', newList);
     socket.emit("createFilterList", newList);
-    filterLists.update(lists => [...lists, newList]);
     newListName = '';
     newListIds = '';
     newListIsExclude = false;
     newListFilterType = '';
   }
+
 
   function handleFilterListsUpdate(event) {
     filterLists.set(event.detail.filterLists);
@@ -90,7 +91,18 @@
   });
 
   socket.on('filterListCreated', (newList) => {
-    filterLists.update(lists => [...lists, newList]);
+    console.log('Received new filter list:', newList);
+    filterLists.update(lists => {
+      const existingIndex = lists.findIndex(list => list.id === newList.id);
+      if (existingIndex !== -1) {
+        // Replace existing list
+        lists[existingIndex] = newList;
+        return [...lists];
+      } else {
+        // Add new list
+        return [...lists, newList];
+      }
+    });
   });
 
   export function setProfiles(newProfiles) {
@@ -117,7 +129,6 @@
   </div>
   
   {#if localSettings}
-    <!-- Existing settings inputs remain the same -->
     <label>
       <input
         type="checkbox"
@@ -148,7 +159,6 @@
       Enable Total Value Filter
     </label>
 
-    <!-- New Item Type ID Filter -->
     <h3>Item Filter</h3>
     <label>
       <input
@@ -456,9 +466,9 @@
           )}
       />
     </label>
-    {/if}
+  {/if}
     
-    <h3>Create New Filter List</h3>
+  <h3>Create New Filter List</h3>
   <div>
     <input bind:value={newListName} placeholder="New list name" />
     <input bind:value={newListIds} placeholder="Comma-separated IDs" />

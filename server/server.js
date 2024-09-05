@@ -31,8 +31,8 @@ const db = new sqlite3.Database('./km_hunter.db', (err) => {
       user_id INTEGER,
       name TEXT,
       ids TEXT,
-      enabled BOOLEAN,
-      is_exclude BOOLEAN,
+      enabled INTEGER,
+      is_exclude INTEGER,
       filter_type TEXT,
       FOREIGN KEY(user_id) REFERENCES users(id)
     )`);
@@ -126,7 +126,7 @@ app.post('/api/register', (req, res) => {
   });
 });
 
-// New route to create a filter list
+// Create a filter list
 app.post('/api/filter-list', async (req, res) => {
   const { userId, name, ids, enabled, isExclude, filterType } = req.body;
   
@@ -145,44 +145,55 @@ app.post('/api/filter-list', async (req, res) => {
     }
 
     db.run('INSERT INTO filter_lists (user_id, name, ids, enabled, is_exclude, filter_type) VALUES (?, ?, ?, ?, ?, ?)', 
-      [userId, name, JSON.stringify(ids), enabled, isExclude, filterType], 
+      [userId, name, JSON.stringify(ids), enabled ? 1 : 0, isExclude ? 1 : 0, filterType || null], 
       function(err) {
         if (err) {
+          console.error('Error creating filter list:', err);
           res.status(500).json({ success: false, message: 'Error creating filter list' });
         } else {
           const newFilterList = {
             id: this.lastID,
             user_id: userId,
             name,
-            ids: JSON.stringify(ids),
-            enabled,
-            is_exclude: isExclude,
-            filter_type: filterType
+            ids: ids,
+            enabled: Boolean(enabled),
+            is_exclude: Boolean(isExclude),
+            filter_type: filterType || null
           };
+          console.log('Created new filter list:', newFilterList);
           res.json({ success: true, filterList: newFilterList });
-          // Emit the new filter list to all connected clients for this user
           io.to(userId.toString()).emit('filterListCreated', newFilterList);
         }
       }
     );
   } catch (error) {
+    console.error('Server error:', error);
     res.status(500).json({ success: false, message: 'Server error' });
   }
 });
 
-// New route to get all filter lists for a user
+// Get all filter lists for a user
 app.get('/api/filter-lists/:userId', (req, res) => {
   const userId = req.params.userId;
   db.all('SELECT * FROM filter_lists WHERE user_id = ?', [userId], (err, rows) => {
     if (err) {
+      console.error('Error fetching filter lists:', err);
       res.status(500).json({ success: false, message: 'Error fetching filter lists' });
     } else {
-      res.json({ success: true, filterLists: rows });
+      const filterLists = rows.map(row => ({
+        ...row,
+        ids: JSON.parse(row.ids),
+        enabled: Boolean(row.enabled),
+        is_exclude: Boolean(row.is_exclude),
+        filter_type: row.filter_type || null
+      }));
+      console.log('Fetched filter lists:', filterLists);
+      res.json({ success: true, filterLists });
     }
   });
 });
 
-// New route to update a filter list
+// Update a filter list
 app.put('/api/filter-list/:id', async (req, res) => {
   const { name, ids, enabled, isExclude, filterType } = req.body;
   const id = req.params.id;
@@ -203,21 +214,24 @@ app.put('/api/filter-list/:id', async (req, res) => {
     }
 
     db.run('UPDATE filter_lists SET name = ?, ids = ?, enabled = ?, is_exclude = ?, filter_type = ? WHERE id = ?', 
-      [name, JSON.stringify(ids), enabled, isExclude, filterType, id], 
+      [name, JSON.stringify(ids), enabled ? 1 : 0, isExclude ? 1 : 0, filterType || null, id], 
       function(err) {
         if (err) {
+          console.error('Error updating filter list:', err);
           res.status(500).json({ success: false, message: 'Error updating filter list' });
         } else {
+          console.log('Updated filter list:', { id, name, ids, enabled, isExclude, filterType });
           res.json({ success: true });
         }
       }
     );
   } catch (error) {
+    console.error('Server error:', error);
     res.status(500).json({ success: false, message: 'Server error' });
   }
 });
 
-// New route to delete a filter list
+// Delete a filter list
 app.delete('/api/filter-list/:id', (req, res) => {
   const id = req.params.id;
   db.run('DELETE FROM filter_lists WHERE id = ?', [id], function(err) {
@@ -248,11 +262,18 @@ io.on('connection', (socket) => {
               if (err) {
                 console.error('Error fetching user profiles', err);
               } else {
-                console.log("Sending user settings, filter lists, profiles, and killmail data");
+                const parsedFilterLists = filterLists.map(list => ({
+                  ...list,
+                  ids: JSON.parse(list.ids),
+                  enabled: Boolean(list.enabled),
+                  is_exclude: Boolean(list.is_exclude),
+                  filter_type: list.filter_type || null
+                }));
+                console.log('Sending initial data with filter lists:', parsedFilterLists);
                 socket.emit('initialData', { 
                   killmails: killmails.filter(km => isWithinLast24Hours(km.killmail.killmail_time)), 
                   settings: JSON.parse(user.settings),
-                  filterLists: filterLists,
+                  filterLists: parsedFilterLists,
                   profiles: profiles
                 });
               }
@@ -283,19 +304,30 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('createFilterList', ({ name, ids, enabled, isExclude, filterType }) => {
+  socket.on('createFilterList', ({ name, ids, enabled, isExclude, filter_type }) => {
     if (socket.username) {
       db.get('SELECT id FROM users WHERE username = ?', [socket.username], (err, row) => {
         if (err) {
           console.error('Error fetching user id:', err);
         } else if (row) {
+          console.log('Inserting filter list with filter_type:', filter_type); // Add this log
           db.run('INSERT INTO filter_lists (user_id, name, ids, enabled, is_exclude, filter_type) VALUES (?, ?, ?, ?, ?, ?)', 
-            [row.id, name, JSON.stringify(ids), enabled, isExclude, filterType], 
+            [row.id, name, JSON.stringify(ids), enabled ? 1 : 0, isExclude ? 1 : 0, filter_type], 
             function(err) {
               if (err) {
                 console.error('Error creating filter list:', err);
               } else {
-                socket.emit('filterListCreated', { id: this.lastID, name, ids, enabled, is_exclude: isExclude, filter_type: filterType });
+                const newFilterList = {
+                  id: this.lastID,
+                  user_id: row.id,
+                  name,
+                  ids,
+                  enabled: Boolean(enabled),
+                  is_exclude: Boolean(isExclude),
+                  filter_type
+                };
+                console.log('Created new filter list:', newFilterList);
+                socket.emit('filterListCreated', newFilterList);
               }
             }
           );
@@ -303,14 +335,17 @@ io.on('connection', (socket) => {
       });
     }
   });
+  
 
   socket.on('updateFilterList', ({ id, name, ids, enabled, is_exclude, filter_type }) => {
+    console.log('Updating filter list with filter_type:', filter_type); // Add this log
     db.run('UPDATE filter_lists SET name = ?, ids = ?, enabled = ?, is_exclude = ?, filter_type = ? WHERE id = ?', 
-      [name, JSON.stringify(ids), enabled, is_exclude, filter_type, id], 
+      [name, JSON.stringify(ids), enabled ? 1 : 0, is_exclude ? 1 : 0, filter_type, id], 
       (err) => {
         if (err) {
           console.error('Error updating filter list:', err);
         } else {
+          console.log('Updated filter list:', { id, name, ids, enabled, is_exclude, filter_type });
           socket.emit('filterListUpdated', { id, name, ids, enabled, is_exclude, filter_type });
         }
       }
@@ -322,6 +357,7 @@ io.on('connection', (socket) => {
       if (err) {
         console.error('Error deleting filter list:', err);
       } else {
+        console.log('Deleted filter list:', id);
         socket.emit('filterListDeleted', { id });
       }
     });
