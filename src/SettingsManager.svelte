@@ -67,6 +67,31 @@
       />
       Enable Total Value Filter
     </label>
+
+    <!-- New Item Type ID Filter -->
+    <h3>Item Filter</h3>
+    <label>
+      <input
+        type="checkbox"
+        bind:checked={localSettings.item_type_filter_enabled}
+        on:change={() =>
+          updateSetting(
+            "item_type_filter_enabled",
+            localSettings.item_type_filter_enabled
+          )}
+      />
+      Enable Item Type Filter
+    </label>
+    <label>
+      Item Type ID:
+      <input
+        type="number"
+        bind:value={localSettings.item_type_filter}
+        on:input={() =>
+          updateSetting("item_type_filter", localSettings.item_type_filter)}
+      />
+    </label>
+
     <label>
       Minimum Total Value:
       <input

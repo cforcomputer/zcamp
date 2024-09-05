@@ -129,6 +129,17 @@ export const filteredKillmails = derived(
         return false;
       }
 
+      // Item Type Filter
+      if (
+        $settings.item_type_filter_enabled &&
+        $settings.item_type_filter &&
+        !killmail.killmail.victim.items.some(
+          (item) => item.item_type_id === parseInt($settings.item_type_filter)
+        )
+      ) {
+        return false;
+      }
+
       // Solar System Filter
       if (
         $settings.solar_system_filter_enabled &&
