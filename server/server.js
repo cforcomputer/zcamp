@@ -29,6 +29,14 @@ const db = new sqlite3.Database('./km_hunter.db', (err) => {
   }
 });
 
+// Function to check if a killmail is within the last 24 hours
+function isWithinLast24Hours(killmailTime) {
+  const now = new Date();
+  const killTime = new Date(killmailTime);
+  const timeDiff = now - killTime;
+  return timeDiff <= 24 * 60 * 60 * 1000; // 24 hours in milliseconds
+}
+
 // Account routes
 app.post('/api/login', (req, res) => {
   const { username, password } = req.body;
@@ -57,7 +65,6 @@ app.post('/api/register', (req, res) => {
     return res.status(400).json({ success: false, message: 'Username and password are required' });
   }
 
-  // Hash the password before storing it in the database
   bcrypt.hash(password, 10, (err, hashedPassword) => {
     if (err) {
       res.status(500).json({ success: false, message: 'Server error' });
@@ -88,7 +95,10 @@ io.on('connection', (socket) => {
         console.error('Error fetching user settings', err);
       } else if (row) {
         console.log("Sending user settings and killmail data");
-        socket.emit('initialData', { killmails, settings: JSON.parse(row.settings) });
+        socket.emit('initialData', { 
+          killmails: killmails.filter(km => isWithinLast24Hours(km.killmail.killmail_time)), 
+          settings: JSON.parse(row.settings) 
+        });
       }
     });
   });
@@ -109,10 +119,14 @@ async function pollRedisQ() {
     const response = await axios.get(REDISQ_URL);
     if (response.status === 200 && response.data.package) {
       const killmail = response.data.package;
-      console.log('Received killmail:', killmail);
-      killmails.push(killmail);
-      io.emit('newKillmail', killmail);
-      console.log('Emitted new killmail');
+      if (isWithinLast24Hours(killmail.killmail.killmail_time)) {
+        console.log('Received killmail:', killmail);
+        killmails.push(killmail);
+        io.emit('newKillmail', killmail);
+        console.log('Emitted new killmail');
+      } else {
+        console.log('Received killmail older than 24 hours, discarding');
+      }
     }
   } catch (error) {
     console.error('Error polling RedisQ:', error);
@@ -120,7 +134,14 @@ async function pollRedisQ() {
   setTimeout(pollRedisQ, 10); // Poll every 10ms
 }
 
+// Function to clean up old killmails
+function cleanupOldKillmails() {
+  killmails = killmails.filter(km => isWithinLast24Hours(km.killmail.killmail_time));
+  console.log(`Cleaned up killmails. Current count: ${killmails.length}`);
+}
+
 server.listen(3000, () => {
   console.log('Server running on http://localhost:3000');
   pollRedisQ(); // Start polling RedisQ
+  setInterval(cleanupOldKillmails, 60 * 60 * 1000); // Run cleanup every hour
 });

@@ -1,15 +1,19 @@
 <script>
   import { filteredKillmails } from "./store";
   import MapVisualization from "./MapVisualization.svelte";
+  import { onMount } from 'svelte';
 
   let selectedKillmailId = null;
+  let scrollContainer;
+  let isUserScrolling = false;
+  let shouldAutoScroll = true;
 
   function viewMap(killID) {
     selectedKillmailId = killID;
   }
 
   function formatDroppedValue(value) {
-    if (isNaN(value) || value === null || value === undefined) return "0";
+    if (value === 0 || isNaN(value) || value === null || value === undefined) return "0 K";
     const magnitude = Math.floor(Math.log10(value) / 3);
     const scaled = value / Math.pow(1000, magnitude);
     return scaled.toFixed(2) + ["", "K", "M", "B", "T"][magnitude];
@@ -25,10 +29,35 @@
     if (seconds < 86400) return `${Math.floor(seconds / 3600)} hours ago`;
     return `${Math.floor(seconds / 86400)} days ago`;
   }
+
+  function handleScroll() {
+    if (!isUserScrolling) {
+      isUserScrolling = true;
+      setTimeout(() => isUserScrolling = false, 150);
+    }
+
+    const { scrollTop, scrollHeight, clientHeight } = scrollContainer;
+    shouldAutoScroll = scrollTop + clientHeight >= scrollHeight - 5;
+  }
+
+  function scrollToBottom() {
+    if (scrollContainer && shouldAutoScroll) {
+      scrollContainer.scrollTop = scrollContainer.scrollHeight;
+    }
+  }
+
+  onMount(() => {
+    scrollToBottom();
+  });
+
+  $: if ($filteredKillmails && !isUserScrolling) {
+    setTimeout(scrollToBottom, 0);
+  }
 </script>
 
 <div class="killmail-viewer">
-  <div class="scroll-box">
+  <h2>Killmails from the last 24 hours</h2>
+  <div class="table-container">
     <table>
       <thead>
         <tr>
@@ -38,25 +67,21 @@
           <th>Map</th>
         </tr>
       </thead>
-      <tbody>
-        {#each $filteredKillmails as killmail}
-          <tr>
-            <td>{formatDroppedValue(killmail.zkb.droppedValue)}</td>
-            <td>{calculateTimeDifference(killmail.killmail.killmail_time)}</td>
-            <td
-              ><a
-                href={`https://zkillboard.com/kill/${killmail.killID}/`}
-                target="_blank">View</a
-              ></td
-            >
-            <td
-              ><button on:click={() => viewMap(killmail.killID)}>Map</button
-              ></td
-            >
-          </tr>
-        {/each}
-      </tbody>
     </table>
+    <div class="scroll-box" bind:this={scrollContainer} on:scroll={handleScroll}>
+      <table>
+        <tbody>
+          {#each $filteredKillmails as killmail}
+            <tr>
+              <td>{formatDroppedValue(killmail.zkb.droppedValue)}</td>
+              <td>{calculateTimeDifference(killmail.killmail.killmail_time)}</td>
+              <td><a href={`https://zkillboard.com/kill/${killmail.killID}/`} target="_blank">View</a></td>
+              <td><button on:click={() => viewMap(killmail.killID)}>Map</button></td>
+            </tr>
+          {/each}
+        </tbody>
+      </table>
+    </div>
   </div>
 
   {#if selectedKillmailId}
@@ -69,10 +94,14 @@
     margin-top: 20px;
   }
 
+  .table-container {
+    position: relative;
+    border: 1px solid #ddd;
+  }
+
   .scroll-box {
-    height: 400px; /* Fixed height */
-    overflow-y: auto; /* Scroll vertically if content overflows */
-    border: 1px solid #ddd; /* Optional: adds a border around the scrollable area */
+    height: 400px;
+    overflow-y: auto;
   }
 
   table {
@@ -80,11 +109,17 @@
     border-collapse: collapse;
   }
 
-  th,
-  td {
+  th, td {
     border: 1px solid #ddd;
     padding: 8px;
     text-align: left;
+  }
+
+  thead {
+    position: sticky;
+    top: 0;
+    background-color: #f2f2f2;
+    z-index: 1;
   }
 
   th {
