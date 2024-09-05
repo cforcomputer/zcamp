@@ -33,7 +33,6 @@
 <div class="settings-manager">
   <h2>Settings</h2>
   {#if localSettings}
-    <!-- Existing filters -->
     <label>
       <input
         type="checkbox"
@@ -56,7 +55,6 @@
       />
     </label>
 
-    <!-- New filters -->
     <label>
       <input
         type="checkbox"
@@ -136,9 +134,9 @@
       Enable Location Filter
     </label>
     <label>
-      Location:
+      Location ID:
       <input
-        type="text"
+        type="number"
         bind:value={localSettings.location_filter}
         on:input={() =>
           updateSetting("location_filter", localSettings.location_filter)}
@@ -167,7 +165,6 @@
       />
     </label>
 
-    <!-- Existing time threshold and audio alerts -->
     <label>
       <input
         type="checkbox"
@@ -203,12 +200,219 @@
       Enable Audio Alerts
     </label>
 
-    <!-- Filter Lists (unchanged) -->
+    <h3>Attacker Filters</h3>
+    <label>
+      <input
+        type="checkbox"
+        bind:checked={localSettings.attacker_alliance_filter_enabled}
+        on:change={() =>
+          updateSetting(
+            "attacker_alliance_filter_enabled",
+            localSettings.attacker_alliance_filter_enabled
+          )}
+      />
+      Enable Attacker Alliance Filter
+    </label>
+    <label>
+      Attacker Alliance ID:
+      <input
+        type="number"
+        bind:value={localSettings.attacker_alliance_filter}
+        on:input={() =>
+          updateSetting(
+            "attacker_alliance_filter",
+            localSettings.attacker_alliance_filter
+          )}
+      />
+    </label>
+
+    <label>
+      <input
+        type="checkbox"
+        bind:checked={localSettings.attacker_corporation_filter_enabled}
+        on:change={() =>
+          updateSetting(
+            "attacker_corporation_filter_enabled",
+            localSettings.attacker_corporation_filter_enabled
+          )}
+      />
+      Enable Attacker Corporation Filter
+    </label>
+    <label>
+      Attacker Corporation ID:
+      <input
+        type="number"
+        bind:value={localSettings.attacker_corporation_filter}
+        on:input={() =>
+          updateSetting(
+            "attacker_corporation_filter",
+            localSettings.attacker_corporation_filter
+          )}
+      />
+    </label>
+
+    <label>
+      <input
+        type="checkbox"
+        bind:checked={localSettings.attacker_ship_type_filter_enabled}
+        on:change={() =>
+          updateSetting(
+            "attacker_ship_type_filter_enabled",
+            localSettings.attacker_ship_type_filter_enabled
+          )}
+      />
+      Enable Attacker Ship Type Filter
+    </label>
+    <label>
+      Attacker Ship Type ID:
+      <input
+        type="number"
+        bind:value={localSettings.attacker_ship_type_filter}
+        on:input={() =>
+          updateSetting(
+            "attacker_ship_type_filter",
+            localSettings.attacker_ship_type_filter
+          )}
+      />
+    </label>
+
+    <h3>Victim Filters</h3>
+    <label>
+      <input
+        type="checkbox"
+        bind:checked={localSettings.victim_alliance_filter_enabled}
+        on:change={() =>
+          updateSetting(
+            "victim_alliance_filter_enabled",
+            localSettings.victim_alliance_filter_enabled
+          )}
+      />
+      Enable Victim Alliance Filter
+    </label>
+    <label>
+      Victim Alliance ID:
+      <input
+        type="number"
+        bind:value={localSettings.victim_alliance_filter}
+        on:input={() =>
+          updateSetting(
+            "victim_alliance_filter",
+            localSettings.victim_alliance_filter
+          )}
+      />
+    </label>
+
+    <label>
+      <input
+        type="checkbox"
+        bind:checked={localSettings.victim_corporation_filter_enabled}
+        on:change={() =>
+          updateSetting(
+            "victim_corporation_filter_enabled",
+            localSettings.victim_corporation_filter_enabled
+          )}
+      />
+      Enable Victim Corporation Filter
+    </label>
+    <label>
+      Victim Corporation ID:
+      <input
+        type="number"
+        bind:value={localSettings.victim_corporation_filter}
+        on:input={() =>
+          updateSetting(
+            "victim_corporation_filter",
+            localSettings.victim_corporation_filter
+          )}
+      />
+    </label>
+
+    <label>
+      <input
+        type="checkbox"
+        bind:checked={localSettings.solar_system_filter_enabled}
+        on:change={() =>
+          updateSetting(
+            "solar_system_filter_enabled",
+            localSettings.solar_system_filter_enabled
+          )}
+      />
+      Enable Solar System Filter
+    </label>
+    <label>
+      Solar System ID:
+      <input
+        type="number"
+        bind:value={localSettings.solar_system_filter}
+        on:input={() =>
+          updateSetting(
+            "solar_system_filter",
+            localSettings.solar_system_filter
+          )}
+      />
+    </label>
+
     <h3>Filter Lists</h3>
     {#if localSettings.filter_lists}
       {#each localSettings.filter_lists as filter, index}
         <div class="filter-list">
-          <!-- ... (unchanged filter list code) ... -->
+          <h4>{filter.file}</h4>
+          <label>
+            <input
+              type="checkbox"
+              bind:checked={filter.enabled}
+              on:change={() =>
+                updateFilterList(index, "enabled", filter.enabled)}
+            />
+            Enabled
+          </label>
+          <label>
+            Color:
+            <input
+              type="text"
+              bind:value={filter.color}
+              on:input={() => updateFilterList(index, "color", filter.color)}
+            />
+          </label>
+          <label>
+            <input
+              type="checkbox"
+              bind:checked={filter.webhook}
+              on:change={() =>
+                updateFilterList(index, "webhook", filter.webhook)}
+            />
+            Webhook
+          </label>
+          <label>
+            Sound:
+            <input
+              type="text"
+              bind:value={filter.sound}
+              on:input={() => updateFilterList(index, "sound", filter.sound)}
+            />
+          </label>
+          <label>
+            <input
+              type="checkbox"
+              bind:checked={filter.ignore_dropped_value}
+              on:change={() =>
+                updateFilterList(
+                  index,
+                  "ignore_dropped_value",
+                  filter.ignore_dropped_value
+                )}
+            />
+            Ignore Dropped Value
+          </label>
+          <label>
+            List Check ID:
+            <input
+              type="text"
+              bind:value={filter.list_check_id}
+              on:input={() =>
+                updateFilterList(index, "list_check_id", filter.list_check_id)}
+            />
+          </label>
         </div>
       {/each}
     {/if}

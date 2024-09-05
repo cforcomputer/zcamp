@@ -70,6 +70,75 @@ export const filteredKillmails = derived(
         }
       }
 
+      // Attacker Alliance Filter
+      if (
+        $settings.attacker_alliance_filter_enabled &&
+        $settings.attacker_alliance_filter &&
+        !killmail.killmail.attackers.some(
+          (attacker) =>
+            attacker.alliance_id ===
+            parseInt($settings.attacker_alliance_filter)
+        )
+      ) {
+        return false;
+      }
+
+      // Attacker Corporation Filter
+      if (
+        $settings.attacker_corporation_filter_enabled &&
+        $settings.attacker_corporation_filter &&
+        !killmail.killmail.attackers.some(
+          (attacker) =>
+            attacker.corporation_id ===
+            parseInt($settings.attacker_corporation_filter)
+        )
+      ) {
+        return false;
+      }
+
+      // Attacker Ship Type Filter
+      if (
+        $settings.attacker_ship_type_filter_enabled &&
+        $settings.attacker_ship_type_filter &&
+        !killmail.killmail.attackers.some(
+          (attacker) =>
+            attacker.ship_type_id ===
+            parseInt($settings.attacker_ship_type_filter)
+        )
+      ) {
+        return false;
+      }
+
+      // Victim Alliance Filter
+      if (
+        $settings.victim_alliance_filter_enabled &&
+        $settings.victim_alliance_filter &&
+        killmail.killmail.victim.alliance_id !==
+          parseInt($settings.victim_alliance_filter)
+      ) {
+        return false;
+      }
+
+      // Victim Corporation Filter
+      if (
+        $settings.victim_corporation_filter_enabled &&
+        $settings.victim_corporation_filter &&
+        killmail.killmail.victim.corporation_id !==
+          parseInt($settings.victim_corporation_filter)
+      ) {
+        return false;
+      }
+
+      // Solar System Filter
+      if (
+        $settings.solar_system_filter_enabled &&
+        $settings.solar_system_filter &&
+        killmail.killmail.solar_system_id !==
+          parseInt($settings.solar_system_filter)
+      ) {
+        return false;
+      }
+
       // If all filters pass, include the killmail
       return true;
     });
