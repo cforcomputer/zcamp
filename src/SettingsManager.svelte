@@ -1,139 +1,208 @@
 <script>
-  import { createEventDispatcher } from "svelte";
-  import { settings, filterLists } from "./store";
+  import { createEventDispatcher, onMount, afterUpdate } from "svelte";
+  import { settings, filterLists, profiles } from "./store";
   import FilterListManager from "./FilterListManager.svelte";
+  import ProfileListManager from "./ProfileListManager.svelte";
 
   const dispatch = createEventDispatcher();
 
   export let socket;
-  export let profiles = [];
 
-  let newListName = '';
-  let newListIds = '';
+  let newListName = "";
+  let newListIds = "";
   let newListIsExclude = false;
-  let newListFilterType = '';
+  let newListFilterType = "";
   let selectedProfile = null;
-  let newProfileName = '';
 
   $: localSettings = $settings;
   $: localFilterLists = $filterLists;
+  $: localProfiles = $profiles;
+
+  $: {
+    console.log(
+      "SettingsManager.svelte - localProfiles updated:",
+      localProfiles
+    );
+  }
+
+  onMount(() => {
+    console.log("SettingsManager.svelte - onMount. Fetching initial profiles.");
+    fetchProfiles();
+  });
+
+  afterUpdate(() => {
+    console.log(
+      "SettingsManager.svelte - afterUpdate. Profiles:",
+      localProfiles
+    );
+  });
 
   function updateSetting(key, value) {
-    settings.update(s => ({ ...s, [key]: value }));
+    settings.update((s) => ({ ...s, [key]: value }));
     socket.emit("updateSettings", $settings);
   }
 
   function createFilterList() {
-    const ids = newListIds.split(',').map(id => id.trim());
-    const newList = { 
-      name: newListName, 
-      ids, 
-      enabled: false, 
-      is_exclude: newListIsExclude, 
-      filter_type: newListFilterType
+    const ids = newListIds.split(",").map((id) => id.trim());
+    const newList = {
+      name: newListName,
+      ids,
+      enabled: false,
+      is_exclude: newListIsExclude,
+      filter_type: newListFilterType,
     };
-    console.log('Creating new filter list:', newList);
+    console.log("Creating new filter list:", newList);
     socket.emit("createFilterList", newList);
-    newListName = '';
-    newListIds = '';
+    newListName = newListIds = "";
     newListIsExclude = false;
-    newListFilterType = '';
+    newListFilterType = "";
   }
-
 
   function handleFilterListsUpdate(event) {
     filterLists.set(event.detail.filterLists);
     socket.emit("updateFilterLists", $filterLists);
   }
 
-  function saveProfile() {
-    console.log('Save profile function called');
-    console.log('New profile name:', newProfileName);
-    console.log('Current settings:', $settings);
-    console.log('Current filter lists:', $filterLists);
-
-    if (newProfileName) {
+  function saveProfile(event) {
+    const { name } = event.detail;
+    if (name) {
       const profileData = {
-        name: newProfileName,
+        name,
         settings: $settings,
-        filterLists: $filterLists
+        filterLists: $filterLists,
       };
-      console.log('Sending profile data:', profileData);
+      console.log("Sending profile data:", profileData);
       socket.emit("saveProfile", profileData);
-      newProfileName = ''; // Clear the input after saving
     } else {
-      console.log('No profile name provided');
+      console.log("No profile name provided");
     }
   }
 
-  function loadProfile() {
-    if (selectedProfile) {
-      socket.emit("loadProfile", selectedProfile);
+  function loadProfile(event) {
+    const profileId = event.detail;
+    if (profileId) {
+      socket.emit("loadProfile", profileId);
     }
   }
 
-  socket.on('profileSaved', (profile) => {
-    console.log('Profile saved event received:', profile);
-    const existingIndex = profiles.findIndex(p => p.id === profile.id);
-    if (existingIndex !== -1) {
-      profiles[existingIndex] = profile;
-    } else {
-      profiles = [...profiles, profile];
-    }
-    selectedProfile = profile.id;
-    profiles = [...profiles]; // Trigger reactivity
-    console.log('Updated profiles:', profiles);
+  function deleteProfile(event) {
+    const { id } = event.detail;
+    console.log("SettingsManager: Deleting profile:", id);
+    socket.emit("deleteProfile", { id });
+  }
+
+  function fetchProfiles() {
+    console.log("Fetching profiles from database");
+    socket.emit("fetchProfiles");
+  }
+
+  socket.on("initialData", (data) => {
+    console.log("Received initial data, fetching profiles");
+    fetchProfiles();
   });
 
-  socket.on('profileLoaded', (data) => {
-    settings.set(data.settings);
-    filterLists.set(data.filterLists);
-  });
-
-  socket.on('filterListCreated', (newList) => {
-    console.log('Received new filter list:', newList);
-    filterLists.update(lists => {
-      const existingIndex = lists.findIndex(list => list.id === newList.id);
+  socket.on("profileSaved", (profile) => {
+    console.log("Profile saved event received:", profile);
+    profiles.update((profs) => {
+      const existingIndex = profs.findIndex((p) => p.id === profile.id);
       if (existingIndex !== -1) {
-        // Replace existing list
+        profs[existingIndex] = profile;
+      } else {
+        profs = [...profs, profile];
+      }
+      return profs;
+    });
+    selectedProfile = profile.id;
+    fetchProfiles(); // Fetch updated list of profiles
+  });
+
+  socket.on("profileLoaded", (data) => {
+    console.log("Profile loaded:", data);
+
+    // Update settings
+    settings.update((currentSettings) => ({
+      ...currentSettings,
+      ...data.settings,
+    }));
+
+    // Update filter lists
+    filterLists.update((currentLists) => {
+      // Remove any lists that no longer exist
+      const validLists = currentLists.filter((list) =>
+        data.filterLists.some((newList) => newList.id === list.id)
+      );
+
+      // Add or update lists from the loaded profile
+      data.filterLists.forEach((newList) => {
+        const index = validLists.findIndex((list) => list.id === newList.id);
+        if (index !== -1) {
+          validLists[index] = { ...validLists[index], ...newList };
+        } else {
+          validLists.push(newList);
+        }
+      });
+
+      return validLists;
+    });
+
+    console.log("Profile loaded successfully");
+    // You might want to add a UI notification here
+  });
+
+  socket.on("profilesFetched", (fetchedProfiles) => {
+    console.log("Profiles fetched from database:", fetchedProfiles);
+    profiles.set(fetchedProfiles);
+  });
+
+  socket.on("profileDeleted", (deletedId) => {
+    console.log("SettingsManager: Profile deleted:", deletedId);
+    profiles.update((profs) => {
+      const updatedProfs = profs.filter((p) => p.id !== deletedId);
+      console.log("SettingsManager: Updated profiles:", updatedProfs);
+      return updatedProfs;
+    });
+    if (selectedProfile === deletedId) {
+      selectedProfile = null;
+    }
+    fetchProfiles(); // Fetch updated list of profiles
+  });
+
+  socket.on("filterListCreated", (newList) => {
+    console.log("Received new filter list:", newList);
+    filterLists.update((lists) => {
+      const existingIndex = lists.findIndex((list) => list.id === newList.id);
+      if (existingIndex !== -1) {
         lists[existingIndex] = newList;
         return [...lists];
       } else {
-        // Add new list
         return [...lists, newList];
       }
     });
   });
-
-  export function setProfiles(newProfiles) {
-    profiles = newProfiles;
-    console.log('Profiles updated in SettingsManager:', profiles);
-  }
 </script>
 
 <div class="settings-manager">
   <h2>Settings</h2>
-  
-  <div class="profile-section">
-    <h3>Profiles</h3>
-    <select bind:value={selectedProfile}>
-      <option value={null}>Select a profile</option>
-      {#each profiles as profile (profile.id)}
-        <option value={profile.id}>{profile.name}</option>
-      {/each}
-    </select>
-    <button on:click={loadProfile}>Load Profile</button>
-    
-    <input bind:value={newProfileName} placeholder="New profile name" />
-    <button on:click={saveProfile}>Save Current Settings as New Profile</button>
-  </div>
-  
+
+  <ProfileListManager
+    profiles={localProfiles}
+    bind:selectedProfile
+    on:saveProfile={saveProfile}
+    on:loadProfile={loadProfile}
+    on:fetchProfiles={fetchProfiles}
+    on:deleteProfile={deleteProfile}
+  />
+
   {#if localSettings}
     <label>
       <input
         type="checkbox"
         bind:checked={localSettings.dropped_value_enabled}
-        on:change={() => updateSetting("dropped_value_enabled", localSettings.dropped_value_enabled)}
+        on:change={() =>
+          updateSetting(
+            "dropped_value_enabled",
+            localSettings.dropped_value_enabled
+          )}
       />
       Enable Dropped Value Filter
     </label>
@@ -142,7 +211,8 @@
       <input
         type="number"
         bind:value={localSettings.dropped_value}
-        on:input={() => updateSetting("dropped_value", localSettings.dropped_value)}
+        on:input={() =>
+          updateSetting("dropped_value", localSettings.dropped_value)}
       />
     </label>
 
@@ -467,7 +537,7 @@
       />
     </label>
   {/if}
-    
+
   <h3>Create New Filter List</h3>
   <div>
     <input bind:value={newListName} placeholder="New list name" />
@@ -488,7 +558,7 @@
     </select>
     <button on:click={createFilterList}>Create New List</button>
   </div>
-  
+
   <FilterListManager on:updateFilterLists={handleFilterListsUpdate} />
 </div>
 
@@ -503,7 +573,7 @@
     margin-bottom: 10px;
   }
 
-  input[type="number"]{
+  input[type="number"] {
     width: 100px;
   }
 
@@ -519,12 +589,5 @@
 
   select {
     margin-top: 5px;
-  }
-
-  .profile-section {
-    margin-bottom: 20px;
-    padding: 10px;
-    border: 1px solid #ddd;
-    border-radius: 5px;
   }
 </style>

@@ -3,6 +3,7 @@ import { writable, derived } from "svelte/store";
 export const killmails = writable([]);
 export const settings = writable({});
 export const filterLists = writable([]);
+export const profiles = writable([]);
 
 export const filteredKillmails = derived(
   [killmails, settings, filterLists],
@@ -10,31 +11,43 @@ export const filteredKillmails = derived(
     return $killmails.filter((killmail) => {
       // Apply filter lists
       for (let list of $filterLists) {
-        if (!list.enabled) continue;  // Skip disabled filter lists
+        if (!list.enabled) continue; // Skip disabled filter lists
 
         const ids = Array.isArray(list.ids) ? list.ids : JSON.parse(list.ids);
         let match = false;
 
         switch (list.filter_type) {
-          case 'attacker_alliance':
-            match = killmail.killmail.attackers.some(attacker => ids.includes(attacker.alliance_id?.toString()));
+          case "attacker_alliance":
+            match = killmail.killmail.attackers.some((attacker) =>
+              ids.includes(attacker.alliance_id?.toString())
+            );
             break;
-          case 'attacker_corporation':
-            match = killmail.killmail.attackers.some(attacker => ids.includes(attacker.corporation_id?.toString()));
+          case "attacker_corporation":
+            match = killmail.killmail.attackers.some((attacker) =>
+              ids.includes(attacker.corporation_id?.toString())
+            );
             break;
-          case 'attacker_ship_type':
-            match = killmail.killmail.attackers.some(attacker => ids.includes(attacker.ship_type_id?.toString()));
+          case "attacker_ship_type":
+            match = killmail.killmail.attackers.some((attacker) =>
+              ids.includes(attacker.ship_type_id?.toString())
+            );
             break;
-          case 'victim_alliance':
-            match = ids.includes(killmail.killmail.victim.alliance_id?.toString());
+          case "victim_alliance":
+            match = ids.includes(
+              killmail.killmail.victim.alliance_id?.toString()
+            );
             break;
-          case 'victim_corporation':
-            match = ids.includes(killmail.killmail.victim.corporation_id?.toString());
+          case "victim_corporation":
+            match = ids.includes(
+              killmail.killmail.victim.corporation_id?.toString()
+            );
             break;
-          case 'ship_type':
-            match = ids.includes(killmail.killmail.victim.ship_type_id?.toString());
+          case "ship_type":
+            match = ids.includes(
+              killmail.killmail.victim.ship_type_id?.toString()
+            );
             break;
-          case 'solar_system':
+          case "solar_system":
             match = ids.includes(killmail.killmail.solar_system_id?.toString());
             break;
         }
@@ -197,13 +210,29 @@ export function clearKills() {
 }
 
 export function addFilterList(list) {
-  filterLists.update(lists => [...lists, list]);
+  filterLists.update((lists) => [...lists, list]);
 }
 
 export function updateFilterList(updatedList) {
-  filterLists.update(lists => lists.map(list => list.id === updatedList.id ? updatedList : list));
+  filterLists.update((lists) =>
+    lists.map((list) => (list.id === updatedList.id ? updatedList : list))
+  );
 }
 
 export function deleteFilterList(id) {
-  filterLists.update(lists => lists.filter(list => list.id !== id));
+  filterLists.update((lists) => lists.filter((list) => list.id !== id));
+}
+
+export function addProfile(profile) {
+  profiles.update((profs) => [...profs, profile]);
+}
+
+export function updateProfile(updatedProfile) {
+  profiles.update((profs) =>
+    profs.map((prof) => (prof.id === updatedProfile.id ? updatedProfile : prof))
+  );
+}
+
+export function deleteProfile(id) {
+  profiles.update((profs) => profs.filter((prof) => prof.id !== id));
 }
