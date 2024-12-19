@@ -21,9 +21,8 @@
   }
 
   // Function to clear all kills
-  function clearAllKills() {
+  export function clearKills() {
     killmails.set([]);
-    socket.emit("clearKills");
   }
 
   // Handle login event from Login.svelte
@@ -68,17 +67,13 @@
   {:else}
     <div class="dashboard">
       <div class="settings-section">
-        <SettingsManager
-          bind:this={settingsManagerComponent}
-          {userSettings}
-          {userFilterLists}
-          {userProfiles}
-          {socket}
-        />
+        <SettingsManager bind:this={settingsManagerComponent} {socket} />
       </div>
       <div class="killmail-section">
-        <KillmailViewer {kills} />
-        <button on:click={clearAllKills}>Clear All Kills</button>
+        <KillmailViewer />
+        <button on:click={() => socket.emit("clearKills")}
+          >Clear All Kills</button
+        >
       </div>
     </div>
   {/if}

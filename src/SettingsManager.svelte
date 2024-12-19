@@ -4,8 +4,6 @@
   import FilterListManager from "./FilterListManager.svelte";
   import ProfileListManager from "./ProfileListManager.svelte";
 
-  const dispatch = createEventDispatcher();
-
   export let socket;
 
   let newListName = "";
@@ -185,7 +183,7 @@
   <h2>Settings</h2>
 
   <ProfileListManager
-    profiles={localProfiles}
+    profiles={localProfiles || []}
     bind:selectedProfile
     on:saveProfile={saveProfile}
     on:loadProfile={loadProfile}

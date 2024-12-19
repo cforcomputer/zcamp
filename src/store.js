@@ -1,17 +1,36 @@
 import { writable, derived } from "svelte/store";
 
 export const killmails = writable([]);
-export const settings = writable({});
 export const filterLists = writable([]);
 export const profiles = writable([]);
+export const settings = writable({
+  dropped_value_enabled: false,
+  total_value_enabled: false,
+  points_enabled: false,
+  npc_only: false,
+  solo: false,
+  awox_only: false,
+  location_filter_enabled: false,
+  ship_type_filter_enabled: false,
+  time_threshold_enabled: false,
+  audio_alerts_enabled: true,
+  attacker_alliance_filter_enabled: false,
+  attacker_corporation_filter_enabled: false,
+  attacker_ship_type_filter_enabled: false,
+  victim_alliance_filter_enabled: false,
+  victim_corporation_filter_enabled: false,
+  solar_system_filter_enabled: false,
+  item_type_filter_enabled: false,
+});
 
 export const filteredKillmails = derived(
   [killmails, settings, filterLists],
   ([$killmails, $settings, $filterLists]) => {
-    return $killmails.filter((killmail) => {
+    // First apply all the filtering logic
+    const filtered = $killmails.filter((killmail) => {
       // Apply filter lists
       for (let list of $filterLists) {
-        if (!list.enabled) continue; // Skip disabled filter lists
+        if (!list.enabled) continue;
 
         const ids = Array.isArray(list.ids) ? list.ids : JSON.parse(list.ids);
         let match = false;
@@ -199,8 +218,14 @@ export const filteredKillmails = derived(
         return false;
       }
 
-      // If all filters pass, include the killmail
       return true;
+    });
+
+    // Sort the filtered results by killmail_time in descending order
+    return filtered.sort((a, b) => {
+      const timeA = new Date(a.killmail.killmail_time).getTime();
+      const timeB = new Date(b.killmail.killmail_time).getTime();
+      return timeB - timeA;
     });
   }
 );

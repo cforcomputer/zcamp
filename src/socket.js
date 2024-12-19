@@ -1,66 +1,76 @@
-// socket.js
-import { io } from 'socket.io-client';
-import { killmails, settings, filterLists, addFilterList } from './store';
+import { io } from "socket.io-client";
+import { get } from "svelte/store";
+import {
+  killmails,
+  settings,
+  filterLists,
+  profiles,
+  addFilterList,
+} from "./store";
 
-// Initialize the socket connection to your server
-const socket = io('http://localhost:3000'); // Replace with your actual server URL
+const socket = io("http://localhost:3000");
+let audio = new Audio("audio_files/alert.wav");
 
-// Handle connection and disconnection events
-socket.on('connect', () => {
-  console.log('Connected to server with socket id:', socket.id);
+socket.on("connect", () => {
+  console.log("Connected to server with socket id:", socket.id);
+  socket.emit("requestInitialData");
 });
 
-socket.on('disconnect', () => {
-  console.log('Disconnected from server');
+socket.on("disconnect", () => {
+  console.log("Disconnected from server");
 });
 
-// Handle initial data received from the server
-socket.on('initialData', (data) => {
-  console.log('Received initialData:', data);
-  settings.set(data.settings);
-  killmails.set(data.killmails);
-  filterLists.set(data.filterLists);
+socket.on("initialData", (data) => {
+  console.log("Received initialData:", data);
+  settings.set(data.settings || {});
+  killmails.set(Array.isArray(data.killmails) ? data.killmails : []);
+  filterLists.set(Array.isArray(data.filterLists) ? data.filterLists : []);
 });
 
-let audio = new Audio('audio_files/alert.wav'); 
-
-// Function to play sound for new killmails
 function playSound() {
-  let audioAlertEnabled;
-  settings.subscribe(value => {
-    audioAlertEnabled = value.audio_alerts_enabled; // Get the current value of audio_alerts_enabled
-  });
-
-  if (audioAlertEnabled) {
-    audio.play().catch(err => {
-      console.error('Error playing audio:', err);
+  const settingsValue = get(settings);
+  if (settingsValue.audio_alerts_enabled) {
+    audio.play().catch((err) => {
+      console.error("Error playing audio:", err);
     });
   }
 }
 
-// Handle filter list creation response
-socket.on('filterListCreated', (newFilterList) => {
-  console.log('New filter list created:', newFilterList);
+socket.on("filterListCreated", (newFilterList) => {
+  console.log("New filter list created:", newFilterList);
   addFilterList(newFilterList);
 });
 
-// Handle new killmails received from the server
-socket.on('newKillmail', (killmail) => {
-  console.log('Received new killmail:', killmail);
-  killmails.update(currentKillmails => [...currentKillmails, killmail]); // Update killmails store
+socket.on("newKillmail", (killmail) => {
+  console.log("Received new killmail:", killmail);
+  killmails.update((currentKillmails) => {
+    const existingKillmails = Array.isArray(currentKillmails)
+      ? currentKillmails
+      : [];
+
+    // Verify this killmail ID doesn't already exist
+    const duplicateIndex = existingKillmails.findIndex(
+      (km) => km.killID === killmail.killID
+    );
+
+    if (duplicateIndex !== -1) {
+      console.warn(`Duplicate killmail detected - ID: ${killmail.killID}`);
+      return existingKillmails;
+    }
+
+    // Add new killmail and maintain chronological order
+    return [...existingKillmails, killmail].sort(
+      (a, b) =>
+        new Date(b.killmail.killmail_time) - new Date(a.killmail.killmail_time)
+    );
+  });
+
   playSound();
 });
 
-// Handle profile saved response
-socket.on('profileSaved', (profile) => {
-  console.log('Profile saved:', profile);
-  // You might want to update a profiles store here if you create one
-});
-
-// Handle profile loaded response
-socket.on('profileLoaded', (loadedSettings) => {
-  console.log('Profile loaded:', loadedSettings);
-  settings.set(loadedSettings);
+socket.on("killmailsCleared", () => {
+  console.log("Clearing killmails");
+  killmails.set([]);
 });
 
 export default socket;

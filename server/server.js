@@ -43,6 +43,12 @@ const db = new sqlite3.Database("./km_hunter.db", (err) => {
       settings TEXT,
       FOREIGN KEY(user_id) REFERENCES users(id)
     )`);
+    db.run(`CREATE TABLE IF NOT EXISTS celestial_data (
+      system_id INTEGER PRIMARY KEY,
+      system_name TEXT,
+      celestial_data TEXT,
+      last_updated DATETIME DEFAULT CURRENT_TIMESTAMP
+    )`);
   }
 });
 
@@ -69,6 +75,41 @@ function getFilterListsSize(userId) {
             0
           );
           resolve(totalSize);
+        }
+      }
+    );
+  });
+}
+
+async function fetchCelestialData(systemId) {
+  try {
+    const response = await axios.get(
+      `https://www.fuzzwork.co.uk/api/mapdata.php?solarsystemid=${systemId}&format=json`
+    );
+    return response.data;
+  } catch (error) {
+    console.error("Error fetching celestial data:", error);
+    return null;
+  }
+}
+
+async function storeCelestialData(systemId, celestialData) {
+  return new Promise((resolve, reject) => {
+    const systemName = celestialData[0]?.solarsystemname || systemId.toString();
+
+    const query = `REPLACE INTO celestial_data 
+      (system_id, system_name, celestial_data, last_updated) 
+      VALUES (?, ?, ?, CURRENT_TIMESTAMP)`;
+
+    db.run(
+      query,
+      [systemId, systemName, JSON.stringify(celestialData)],
+      function (err) {
+        if (err) {
+          console.error("Error storing celestial data:", err);
+          reject(err);
+        } else {
+          resolve(this.lastID);
         }
       }
     );
@@ -217,6 +258,49 @@ app.post("/api/filter-list", async (req, res) => {
   } catch (error) {
     console.error("Server error:", error);
     res.status(500).json({ success: false, message: "Server error" });
+  }
+});
+
+app.get("/api/celestials/:killmailId", async (req, res) => {
+  try {
+    const killmailId = parseInt(req.params.killmailId);
+    const killmail = killmails.find((km) => km.killID === killmailId);
+
+    if (!killmail) {
+      return res.status(404).json({ error: "Killmail not found" });
+    }
+
+    const systemId = killmail.killmail.solar_system_id;
+
+    try {
+      const celestialData = await ensureCelestialData(systemId);
+
+      const response = [
+        {
+          id: killmailId.toString(),
+          name: "Killmail Location",
+          typeid: 0,
+          x: killmail.killmail.position?.x || 0,
+          y: killmail.killmail.position?.y || 0,
+          z: killmail.killmail.position?.z || 0,
+          killmail_x: killmail.killmail.position?.x || 0,
+          killmail_y: killmail.killmail.position?.y || 0,
+          killmail_z: killmail.killmail.position?.z || 0,
+        },
+        ...celestialData,
+      ];
+
+      res.json(response);
+    } catch (error) {
+      console.error(
+        `Error ensuring celestial data for system ${systemId}:`,
+        error
+      );
+      res.status(500).json({ error: "Failed to retrieve celestial data" });
+    }
+  } catch (error) {
+    console.error("Error processing celestial request:", error);
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
@@ -652,6 +736,97 @@ io.on("connection", (socket) => {
     }
   });
 
+  async function getUserData(username) {
+    return new Promise((resolve, reject) => {
+      db.get(
+        "SELECT id, settings FROM users WHERE username = ?",
+        [username],
+        async (err, user) => {
+          if (err) {
+            reject(new Error("Database error"));
+            return;
+          }
+
+          if (!user) {
+            reject(new Error("User not found"));
+            return;
+          }
+
+          try {
+            const filterLists = await getFilterLists(user.id);
+            const profiles = await getProfiles(user.id);
+
+            resolve({
+              settings: JSON.parse(user.settings || "{}"),
+              filterLists,
+              profiles,
+            });
+          } catch (error) {
+            reject(error);
+          }
+        }
+      );
+    });
+  }
+
+  async function getFilterLists(userId) {
+    return new Promise((resolve, reject) => {
+      db.all(
+        "SELECT * FROM filter_lists WHERE user_id = ?",
+        [userId],
+        (err, rows) => {
+          if (err) {
+            reject(new Error("Error fetching filter lists"));
+            return;
+          }
+          resolve(
+            rows.map((row) => ({
+              ...row,
+              ids: JSON.parse(row.ids),
+              enabled: Boolean(row.enabled),
+              is_exclude: Boolean(row.is_exclude),
+            }))
+          );
+        }
+      );
+    });
+  }
+
+  async function getProfiles(userId) {
+    return new Promise((resolve, reject) => {
+      db.all(
+        "SELECT * FROM user_profiles WHERE user_id = ?",
+        [userId],
+        (err, rows) => {
+          if (err) {
+            reject(new Error("Error fetching profiles"));
+            return;
+          }
+          resolve(
+            rows.map((row) => ({
+              ...row,
+              settings: JSON.parse(row.settings || "{}"),
+            }))
+          );
+        }
+      );
+    });
+  }
+
+  socket.on("requestSync", async () => {
+    if (!socket.username) {
+      socket.emit("syncError", { message: "Not authenticated" });
+      return;
+    }
+
+    try {
+      const userData = await getUserData(socket.username);
+      socket.emit("syncComplete", userData);
+    } catch (error) {
+      socket.emit("syncError", { message: error.message });
+    }
+  });
+
   socket.on("loadProfile", (profileId) => {
     if (socket.username) {
       db.get(
@@ -702,17 +877,66 @@ io.on("connection", (socket) => {
   });
 });
 
+async function ensureCelestialData(systemId) {
+  return new Promise((resolve, reject) => {
+    db.get(
+      "SELECT celestial_data FROM celestial_data WHERE system_id = ?",
+      [systemId],
+      async (err, row) => {
+        if (err) {
+          reject(err);
+          return;
+        }
+
+        if (!row) {
+          try {
+            const celestialData = await fetchCelestialData(systemId);
+            if (!celestialData) {
+              reject(
+                new Error(
+                  `Failed to fetch celestial data for system ${systemId}`
+                )
+              );
+              return;
+            }
+
+            await storeCelestialData(systemId, celestialData);
+            resolve(celestialData);
+          } catch (error) {
+            reject(error);
+          }
+        } else {
+          resolve(JSON.parse(row.celestial_data));
+        }
+      }
+    );
+  });
+}
+
 // Function to poll for new killmails from RedisQ
 async function pollRedisQ() {
   try {
     const response = await axios.get(REDISQ_URL);
     if (response.status === 200 && response.data.package) {
       const killmail = response.data.package;
+
       if (isWithinLast24Hours(killmail.killmail.killmail_time)) {
-        console.log("Received killmail:", killmail);
-        killmails.push(killmail);
-        io.emit("newKillmail", killmail);
-        console.log("Emitted new killmail");
+        const systemId = killmail.killmail.solar_system_id;
+
+        // Ensure we have celestial data before processing the killmail
+        try {
+          await ensureCelestialData(systemId);
+
+          console.log("Received killmail:", killmail);
+          killmails.push(killmail);
+          io.emit("newKillmail", killmail);
+          console.log("Emitted new killmail");
+        } catch (error) {
+          console.error(
+            `Failed to ensure celestial data for system ${systemId}:`,
+            error
+          );
+        }
       } else {
         console.log("Received killmail older than 24 hours, discarding");
       }
@@ -720,7 +944,7 @@ async function pollRedisQ() {
   } catch (error) {
     console.error("Error polling RedisQ:", error);
   }
-  setTimeout(pollRedisQ, 10); // Poll every 10ms
+  setTimeout(pollRedisQ, 10);
 }
 
 // Function to clean up old killmails

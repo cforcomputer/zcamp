@@ -1,0 +1,6 @@
+*.db
+public/build/
+public/audio_files/
+package-lock.json
+bundle.js
+node_modules/
