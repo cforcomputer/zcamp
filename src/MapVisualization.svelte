@@ -4,6 +4,13 @@
   import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 
   export let killmailId;
+  // Add kill as a prop
+  export let kill;
+
+  // Type checking
+  $: if (kill && typeof kill !== "object") {
+    throw new Error("kill prop must be an object");
+  }
 
   let container;
   let scene, camera, renderer, controls;
@@ -26,6 +33,10 @@
 
   const SCALE_FACTOR = 1e-9;
   const objectsWithLabels = new Map();
+
+  $: if (kill) {
+    console.log("Kill data in MapVisualization:", kill);
+  }
 
   async function fetchCelestials(killmailId, retryCount = 3) {
     for (let i = 0; i < retryCount; i++) {
@@ -93,6 +104,72 @@
     }
   }
 
+  function updateObjectScales() {
+    if (!camera || !scene) return;
+
+    scene.traverse((object) => {
+      if (!objectsWithLabels.has(object)) return;
+
+      const data = objectsWithLabels.get(object);
+      const distance = camera.position.distanceTo(object.position);
+      const scale = getScaleFactor(distance, data.type);
+
+      // Apply scale to object
+      object.scale.setScalar(scale);
+    });
+  }
+
+  function animate() {
+    requestAnimationFrame(animate);
+    controls.update();
+    updateObjectScales();
+    updateDirectionalGUI();
+    renderer.render(scene, camera);
+  }
+
+  function getScaleFactor(distance, objectType, objectData) {
+    // Base scale factors
+    const scales = {
+      sun: { near: 0.01, far: 50 },
+      planet: { near: 0.005, far: 25 },
+      moon: { near: 0.002, far: 10 },
+      station: { near: 0.002, far: 15 },
+      stargate: { near: 0.002, far: 10 },
+      asteroid: { near: 0.001, far: 8 },
+      killmail: { near: 0.002, far: 10 },
+    };
+
+    const NEAR = 10 * SCALE_FACTOR;
+    const FAR = 1000000 * SCALE_FACTOR;
+
+    // Get base scale
+    const scale = scales[objectType] || scales.planet;
+
+    // Calculate distance factor with exponential falloff for close distances
+    const distanceFactor = Math.pow(
+      THREE.MathUtils.smoothstep(distance, NEAR, FAR),
+      1.5
+    );
+
+    // If selected object has Roman numeral, scale related objects
+    if (selectedObject) {
+      const selectedData = objectsWithLabels.get(selectedObject);
+      const selectedGroup = getRomanNumeralGroup(selectedData.name);
+      const thisGroup = getRomanNumeralGroup(objectData.name);
+
+      if (selectedGroup && thisGroup && selectedGroup === thisGroup) {
+        // Related objects scale more dramatically at close range
+        return THREE.MathUtils.lerp(
+          scale.near * 2,
+          scale.far * 0.5,
+          distanceFactor
+        );
+      }
+    }
+
+    return THREE.MathUtils.lerp(scale.near, scale.far, distanceFactor);
+  }
+
   function focusOnObject(object) {
     if (!object || !objectsWithLabels.has(object)) return;
 
@@ -127,6 +204,14 @@
       if (progress < 1) {
         requestAnimationFrame(animateCamera);
       } else {
+        // Reset controls after animation
+        controls.minDistance = 0.1;
+        controls.maxDistance = 1000000000;
+        controls.enableZoom = true;
+        controls.enableRotate = true;
+        controls.enablePan = true;
+        controls.update();
+
         updateInfoPanel(objectData);
         updateDirectionalGUI();
       }
@@ -139,26 +224,43 @@
     const infoPanel = document.querySelector(".info-panel");
     if (!infoPanel) return;
 
-    const locationList = document.createElement("div");
-    locationList.className = "location-list";
+    const killPos = kill?.killmail?.victim?.position;
 
-    // Filter for major celestials only
-    const majorCelestials = Array.from(objectsWithLabels.entries()).filter(
-      ([_, data]) =>
-        data.type === "sun" ||
-        data.type === "planet" ||
-        data.type === "killmail"
-    );
+    // Always show kill location first
+    infoPanel.innerHTML = `
+        <p>System name: ${systemName}</p>
+        <p>Closest Celestial: ${closestCelestial}</p>
+        <p>Kill Location:
+            <a href="#" class="kill-location">
+                (${(killPos?.x * SCALE_FACTOR).toFixed(2)},
+                ${(killPos?.y * SCALE_FACTOR).toFixed(2)},
+                ${(killPos?.z * SCALE_FACTOR).toFixed(2)}) km
+            </a>
+        </p>
+        <p>Pinpoint 1: ${pinpoints[0]}</p>
+        <p>Pinpoint 2: ${pinpoints[1]}</p>
+        <p>Pinpoint 3: ${pinpoints[2]}</p>
+        <p>Pinpoint 4: ${pinpoints[3]}</p>
+    `;
 
-    majorCelestials.forEach(([obj, data]) => {
-      const entry = document.createElement("div");
-      entry.className = "location-entry";
-      entry.textContent = `${data.type}: ${data.name}`;
-      entry.onclick = () => focusOnObject(obj);
-      locationList.appendChild(entry);
-    });
+    // Always add kill location click handler
+    const killLocationLink = infoPanel.querySelector(".kill-location");
+    if (killLocationLink) {
+      killLocationLink.onclick = (e) => {
+        e.preventDefault();
+        const killObject = Array.from(objectsWithLabels.entries()).find(
+          ([_, data]) => data.type === "killmail"
+        );
+        if (killObject) {
+          focusOnObject(killObject[0]);
+        }
+      };
+    }
+  }
 
-    infoPanel.appendChild(locationList);
+  function getRomanNumeralGroup(name) {
+    const match = name?.match(/ ([IVX]+)( -|$)/);
+    return match ? match[1] : null;
   }
 
   let directionIndicator;
@@ -289,11 +391,17 @@
   }
 
   function findClosestCelestial(celestials, killPosition) {
+    if (!killPosition?.x || !killPosition?.y || !killPosition?.z) {
+      console.error("Invalid kill position:", killPosition);
+      return "Unknown";
+    }
+
     const killPos = new THREE.Vector3(
       killPosition.x,
       killPosition.y,
       killPosition.z
     );
+
     let closest = null;
     let minDistance = Infinity;
 
@@ -301,9 +409,9 @@
       if (celestial.id === "killmail") return;
 
       const celestialPos = new THREE.Vector3(
-        celestial.x,
-        celestial.y,
-        celestial.z
+        celestial.x || 0,
+        celestial.y || 0,
+        celestial.z || 0
       );
       const distance = celestialPos.distanceTo(killPos);
 
@@ -314,11 +422,8 @@
     });
 
     return closest
-      ? {
-          name: closest.name,
-          distance: minDistance,
-        }
-      : null;
+      ? `${closest.itemname} (${(minDistance * SCALE_FACTOR).toFixed(2)} km)`
+      : "Unknown";
   }
 
   function calculatePinpoints(celestials, killPosition) {
@@ -326,40 +431,66 @@
   }
 
   function createCelestialObject(celestialData) {
+    if (!celestialData) {
+      console.error("celestialData is undefined or null.");
+      return null;
+    }
+
+    // Base sizes with dynamic scale ranges
     const SIZES = {
       KILL: {
         radius: 0.8,
-        scale: SCALE_FACTOR,
+        near: { min: 0.5, max: 2 },
+        far: { min: 2, max: 5 },
       },
       SUN: {
         radius: 5,
-        scale: SCALE_FACTOR,
+        near: { min: 0.5, max: 3 },
+        far: { min: 3, max: 10 },
       },
       PLANET: {
         radius: 2,
-        scale: SCALE_FACTOR,
+        near: { min: 0.3, max: 2 },
+        far: { min: 2, max: 8 },
       },
       MOON: {
         radius: 0.3,
-        scale: SCALE_FACTOR,
+        near: { min: 0.2, max: 1 },
+        far: { min: 1, max: 4 },
       },
       ASTEROID: {
         radius: 0.2,
         particleCount: 3,
         spread: 1,
+        near: { min: 0.1, max: 0.5 },
+        far: { min: 0.5, max: 3 },
       },
       STARGATE: {
         length: 3,
         radius: 0.5,
         sphereRadius: 0.4,
+        near: { min: 0.2, max: 1 },
+        far: { min: 1, max: 4 },
       },
       STATION: {
         size: 2,
+        near: { min: 0.3, max: 1.5 },
+        far: { min: 1.5, max: 5 },
       },
     };
 
     const group = new THREE.Group();
     const typeName = celestialData.typename || "";
+
+    // Calculate initial scale based on camera distance
+    const position = new THREE.Vector3(
+      celestialData.x * SCALE_FACTOR,
+      celestialData.y * SCALE_FACTOR,
+      celestialData.z * SCALE_FACTOR
+    );
+
+    const distance = camera.position.distanceTo(position);
+    const initialScale = getScaleFactor(distance, typeName.toLowerCase());
 
     if (celestialData.id === "killmail") {
       const geometry = new THREE.SphereGeometry(SIZES.KILL.radius);
@@ -370,16 +501,14 @@
         depthWrite: true,
       });
       const sphere = new THREE.Mesh(geometry, material);
-      sphere.position.set(
-        celestialData.x * SCALE_FACTOR,
-        celestialData.y * SCALE_FACTOR,
-        celestialData.z * SCALE_FACTOR
-      );
+      sphere.position.copy(position);
+      sphere.scale.setScalar(initialScale);
       group.add(sphere);
       objectsWithLabels.set(sphere, {
         name: "Kill Location",
         type: "killmail",
         position: sphere.position.clone(),
+        sizeConfig: SIZES.KILL,
       });
     } else if (typeName.includes("Sun")) {
       const geometry = new THREE.SphereGeometry(SIZES.SUN.radius);
@@ -631,20 +760,28 @@
   }
 
   async function initVisualization(celestialData) {
-    if (!celestialData || !Array.isArray(celestialData)) {
-      error = "Invalid celestial data received";
+    console.log("Kill object received:", kill); // Debug log
+
+    if (!kill?.killmail?.victim?.position) {
+      console.error("Missing kill position data:", kill);
+      error = "Invalid kill data";
       loading = false;
       return;
     }
 
+    const killPosition = kill.killmail.victim.position;
+
+    // Add kill location to celestial data
+    celestialData.push({
+      id: "killmail",
+      x: killPosition.x,
+      y: killPosition.y,
+      z: killPosition.z,
+      typename: "Kill Location",
+    });
+
     scene = new THREE.Scene();
     scene.background = new THREE.Color(0x000000);
-
-    const killPosition = celestialData[0];
-    systemName = celestialData[1]?.solarsystemname || "Unknown System";
-
-    closestCelestial = findClosestCelestial(celestialData, killPosition);
-    pinpoints = calculatePinpoints(celestialData, killPosition);
 
     camera = new THREE.PerspectiveCamera(
       75,
@@ -652,6 +789,23 @@
       0.1,
       1000000000
     );
+
+    // Set initial camera position at kill location with offset
+    camera.position.set(
+      killPosition.x * SCALE_FACTOR + 50,
+      killPosition.y * SCALE_FACTOR + 50,
+      killPosition.z * SCALE_FACTOR + 50
+    );
+
+    camera.lookAt(
+      killPosition.x * SCALE_FACTOR,
+      killPosition.y * SCALE_FACTOR,
+      killPosition.z * SCALE_FACTOR
+    );
+
+    systemName = celestialData[1]?.solarsystemname || "Unknown System";
+    closestCelestial = findClosestCelestial(celestialData, killPosition);
+    pinpoints = calculatePinpoints(celestialData, killPosition);
 
     renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(container.clientWidth, container.clientHeight);
@@ -662,7 +816,7 @@
     controls.dampingFactor = 0.05;
 
     initRaycaster();
-    initDirectionalGUI(); // Add the directional GUI initialization here
+    initDirectionalGUI();
 
     const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
     scene.add(ambientLight);

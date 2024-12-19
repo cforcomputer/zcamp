@@ -4,6 +4,7 @@
   import { onMount } from "svelte";
 
   let selectedKillmailId = null;
+  let selectedKillmail = null;
   let scrollContainer;
   let isUserScrolling = false;
   let shouldAutoScroll = true;
@@ -21,8 +22,9 @@
       })
     : [];
 
-  function viewMap(killID) {
-    selectedKillmailId = killID;
+  function viewMap(killmail) {
+    selectedKillmailId = killmail.killID;
+    selectedKillmail = killmail;
     showMap = true;
   }
 
@@ -108,7 +110,7 @@
                 </a>
               </td>
               <td>
-                <button on:click={() => viewMap(killmail.killID)}>Map</button>
+                <button on:click={() => viewMap(killmail)}>Map</button>
               </td>
             </tr>
           {/each}
@@ -120,7 +122,10 @@
   {#if showMap && selectedKillmailId}
     <div class="map-overlay">
       <div class="map-container">
-        <MapVisualization killmailId={selectedKillmailId} />
+        <MapVisualization
+          killmailId={selectedKillmailId}
+          kill={selectedKillmail}
+        />
         <button class="close-map" on:click={() => (showMap = false)}>
           Close Map
         </button>

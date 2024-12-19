@@ -5668,7 +5668,7 @@ var app = (function () {
 				input.checked = input_checked_value = /*list*/ ctx[10].enabled;
 				add_location(input, file$6, 61, 8, 1774);
 				attr_dev(label, "for", label_for_value = `filter-list-${/*list*/ ctx[10].id}`);
-				attr_dev(label, "class", "svelte-1gnzcjj");
+				attr_dev(label, "class", "svelte-14z6a7f");
 				add_location(label, file$6, 67, 8, 1959);
 				option0.__value = "include";
 				set_input_value(option0, option0.__value);
@@ -5676,11 +5676,11 @@ var app = (function () {
 				option1.__value = "exclude";
 				set_input_value(option1, option1.__value);
 				add_location(option1, file$6, 75, 10, 2275);
-				attr_dev(select, "class", "svelte-1gnzcjj");
+				attr_dev(select, "class", "svelte-14z6a7f");
 				add_location(select, file$6, 70, 8, 2082);
-				attr_dev(button, "class", "svelte-1gnzcjj");
+				attr_dev(button, "class", "svelte-14z6a7f");
 				add_location(button, file$6, 77, 8, 2344);
-				attr_dev(div, "class", "filter-list-item svelte-1gnzcjj");
+				attr_dev(div, "class", "filter-list-item svelte-14z6a7f");
 				add_location(div, file$6, 60, 6, 1734);
 				this.first = div;
 			},
@@ -5776,7 +5776,7 @@ var app = (function () {
 				t1 = space();
 				if_block.c();
 				add_location(h2, file$6, 55, 2, 1539);
-				attr_dev(div, "class", "filter-list-manager svelte-1gnzcjj");
+				attr_dev(div, "class", "filter-list-manager svelte-14z6a7f");
 				add_location(div, file$6, 54, 0, 1502);
 			},
 			l: function claim(nodes) {
@@ -6060,20 +6060,20 @@ var app = (function () {
 				option.__value = null;
 				set_input_value(option, option.__value);
 				add_location(option, file$5, 53, 6, 1474);
-				attr_dev(select, "class", "svelte-2xwgf5");
+				attr_dev(select, "class", "svelte-kq5f5p");
 				if (/*selectedProfile*/ ctx[0] === void 0) add_render_callback(() => /*select_change_handler*/ ctx[7].call(select));
 				add_location(select, file$5, 52, 4, 1398);
 				add_location(button0, file$5, 58, 4, 1670);
 				add_location(button1, file$5, 59, 4, 1720);
-				attr_dev(div0, "class", "profile-controls svelte-2xwgf5");
+				attr_dev(div0, "class", "profile-controls svelte-kq5f5p");
 				add_location(div0, file$5, 51, 2, 1362);
 				attr_dev(input, "placeholder", "New profile name");
-				attr_dev(input, "class", "svelte-2xwgf5");
+				attr_dev(input, "class", "svelte-kq5f5p");
 				add_location(input, file$5, 62, 4, 1813);
 				add_location(button2, file$5, 63, 4, 1887);
-				attr_dev(div1, "class", "new-profile svelte-2xwgf5");
+				attr_dev(div1, "class", "new-profile svelte-kq5f5p");
 				add_location(div1, file$5, 61, 2, 1782);
-				attr_dev(div2, "class", "profile-list-manager svelte-2xwgf5");
+				attr_dev(div2, "class", "profile-list-manager svelte-kq5f5p");
 				add_location(div2, file$5, 49, 0, 1303);
 			},
 			l: function claim(nodes) {
@@ -6565,142 +6565,142 @@ var app = (function () {
 				input29 = element("input");
 				attr_dev(input0, "type", "checkbox");
 				add_location(input0, file$4, 195, 6, 5544);
-				attr_dev(label0, "class", "svelte-1ntxwu3");
+				attr_dev(label0, "class", "svelte-gu7nlb");
 				add_location(label0, file$4, 194, 4, 5529);
 				attr_dev(input1, "type", "number");
-				attr_dev(input1, "class", "svelte-1ntxwu3");
+				attr_dev(input1, "class", "svelte-gu7nlb");
 				add_location(input1, file$4, 208, 6, 5898);
-				attr_dev(label1, "class", "svelte-1ntxwu3");
+				attr_dev(label1, "class", "svelte-gu7nlb");
 				add_location(label1, file$4, 206, 4, 5853);
 				attr_dev(input2, "type", "checkbox");
 				add_location(input2, file$4, 217, 6, 6121);
-				attr_dev(label2, "class", "svelte-1ntxwu3");
+				attr_dev(label2, "class", "svelte-gu7nlb");
 				add_location(label2, file$4, 216, 4, 6106);
-				attr_dev(h30, "class", "svelte-1ntxwu3");
+				attr_dev(h30, "class", "svelte-gu7nlb");
 				add_location(h30, file$4, 229, 4, 6424);
 				attr_dev(input3, "type", "checkbox");
 				add_location(input3, file$4, 231, 6, 6465);
-				attr_dev(label3, "class", "svelte-1ntxwu3");
+				attr_dev(label3, "class", "svelte-gu7nlb");
 				add_location(label3, file$4, 230, 4, 6450);
 				attr_dev(input4, "type", "number");
-				attr_dev(input4, "class", "svelte-1ntxwu3");
+				attr_dev(input4, "class", "svelte-gu7nlb");
 				add_location(input4, file$4, 244, 6, 6815);
-				attr_dev(label4, "class", "svelte-1ntxwu3");
+				attr_dev(label4, "class", "svelte-gu7nlb");
 				add_location(label4, file$4, 242, 4, 6779);
 				attr_dev(input5, "type", "number");
-				attr_dev(input5, "class", "svelte-1ntxwu3");
+				attr_dev(input5, "class", "svelte-gu7nlb");
 				add_location(input5, file$4, 254, 6, 7075);
-				attr_dev(label5, "class", "svelte-1ntxwu3");
+				attr_dev(label5, "class", "svelte-gu7nlb");
 				add_location(label5, file$4, 252, 4, 7032);
 				attr_dev(input6, "type", "checkbox");
 				add_location(input6, file$4, 262, 6, 7281);
-				attr_dev(label6, "class", "svelte-1ntxwu3");
+				attr_dev(label6, "class", "svelte-gu7nlb");
 				add_location(label6, file$4, 261, 4, 7266);
 				attr_dev(input7, "type", "number");
-				attr_dev(input7, "class", "svelte-1ntxwu3");
+				attr_dev(input7, "class", "svelte-gu7nlb");
 				add_location(input7, file$4, 272, 6, 7561);
-				attr_dev(label7, "class", "svelte-1ntxwu3");
+				attr_dev(label7, "class", "svelte-gu7nlb");
 				add_location(label7, file$4, 270, 4, 7523);
 				attr_dev(input8, "type", "checkbox");
 				add_location(input8, file$4, 280, 6, 7752);
-				attr_dev(label8, "class", "svelte-1ntxwu3");
+				attr_dev(label8, "class", "svelte-gu7nlb");
 				add_location(label8, file$4, 279, 4, 7737);
 				attr_dev(input9, "type", "checkbox");
 				add_location(input9, file$4, 289, 6, 7970);
-				attr_dev(label9, "class", "svelte-1ntxwu3");
+				attr_dev(label9, "class", "svelte-gu7nlb");
 				add_location(label9, file$4, 288, 4, 7955);
 				attr_dev(input10, "type", "checkbox");
 				add_location(input10, file$4, 298, 6, 8177);
-				attr_dev(label10, "class", "svelte-1ntxwu3");
+				attr_dev(label10, "class", "svelte-gu7nlb");
 				add_location(label10, file$4, 297, 4, 8162);
 				attr_dev(input11, "type", "checkbox");
 				add_location(input11, file$4, 307, 6, 8399);
-				attr_dev(label11, "class", "svelte-1ntxwu3");
+				attr_dev(label11, "class", "svelte-gu7nlb");
 				add_location(label11, file$4, 306, 4, 8384);
 				attr_dev(input12, "type", "number");
-				attr_dev(input12, "class", "svelte-1ntxwu3");
+				attr_dev(input12, "class", "svelte-gu7nlb");
 				add_location(input12, file$4, 320, 6, 8744);
-				attr_dev(label12, "class", "svelte-1ntxwu3");
+				attr_dev(label12, "class", "svelte-gu7nlb");
 				add_location(label12, file$4, 318, 4, 8709);
 				attr_dev(input13, "type", "checkbox");
 				add_location(input13, file$4, 329, 6, 8973);
-				attr_dev(label13, "class", "svelte-1ntxwu3");
+				attr_dev(label13, "class", "svelte-gu7nlb");
 				add_location(label13, file$4, 328, 4, 8958);
 				attr_dev(input14, "type", "number");
-				attr_dev(input14, "class", "svelte-1ntxwu3");
+				attr_dev(input14, "class", "svelte-gu7nlb");
 				add_location(input14, file$4, 342, 6, 9323);
-				attr_dev(label14, "class", "svelte-1ntxwu3");
+				attr_dev(label14, "class", "svelte-gu7nlb");
 				add_location(label14, file$4, 340, 4, 9287);
 				attr_dev(input15, "type", "checkbox");
 				add_location(input15, file$4, 351, 6, 9555);
-				attr_dev(label15, "class", "svelte-1ntxwu3");
+				attr_dev(label15, "class", "svelte-gu7nlb");
 				add_location(label15, file$4, 350, 4, 9540);
 				attr_dev(input16, "type", "number");
-				attr_dev(input16, "class", "svelte-1ntxwu3");
+				attr_dev(input16, "class", "svelte-gu7nlb");
 				add_location(input16, file$4, 364, 6, 9909);
-				attr_dev(label16, "class", "svelte-1ntxwu3");
+				attr_dev(label16, "class", "svelte-gu7nlb");
 				add_location(label16, file$4, 362, 4, 9861);
 				attr_dev(input17, "type", "checkbox");
 				add_location(input17, file$4, 373, 6, 10135);
-				attr_dev(label17, "class", "svelte-1ntxwu3");
+				attr_dev(label17, "class", "svelte-gu7nlb");
 				add_location(label17, file$4, 372, 4, 10120);
-				attr_dev(h31, "class", "svelte-1ntxwu3");
+				attr_dev(h31, "class", "svelte-gu7nlb");
 				add_location(h31, file$4, 385, 4, 10435);
 				attr_dev(input18, "type", "checkbox");
 				add_location(input18, file$4, 387, 6, 10481);
-				attr_dev(label18, "class", "svelte-1ntxwu3");
+				attr_dev(label18, "class", "svelte-gu7nlb");
 				add_location(label18, file$4, 386, 4, 10466);
 				attr_dev(input19, "type", "number");
-				attr_dev(input19, "class", "svelte-1ntxwu3");
+				attr_dev(input19, "class", "svelte-gu7nlb");
 				add_location(input19, file$4, 400, 6, 10871);
-				attr_dev(label19, "class", "svelte-1ntxwu3");
+				attr_dev(label19, "class", "svelte-gu7nlb");
 				add_location(label19, file$4, 398, 4, 10827);
 				attr_dev(input20, "type", "checkbox");
 				add_location(input20, file$4, 412, 6, 11166);
-				attr_dev(label20, "class", "svelte-1ntxwu3");
+				attr_dev(label20, "class", "svelte-gu7nlb");
 				add_location(label20, file$4, 411, 4, 11151);
 				attr_dev(input21, "type", "number");
-				attr_dev(input21, "class", "svelte-1ntxwu3");
+				attr_dev(input21, "class", "svelte-gu7nlb");
 				add_location(input21, file$4, 425, 6, 11571);
-				attr_dev(label21, "class", "svelte-1ntxwu3");
+				attr_dev(label21, "class", "svelte-gu7nlb");
 				add_location(label21, file$4, 423, 4, 11524);
 				attr_dev(input22, "type", "checkbox");
 				add_location(input22, file$4, 437, 6, 11875);
-				attr_dev(label22, "class", "svelte-1ntxwu3");
+				attr_dev(label22, "class", "svelte-gu7nlb");
 				add_location(label22, file$4, 436, 4, 11860);
 				attr_dev(input23, "type", "number");
-				attr_dev(input23, "class", "svelte-1ntxwu3");
+				attr_dev(input23, "class", "svelte-gu7nlb");
 				add_location(input23, file$4, 450, 6, 12270);
-				attr_dev(label23, "class", "svelte-1ntxwu3");
+				attr_dev(label23, "class", "svelte-gu7nlb");
 				add_location(label23, file$4, 448, 4, 12225);
-				attr_dev(h32, "class", "svelte-1ntxwu3");
+				attr_dev(h32, "class", "svelte-gu7nlb");
 				add_location(h32, file$4, 461, 4, 12553);
 				attr_dev(input24, "type", "checkbox");
 				add_location(input24, file$4, 463, 6, 12597);
-				attr_dev(label24, "class", "svelte-1ntxwu3");
+				attr_dev(label24, "class", "svelte-gu7nlb");
 				add_location(label24, file$4, 462, 4, 12582);
 				attr_dev(input25, "type", "number");
-				attr_dev(input25, "class", "svelte-1ntxwu3");
+				attr_dev(input25, "class", "svelte-gu7nlb");
 				add_location(input25, file$4, 476, 6, 12977);
-				attr_dev(label25, "class", "svelte-1ntxwu3");
+				attr_dev(label25, "class", "svelte-gu7nlb");
 				add_location(label25, file$4, 474, 4, 12935);
 				attr_dev(input26, "type", "checkbox");
 				add_location(input26, file$4, 488, 6, 13266);
-				attr_dev(label26, "class", "svelte-1ntxwu3");
+				attr_dev(label26, "class", "svelte-gu7nlb");
 				add_location(label26, file$4, 487, 4, 13251);
 				attr_dev(input27, "type", "number");
-				attr_dev(input27, "class", "svelte-1ntxwu3");
+				attr_dev(input27, "class", "svelte-gu7nlb");
 				add_location(input27, file$4, 501, 6, 13661);
-				attr_dev(label27, "class", "svelte-1ntxwu3");
+				attr_dev(label27, "class", "svelte-gu7nlb");
 				add_location(label27, file$4, 499, 4, 13616);
 				attr_dev(input28, "type", "checkbox");
 				add_location(input28, file$4, 513, 6, 13959);
-				attr_dev(label28, "class", "svelte-1ntxwu3");
+				attr_dev(label28, "class", "svelte-gu7nlb");
 				add_location(label28, file$4, 512, 4, 13944);
 				attr_dev(input29, "type", "number");
-				attr_dev(input29, "class", "svelte-1ntxwu3");
+				attr_dev(input29, "class", "svelte-gu7nlb");
 				add_location(input29, file$4, 526, 6, 14324);
-				attr_dev(label29, "class", "svelte-1ntxwu3");
+				attr_dev(label29, "class", "svelte-gu7nlb");
 				add_location(label29, file$4, 524, 4, 14285);
 			},
 			m: function mount(target, anchor) {
@@ -7238,7 +7238,7 @@ var app = (function () {
 				t20 = space();
 				create_component(filterlistmanager.$$.fragment);
 				add_location(h2, file$4, 182, 2, 5244);
-				attr_dev(h3, "class", "svelte-1ntxwu3");
+				attr_dev(h3, "class", "svelte-gu7nlb");
 				add_location(h3, file$4, 538, 2, 14596);
 				attr_dev(input0, "placeholder", "New list name");
 				add_location(input0, file$4, 540, 4, 14642);
@@ -7246,7 +7246,7 @@ var app = (function () {
 				add_location(input1, file$4, 541, 4, 14710);
 				attr_dev(input2, "type", "checkbox");
 				add_location(input2, file$4, 543, 6, 14798);
-				attr_dev(label, "class", "svelte-1ntxwu3");
+				attr_dev(label, "class", "svelte-gu7nlb");
 				add_location(label, file$4, 542, 4, 14783);
 				option0.__value = "";
 				set_input_value(option0, option0.__value);
@@ -7272,13 +7272,13 @@ var app = (function () {
 				option7.__value = "solar_system";
 				set_input_value(option7, option7.__value);
 				add_location(option7, file$4, 554, 6, 15387);
-				attr_dev(select, "class", "svelte-1ntxwu3");
+				attr_dev(select, "class", "svelte-gu7nlb");
 				if (/*newListFilterType*/ ctx[4] === void 0) add_render_callback(() => /*select_change_handler*/ ctx[82].call(select));
 				add_location(select, file$4, 546, 4, 14890);
-				attr_dev(button, "class", "svelte-1ntxwu3");
+				attr_dev(button, "class", "svelte-gu7nlb");
 				add_location(button, file$4, 556, 4, 15458);
 				add_location(div0, file$4, 539, 2, 14631);
-				attr_dev(div1, "class", "settings-manager svelte-1ntxwu3");
+				attr_dev(div1, "class", "settings-manager svelte-gu7nlb");
 				add_location(div1, file$4, 181, 0, 5210);
 			},
 			l: function claim(nodes) {
@@ -63872,7 +63872,7 @@ void main() {
 	const { Error: Error_1, Object: Object_1, console: console_1$1 } = globals;
 	const file$3 = "src\\MapVisualization.svelte";
 
-	// (780:20) 
+	// (934:20) 
 	function create_if_block_1$1(ctx) {
 		let div;
 		let t;
@@ -63881,8 +63881,8 @@ void main() {
 			c: function create() {
 				div = element("div");
 				t = text(/*error*/ ctx[1]);
-				attr_dev(div, "class", "status-message error svelte-6lnhdp");
-				add_location(div, file$3, 780, 6, 23861);
+				attr_dev(div, "class", "status-message error svelte-dddr89");
+				add_location(div, file$3, 934, 6, 28709);
 			},
 			m: function mount(target, anchor) {
 				insert_dev(target, div, anchor);
@@ -63902,14 +63902,14 @@ void main() {
 			block,
 			id: create_if_block_1$1.name,
 			type: "if",
-			source: "(780:20) ",
+			source: "(934:20) ",
 			ctx
 		});
 
 		return block;
 	}
 
-	// (778:4) {#if loading}
+	// (932:4) {#if loading}
 	function create_if_block$3(ctx) {
 		let div;
 
@@ -63917,8 +63917,8 @@ void main() {
 			c: function create() {
 				div = element("div");
 				div.textContent = "Loading map...";
-				attr_dev(div, "class", "status-message svelte-6lnhdp");
-				add_location(div, file$3, 778, 6, 23783);
+				attr_dev(div, "class", "status-message svelte-dddr89");
+				add_location(div, file$3, 932, 6, 28631);
 			},
 			m: function mount(target, anchor) {
 				insert_dev(target, div, anchor);
@@ -63935,7 +63935,7 @@ void main() {
 			block,
 			id: create_if_block$3.name,
 			type: "if",
-			source: "(778:4) {#if loading}",
+			source: "(932:4) {#if loading}",
 			ctx
 		});
 
@@ -64013,24 +64013,24 @@ void main() {
 				p5 = element("p");
 				t16 = text("Pinpoint 4: ");
 				t17 = text(t17_value);
-				attr_dev(div0, "class", "map-container svelte-6lnhdp");
-				add_location(div0, file$3, 776, 2, 23707);
-				attr_dev(p0, "class", "svelte-6lnhdp");
-				add_location(p0, file$3, 785, 4, 23965);
-				attr_dev(p1, "class", "svelte-6lnhdp");
-				add_location(p1, file$3, 786, 4, 24003);
-				attr_dev(p2, "class", "svelte-6lnhdp");
-				add_location(p2, file$3, 787, 4, 24053);
-				attr_dev(p3, "class", "svelte-6lnhdp");
-				add_location(p3, file$3, 788, 4, 24092);
-				attr_dev(p4, "class", "svelte-6lnhdp");
-				add_location(p4, file$3, 789, 4, 24131);
-				attr_dev(p5, "class", "svelte-6lnhdp");
-				add_location(p5, file$3, 790, 4, 24170);
-				attr_dev(div1, "class", "info-panel svelte-6lnhdp");
-				add_location(div1, file$3, 784, 2, 23935);
-				attr_dev(div2, "class", "visualization-container svelte-6lnhdp");
-				add_location(div2, file$3, 775, 0, 23666);
+				attr_dev(div0, "class", "map-container svelte-dddr89");
+				add_location(div0, file$3, 930, 2, 28555);
+				attr_dev(p0, "class", "svelte-dddr89");
+				add_location(p0, file$3, 939, 4, 28813);
+				attr_dev(p1, "class", "svelte-dddr89");
+				add_location(p1, file$3, 940, 4, 28851);
+				attr_dev(p2, "class", "svelte-dddr89");
+				add_location(p2, file$3, 941, 4, 28901);
+				attr_dev(p3, "class", "svelte-dddr89");
+				add_location(p3, file$3, 942, 4, 28940);
+				attr_dev(p4, "class", "svelte-dddr89");
+				add_location(p4, file$3, 943, 4, 28979);
+				attr_dev(p5, "class", "svelte-dddr89");
+				add_location(p5, file$3, 944, 4, 29018);
+				attr_dev(div1, "class", "info-panel svelte-dddr89");
+				add_location(div1, file$3, 938, 2, 28783);
+				attr_dev(div2, "class", "visualization-container svelte-dddr89");
+				add_location(div2, file$3, 929, 0, 28514);
 			},
 			l: function claim(nodes) {
 				throw new Error_1("options.hydrate only works if the component was compiled with the `hydratable: true` option");
@@ -64039,7 +64039,7 @@ void main() {
 				insert_dev(target, div2, anchor);
 				append_dev(div2, div0);
 				if (if_block) if_block.m(div0, null);
-				/*div0_binding*/ ctx[7](div0);
+				/*div0_binding*/ ctx[8](div0);
 				append_dev(div2, t0);
 				append_dev(div2, div1);
 				append_dev(div1, p0);
@@ -64097,7 +64097,7 @@ void main() {
 					if_block.d();
 				}
 
-				/*div0_binding*/ ctx[7](null);
+				/*div0_binding*/ ctx[8](null);
 			}
 		};
 
@@ -64147,6 +64147,11 @@ void main() {
 		return null;
 	}
 
+	function getRomanNumeralGroup(name) {
+		const match = name?.match(/ ([IVX]+)( -|$)/);
+		return match ? match[1] : null;
+	}
+
 	function createDirectionalGUI() {
 		const guiContainer = document.createElement("div");
 
@@ -64194,6 +64199,7 @@ void main() {
 		let { $$slots: slots = {}, $$scope } = $$props;
 		validate_slots('MapVisualization', slots, []);
 		let { killmailId } = $$props;
+		let { kill } = $$props;
 		let container;
 		let scene, camera, renderer, controls;
 		let compass;
@@ -64240,6 +64246,64 @@ void main() {
 			}
 		}
 
+		function updateObjectScales() {
+			if (!camera || !scene) return;
+
+			scene.traverse(object => {
+				if (!objectsWithLabels.has(object)) return;
+				const data = objectsWithLabels.get(object);
+				const distance = camera.position.distanceTo(object.position);
+				const scale = getScaleFactor(distance, data.type);
+
+				// Apply scale to object
+				object.scale.setScalar(scale);
+			});
+		}
+
+		function animate() {
+			requestAnimationFrame(animate);
+			controls.update();
+			updateObjectScales();
+			updateDirectionalGUI();
+			renderer.render(scene, camera);
+		}
+
+		function getScaleFactor(distance, objectType, objectData) {
+			// Base scale factors
+			const scales = {
+				sun: { near: 0.01, far: 50 },
+				planet: { near: 0.005, far: 25 },
+				moon: { near: 0.002, far: 10 },
+				station: { near: 0.002, far: 15 },
+				stargate: { near: 0.002, far: 10 },
+				asteroid: { near: 0.001, far: 8 },
+				killmail: { near: 0.002, far: 10 }
+			};
+
+			const NEAR = 10 * SCALE_FACTOR;
+			const FAR = 1000000 * SCALE_FACTOR;
+
+			// Get base scale
+			const scale = scales[objectType] || scales.planet;
+
+			// Calculate distance factor with exponential falloff for close distances
+			const distanceFactor = Math.pow(MathUtils.smoothstep(distance, NEAR, FAR), 1.5);
+
+			// If selected object has Roman numeral, scale related objects
+			if (selectedObject) {
+				const selectedData = objectsWithLabels.get(selectedObject);
+				const selectedGroup = getRomanNumeralGroup(selectedData.name);
+				const thisGroup = getRomanNumeralGroup(objectData.name);
+
+				if (selectedGroup && thisGroup && selectedGroup === thisGroup) {
+					// Related objects scale more dramatically at close range
+					return MathUtils.lerp(scale.near * 2, scale.far * 0.5, distanceFactor);
+				}
+			}
+
+			return MathUtils.lerp(scale.near, scale.far, distanceFactor);
+		}
+
 		function focusOnObject(object) {
 			if (!object || !objectsWithLabels.has(object)) return;
 			const objectData = objectsWithLabels.get(object);
@@ -64267,6 +64331,14 @@ void main() {
 				if (progress < 1) {
 					requestAnimationFrame(animateCamera);
 				} else {
+					// Reset controls after animation
+					controls.minDistance = 0.1;
+
+					controls.maxDistance = 1000000000;
+					controls.enableZoom = true;
+					controls.enableRotate = true;
+					controls.enablePan = true;
+					controls.update();
 					updateInfoPanel();
 					updateDirectionalGUI();
 				}
@@ -64278,21 +64350,38 @@ void main() {
 		function updateInfoPanel(objectData) {
 			const infoPanel = document.querySelector(".info-panel");
 			if (!infoPanel) return;
-			const locationList = document.createElement("div");
-			locationList.className = "location-list";
+			const killPos = kill?.killmail?.victim?.position;
 
-			// Filter for major celestials only
-			const majorCelestials = Array.from(objectsWithLabels.entries()).filter(([_, data]) => data.type === "sun" || data.type === "planet" || data.type === "killmail");
+			// Always show kill location first
+			infoPanel.innerHTML = `
+        <p>System name: ${systemName}</p>
+        <p>Closest Celestial: ${closestCelestial}</p>
+        <p>Kill Location:
+            <a href="#" class="kill-location">
+                (${(killPos?.x * SCALE_FACTOR).toFixed(2)},
+                ${(killPos?.y * SCALE_FACTOR).toFixed(2)},
+                ${(killPos?.z * SCALE_FACTOR).toFixed(2)}) km
+            </a>
+        </p>
+        <p>Pinpoint 1: ${pinpoints[0]}</p>
+        <p>Pinpoint 2: ${pinpoints[1]}</p>
+        <p>Pinpoint 3: ${pinpoints[2]}</p>
+        <p>Pinpoint 4: ${pinpoints[3]}</p>
+    `;
 
-			majorCelestials.forEach(([obj, data]) => {
-				const entry = document.createElement("div");
-				entry.className = "location-entry";
-				entry.textContent = `${data.type}: ${data.name}`;
-				entry.onclick = () => focusOnObject(obj);
-				locationList.appendChild(entry);
-			});
+			// Always add kill location click handler
+			const killLocationLink = infoPanel.querySelector(".kill-location");
 
-			infoPanel.appendChild(locationList);
+			if (killLocationLink) {
+				killLocationLink.onclick = e => {
+					e.preventDefault();
+					const killObject = Array.from(objectsWithLabels.entries()).find(([_, data]) => data.type === "killmail");
+
+					if (killObject) {
+						focusOnObject(killObject[0]);
+					}
+				};
+			}
 		}
 
 		let directionIndicator;
@@ -64383,13 +64472,18 @@ void main() {
 		}
 
 		function findClosestCelestial(celestials, killPosition) {
+			if (!killPosition?.x || !killPosition?.y || !killPosition?.z) {
+				console.error("Invalid kill position:", killPosition);
+				return "Unknown";
+			}
+
 			const killPos = new Vector3(killPosition.x, killPosition.y, killPosition.z);
 			let closest = null;
 			let minDistance = Infinity;
 
 			celestials.forEach(celestial => {
 				if (celestial.id === "killmail") return;
-				const celestialPos = new Vector3(celestial.x, celestial.y, celestial.z);
+				const celestialPos = new Vector3(celestial.x || 0, celestial.y || 0, celestial.z || 0);
 				const distance = celestialPos.distanceTo(killPos);
 
 				if (distance < minDistance) {
@@ -64399,30 +64493,67 @@ void main() {
 			});
 
 			return closest
-			? {
-					name: closest.name,
-					distance: minDistance
-				}
-			: null;
+			? `${closest.itemname} (${(minDistance * SCALE_FACTOR).toFixed(2)} km)`
+			: "Unknown";
 		}
 
 		function createCelestialObject(celestialData) {
+			if (!celestialData) {
+				console.error("celestialData is undefined or null.");
+				return null;
+			}
+
+			// Base sizes with dynamic scale ranges
 			const SIZES = {
-				KILL: { radius: 0.8, scale: SCALE_FACTOR },
-				SUN: { radius: 5, scale: SCALE_FACTOR },
-				PLANET: { radius: 2, scale: SCALE_FACTOR },
-				MOON: { radius: 0.3, scale: SCALE_FACTOR },
-				ASTEROID: { radius: 0.2, particleCount: 3, spread: 1 },
+				KILL: {
+					radius: 0.8,
+					near: { min: 0.5, max: 2 },
+					far: { min: 2, max: 5 }
+				},
+				SUN: {
+					radius: 5,
+					near: { min: 0.5, max: 3 },
+					far: { min: 3, max: 10 }
+				},
+				PLANET: {
+					radius: 2,
+					near: { min: 0.3, max: 2 },
+					far: { min: 2, max: 8 }
+				},
+				MOON: {
+					radius: 0.3,
+					near: { min: 0.2, max: 1 },
+					far: { min: 1, max: 4 }
+				},
+				ASTEROID: {
+					radius: 0.2,
+					particleCount: 3,
+					spread: 1,
+					near: { min: 0.1, max: 0.5 },
+					far: { min: 0.5, max: 3 }
+				},
 				STARGATE: {
 					length: 3,
 					radius: 0.5,
-					sphereRadius: 0.4
+					sphereRadius: 0.4,
+					near: { min: 0.2, max: 1 },
+					far: { min: 1, max: 4 }
 				},
-				STATION: { size: 2 }
+				STATION: {
+					size: 2,
+					near: { min: 0.3, max: 1.5 },
+					far: { min: 1.5, max: 5 }
+				}
 			};
 
 			const group = new Group();
 			const typeName = celestialData.typename || "";
+
+			// Calculate initial scale based on camera distance
+			const position = new Vector3(celestialData.x * SCALE_FACTOR, celestialData.y * SCALE_FACTOR, celestialData.z * SCALE_FACTOR);
+
+			const distance = camera.position.distanceTo(position);
+			const initialScale = getScaleFactor(distance, typeName.toLowerCase());
 
 			if (celestialData.id === "killmail") {
 				const geometry = new SphereGeometry(SIZES.KILL.radius);
@@ -64435,13 +64566,15 @@ void main() {
 					});
 
 				const sphere = new Mesh(geometry, material);
-				sphere.position.set(celestialData.x * SCALE_FACTOR, celestialData.y * SCALE_FACTOR, celestialData.z * SCALE_FACTOR);
+				sphere.position.copy(position);
+				sphere.scale.setScalar(initialScale);
 				group.add(sphere);
 
 				objectsWithLabels.set(sphere, {
 					name: "Kill Location",
 					type: "killmail",
-					position: sphere.position.clone()
+					position: sphere.position.clone(),
+					sizeConfig: SIZES.KILL
 				});
 			} else if (typeName.includes("Sun")) {
 				const geometry = new SphereGeometry(SIZES.SUN.radius);
@@ -64640,19 +64773,37 @@ void main() {
 		}
 
 		async function initVisualization(celestialData) {
-			if (!celestialData || !Array.isArray(celestialData)) {
-				$$invalidate(1, error = "Invalid celestial data received");
+			console.log("Kill object received:", kill); // Debug log
+
+			if (!kill?.killmail?.victim?.position) {
+				console.error("Missing kill position data:", kill);
+				$$invalidate(1, error = "Invalid kill data");
 				$$invalidate(2, loading = false);
 				return;
 			}
 
+			const killPosition = kill.killmail.victim.position;
+
+			// Add kill location to celestial data
+			celestialData.push({
+				id: "killmail",
+				x: killPosition.x,
+				y: killPosition.y,
+				z: killPosition.z,
+				typename: "Kill Location"
+			});
+
 			scene = new Scene();
 			scene.background = new Color(0x000000);
-			const killPosition = celestialData[0];
+			camera = new PerspectiveCamera(75, container.clientWidth / container.clientHeight, 0.1, 1000000000);
+
+			// Set initial camera position at kill location with offset
+			camera.position.set(killPosition.x * SCALE_FACTOR + 50, killPosition.y * SCALE_FACTOR + 50, killPosition.z * SCALE_FACTOR + 50);
+
+			camera.lookAt(killPosition.x * SCALE_FACTOR, killPosition.y * SCALE_FACTOR, killPosition.z * SCALE_FACTOR);
 			$$invalidate(3, systemName = celestialData[1]?.solarsystemname || "Unknown System");
 			$$invalidate(4, closestCelestial = findClosestCelestial(celestialData, killPosition));
 			$$invalidate(5, pinpoints = calculatePinpoints());
-			camera = new PerspectiveCamera(75, container.clientWidth / container.clientHeight, 0.1, 1000000000);
 			renderer = new WebGLRenderer({ antialias: true });
 			renderer.setSize(container.clientWidth, container.clientHeight);
 			container.appendChild(renderer.domElement);
@@ -64660,7 +64811,7 @@ void main() {
 			controls.enableDamping = true;
 			controls.dampingFactor = 0.05;
 			initRaycaster();
-			initDirectionalGUI(); // Add the directional GUI initialization here
+			initDirectionalGUI();
 			const ambientLight = new AmbientLight(0xffffff, 0.5);
 			scene.add(ambientLight);
 
@@ -64767,9 +64918,13 @@ void main() {
 			if (killmailId === undefined && !('killmailId' in $$props || $$self.$$.bound[$$self.$$.props['killmailId']])) {
 				console_1$1.warn("<MapVisualization> was created without expected prop 'killmailId'");
 			}
+
+			if (kill === undefined && !('kill' in $$props || $$self.$$.bound[$$self.$$.props['kill']])) {
+				console_1$1.warn("<MapVisualization> was created without expected prop 'kill'");
+			}
 		});
 
-		const writable_props = ['killmailId'];
+		const writable_props = ['killmailId', 'kill'];
 
 		Object_1.keys($$props).forEach(key => {
 			if (!~writable_props.indexOf(key) && key.slice(0, 2) !== '$$' && key !== 'slot') console_1$1.warn(`<MapVisualization> was created with unknown prop '${key}'`);
@@ -64784,6 +64939,7 @@ void main() {
 
 		$$self.$$set = $$props => {
 			if ('killmailId' in $$props) $$invalidate(6, killmailId = $$props.killmailId);
+			if ('kill' in $$props) $$invalidate(7, kill = $$props.kill);
 		};
 
 		$$self.$capture_state = () => ({
@@ -64792,6 +64948,7 @@ void main() {
 			THREE,
 			OrbitControls,
 			killmailId,
+			kill,
 			container,
 			scene,
 			camera,
@@ -64813,8 +64970,12 @@ void main() {
 			fetchCelestials,
 			initRaycaster,
 			onMouseMove,
+			updateObjectScales,
+			animate,
+			getScaleFactor,
 			focusOnObject,
 			updateInfoPanel,
+			getRomanNumeralGroup,
 			directionIndicator,
 			initDirectionalGUI,
 			createDirectionalGUI,
@@ -64831,6 +64992,7 @@ void main() {
 
 		$$self.$inject_state = $$props => {
 			if ('killmailId' in $$props) $$invalidate(6, killmailId = $$props.killmailId);
+			if ('kill' in $$props) $$invalidate(7, kill = $$props.kill);
 			if ('container' in $$props) $$invalidate(0, container = $$props.container);
 			if ('scene' in $$props) scene = $$props.scene;
 			if ('camera' in $$props) camera = $$props.camera;
@@ -64854,6 +65016,21 @@ void main() {
 			$$self.$inject_state($$props.$$inject);
 		}
 
+		$$self.$$.update = () => {
+			if ($$self.$$.dirty[0] & /*kill*/ 128) {
+				// Type checking
+				if (kill && typeof kill !== "object") {
+					throw new Error("kill prop must be an object");
+				}
+			}
+
+			if ($$self.$$.dirty[0] & /*kill*/ 128) {
+				if (kill) {
+					console.log("Kill data in MapVisualization:", kill);
+				}
+			}
+		};
+
 		return [
 			container,
 			error,
@@ -64862,6 +65039,7 @@ void main() {
 			closestCelestial,
 			pinpoints,
 			killmailId,
+			kill,
 			div0_binding
 		];
 	}
@@ -64869,7 +65047,7 @@ void main() {
 	class MapVisualization extends SvelteComponentDev {
 		constructor(options) {
 			super(options);
-			init(this, options, instance$3, create_fragment$3, safe_not_equal, { killmailId: 6 }, null, [-1, -1]);
+			init(this, options, instance$3, create_fragment$3, safe_not_equal, { killmailId: 6, kill: 7 }, null, [-1, -1]);
 
 			dispatch_dev("SvelteRegisterComponent", {
 				component: this,
@@ -64886,6 +65064,14 @@ void main() {
 		set killmailId(value) {
 			throw new Error_1("<MapVisualization>: Props cannot be set directly on the component instance unless compiling with 'accessors: true' or '<svelte:options accessors/>'");
 		}
+
+		get kill() {
+			throw new Error_1("<MapVisualization>: Props cannot be read directly from the component instance unless compiling with 'accessors: true' or '<svelte:options accessors/>'");
+		}
+
+		set kill(value) {
+			throw new Error_1("<MapVisualization>: Props cannot be set directly on the component instance unless compiling with 'accessors: true' or '<svelte:options accessors/>'");
+		}
 	}
 
 	/* src\KillmailViewer.svelte generated by Svelte v4.2.19 */
@@ -64893,19 +65079,19 @@ void main() {
 
 	function get_each_context(ctx, list, i) {
 		const child_ctx = ctx.slice();
-		child_ctx[14] = list[i];
+		child_ctx[15] = list[i];
 		return child_ctx;
 	}
 
-	// (97:10) {#each sortedKillmails as killmail (killmail.killID)}
+	// (99:10) {#each sortedKillmails as killmail (killmail.killID)}
 	function create_each_block(key_1, ctx) {
 		let tr;
 		let td0;
-		let t0_value = formatDroppedValue(/*killmail*/ ctx[14].zkb.droppedValue) + "";
+		let t0_value = formatDroppedValue(/*killmail*/ ctx[15].zkb.droppedValue) + "";
 		let t0;
 		let t1;
 		let td1;
-		let t2_value = calculateTimeDifference(/*killmail*/ ctx[14].killmail.killmail_time) + "";
+		let t2_value = calculateTimeDifference(/*killmail*/ ctx[15].killmail.killmail_time) + "";
 		let t2;
 		let t3;
 		let td2;
@@ -64920,7 +65106,7 @@ void main() {
 		let dispose;
 
 		function click_handler() {
-			return /*click_handler*/ ctx[10](/*killmail*/ ctx[14]);
+			return /*click_handler*/ ctx[11](/*killmail*/ ctx[15]);
 		}
 
 		const block = {
@@ -64942,21 +65128,21 @@ void main() {
 				button = element("button");
 				button.textContent = "Map";
 				t7 = space();
-				attr_dev(td0, "class", "svelte-zofpxj");
-				add_location(td0, file$2, 98, 14, 2780);
-				attr_dev(td1, "class", "svelte-zofpxj");
-				add_location(td1, file$2, 99, 14, 2852);
-				attr_dev(a, "href", a_href_value = `https://zkillboard.com/kill/${/*killmail*/ ctx[14].killID}/`);
+				attr_dev(td0, "class", "svelte-2ocpib");
+				add_location(td0, file$2, 100, 14, 2857);
+				attr_dev(td1, "class", "svelte-2ocpib");
+				add_location(td1, file$2, 101, 14, 2929);
+				attr_dev(a, "href", a_href_value = `https://zkillboard.com/kill/${/*killmail*/ ctx[15].killID}/`);
 				attr_dev(a, "target", "_blank");
-				add_location(a, file$2, 102, 16, 2973);
-				attr_dev(td2, "class", "svelte-zofpxj");
-				add_location(td2, file$2, 101, 14, 2951);
-				attr_dev(button, "class", "svelte-zofpxj");
-				add_location(button, file$2, 110, 16, 3210);
-				attr_dev(td3, "class", "svelte-zofpxj");
-				add_location(td3, file$2, 109, 14, 3188);
-				attr_dev(tr, "class", "svelte-zofpxj");
-				add_location(tr, file$2, 97, 12, 2760);
+				add_location(a, file$2, 104, 16, 3050);
+				attr_dev(td2, "class", "svelte-2ocpib");
+				add_location(td2, file$2, 103, 14, 3028);
+				attr_dev(button, "class", "svelte-2ocpib");
+				add_location(button, file$2, 112, 16, 3287);
+				attr_dev(td3, "class", "svelte-2ocpib");
+				add_location(td3, file$2, 111, 14, 3265);
+				attr_dev(tr, "class", "svelte-2ocpib");
+				add_location(tr, file$2, 99, 12, 2837);
 				this.first = tr;
 			},
 			m: function mount(target, anchor) {
@@ -64982,10 +65168,10 @@ void main() {
 			},
 			p: function update(new_ctx, dirty) {
 				ctx = new_ctx;
-				if (dirty & /*sortedKillmails*/ 1 && t0_value !== (t0_value = formatDroppedValue(/*killmail*/ ctx[14].zkb.droppedValue) + "")) set_data_dev(t0, t0_value);
-				if (dirty & /*sortedKillmails*/ 1 && t2_value !== (t2_value = calculateTimeDifference(/*killmail*/ ctx[14].killmail.killmail_time) + "")) set_data_dev(t2, t2_value);
+				if (dirty & /*sortedKillmails*/ 1 && t0_value !== (t0_value = formatDroppedValue(/*killmail*/ ctx[15].zkb.droppedValue) + "")) set_data_dev(t0, t0_value);
+				if (dirty & /*sortedKillmails*/ 1 && t2_value !== (t2_value = calculateTimeDifference(/*killmail*/ ctx[15].killmail.killmail_time) + "")) set_data_dev(t2, t2_value);
 
-				if (dirty & /*sortedKillmails*/ 1 && a_href_value !== (a_href_value = `https://zkillboard.com/kill/${/*killmail*/ ctx[14].killID}/`)) {
+				if (dirty & /*sortedKillmails*/ 1 && a_href_value !== (a_href_value = `https://zkillboard.com/kill/${/*killmail*/ ctx[15].killID}/`)) {
 					attr_dev(a, "href", a_href_value);
 				}
 			},
@@ -65003,14 +65189,14 @@ void main() {
 			block,
 			id: create_each_block.name,
 			type: "each",
-			source: "(97:10) {#each sortedKillmails as killmail (killmail.killID)}",
+			source: "(99:10) {#each sortedKillmails as killmail (killmail.killID)}",
 			ctx
 		});
 
 		return block;
 	}
 
-	// (120:2) {#if showMap && selectedKillmailId}
+	// (122:2) {#if showMap && selectedKillmailId}
 	function create_if_block$2(ctx) {
 		let div1;
 		let div0;
@@ -65023,7 +65209,8 @@ void main() {
 
 		mapvisualization = new MapVisualization({
 				props: {
-					killmailId: /*selectedKillmailId*/ ctx[1]
+					killmailId: /*selectedKillmailId*/ ctx[1],
+					kill: /*selectedKillmail*/ ctx[2]
 				},
 				$$inline: true
 			});
@@ -65036,12 +65223,12 @@ void main() {
 				t0 = space();
 				button = element("button");
 				button.textContent = "Close Map";
-				attr_dev(button, "class", "close-map svelte-zofpxj");
-				add_location(button, file$2, 123, 8, 3566);
-				attr_dev(div0, "class", "map-container svelte-zofpxj");
-				add_location(div0, file$2, 121, 6, 3467);
-				attr_dev(div1, "class", "map-overlay svelte-zofpxj");
-				add_location(div1, file$2, 120, 4, 3434);
+				attr_dev(button, "class", "close-map svelte-2ocpib");
+				add_location(button, file$2, 128, 8, 3691);
+				attr_dev(div0, "class", "map-container svelte-2ocpib");
+				add_location(div0, file$2, 123, 6, 3537);
+				attr_dev(div1, "class", "map-overlay svelte-2ocpib");
+				add_location(div1, file$2, 122, 4, 3504);
 			},
 			m: function mount(target, anchor) {
 				insert_dev(target, div1, anchor);
@@ -65052,13 +65239,14 @@ void main() {
 				current = true;
 
 				if (!mounted) {
-					dispose = listen_dev(button, "click", /*click_handler_1*/ ctx[12], false, false, false, false);
+					dispose = listen_dev(button, "click", /*click_handler_1*/ ctx[13], false, false, false, false);
 					mounted = true;
 				}
 			},
 			p: function update(ctx, dirty) {
 				const mapvisualization_changes = {};
 				if (dirty & /*selectedKillmailId*/ 2) mapvisualization_changes.killmailId = /*selectedKillmailId*/ ctx[1];
+				if (dirty & /*selectedKillmail*/ 4) mapvisualization_changes.kill = /*selectedKillmail*/ ctx[2];
 				mapvisualization.$set(mapvisualization_changes);
 			},
 			i: function intro(local) {
@@ -65085,7 +65273,7 @@ void main() {
 			block,
 			id: create_if_block$2.name,
 			type: "if",
-			source: "(120:2) {#if showMap && selectedKillmailId}",
+			source: "(122:2) {#if showMap && selectedKillmailId}",
 			ctx
 		});
 
@@ -65118,7 +65306,7 @@ void main() {
 		let mounted;
 		let dispose;
 		let each_value = ensure_array_like_dev(/*sortedKillmails*/ ctx[0]);
-		const get_key = ctx => /*killmail*/ ctx[14].killID;
+		const get_key = ctx => /*killmail*/ ctx[15].killID;
 		validate_each_keys(ctx, each_value, get_each_context, get_key);
 
 		for (let i = 0; i < each_value.length; i += 1) {
@@ -65127,7 +65315,7 @@ void main() {
 			each_1_lookup.set(key, each_blocks[i] = create_each_block(key, child_ctx));
 		}
 
-		let if_block = /*showMap*/ ctx[3] && /*selectedKillmailId*/ ctx[1] && create_if_block$2(ctx);
+		let if_block = /*showMap*/ ctx[4] && /*selectedKillmailId*/ ctx[1] && create_if_block$2(ctx);
 
 		const block = {
 			c: function create() {
@@ -65161,30 +65349,30 @@ void main() {
 
 				t10 = space();
 				if (if_block) if_block.c();
-				add_location(h2, file$2, 77, 2, 2267);
-				attr_dev(th0, "class", "svelte-zofpxj");
-				add_location(th0, file$2, 82, 10, 2395);
-				attr_dev(th1, "class", "svelte-zofpxj");
-				add_location(th1, file$2, 83, 10, 2429);
-				attr_dev(th2, "class", "svelte-zofpxj");
-				add_location(th2, file$2, 84, 10, 2458);
-				attr_dev(th3, "class", "svelte-zofpxj");
-				add_location(th3, file$2, 85, 10, 2482);
-				attr_dev(tr, "class", "svelte-zofpxj");
-				add_location(tr, file$2, 81, 8, 2379);
-				attr_dev(thead, "class", "svelte-zofpxj");
-				add_location(thead, file$2, 80, 6, 2362);
-				attr_dev(table0, "class", "svelte-zofpxj");
-				add_location(table0, file$2, 79, 4, 2347);
-				add_location(tbody, file$2, 95, 8, 2674);
-				attr_dev(table1, "class", "svelte-zofpxj");
-				add_location(table1, file$2, 94, 6, 2657);
-				attr_dev(div0, "class", "scroll-box svelte-zofpxj");
-				add_location(div0, file$2, 89, 4, 2545);
-				attr_dev(div1, "class", "table-container svelte-zofpxj");
-				add_location(div1, file$2, 78, 2, 2312);
-				attr_dev(div2, "class", "killmail-viewer svelte-zofpxj");
-				add_location(div2, file$2, 76, 0, 2234);
+				add_location(h2, file$2, 79, 2, 2344);
+				attr_dev(th0, "class", "svelte-2ocpib");
+				add_location(th0, file$2, 84, 10, 2472);
+				attr_dev(th1, "class", "svelte-2ocpib");
+				add_location(th1, file$2, 85, 10, 2506);
+				attr_dev(th2, "class", "svelte-2ocpib");
+				add_location(th2, file$2, 86, 10, 2535);
+				attr_dev(th3, "class", "svelte-2ocpib");
+				add_location(th3, file$2, 87, 10, 2559);
+				attr_dev(tr, "class", "svelte-2ocpib");
+				add_location(tr, file$2, 83, 8, 2456);
+				attr_dev(thead, "class", "svelte-2ocpib");
+				add_location(thead, file$2, 82, 6, 2439);
+				attr_dev(table0, "class", "svelte-2ocpib");
+				add_location(table0, file$2, 81, 4, 2424);
+				add_location(tbody, file$2, 97, 8, 2751);
+				attr_dev(table1, "class", "svelte-2ocpib");
+				add_location(table1, file$2, 96, 6, 2734);
+				attr_dev(div0, "class", "scroll-box svelte-2ocpib");
+				add_location(div0, file$2, 91, 4, 2622);
+				attr_dev(div1, "class", "table-container svelte-2ocpib");
+				add_location(div1, file$2, 80, 2, 2389);
+				attr_dev(div2, "class", "killmail-viewer svelte-2ocpib");
+				add_location(div2, file$2, 78, 0, 2311);
 			},
 			l: function claim(nodes) {
 				throw new Error("options.hydrate only works if the component was compiled with the `hydratable: true` option");
@@ -65215,28 +65403,28 @@ void main() {
 					}
 				}
 
-				/*div0_binding*/ ctx[11](div0);
+				/*div0_binding*/ ctx[12](div0);
 				append_dev(div2, t10);
 				if (if_block) if_block.m(div2, null);
 				current = true;
 
 				if (!mounted) {
-					dispose = listen_dev(div0, "scroll", /*handleScroll*/ ctx[5], false, false, false, false);
+					dispose = listen_dev(div0, "scroll", /*handleScroll*/ ctx[6], false, false, false, false);
 					mounted = true;
 				}
 			},
 			p: function update(ctx, [dirty]) {
-				if (dirty & /*viewMap, sortedKillmails, calculateTimeDifference, formatDroppedValue*/ 17) {
+				if (dirty & /*viewMap, sortedKillmails, calculateTimeDifference, formatDroppedValue*/ 33) {
 					each_value = ensure_array_like_dev(/*sortedKillmails*/ ctx[0]);
 					validate_each_keys(ctx, each_value, get_each_context, get_key);
 					each_blocks = update_keyed_each(each_blocks, dirty, get_key, 1, ctx, each_value, each_1_lookup, tbody, destroy_block, create_each_block, null, get_each_context);
 				}
 
-				if (/*showMap*/ ctx[3] && /*selectedKillmailId*/ ctx[1]) {
+				if (/*showMap*/ ctx[4] && /*selectedKillmailId*/ ctx[1]) {
 					if (if_block) {
 						if_block.p(ctx, dirty);
 
-						if (dirty & /*showMap, selectedKillmailId*/ 10) {
+						if (dirty & /*showMap, selectedKillmailId*/ 18) {
 							transition_in(if_block, 1);
 						}
 					} else {
@@ -65273,7 +65461,7 @@ void main() {
 					each_blocks[i].d();
 				}
 
-				/*div0_binding*/ ctx[11](null);
+				/*div0_binding*/ ctx[12](null);
 				if (if_block) if_block.d();
 				mounted = false;
 				dispose();
@@ -65317,33 +65505,35 @@ void main() {
 		let sortedKillmails;
 		let $filteredKillmails;
 		validate_store(filteredKillmails, 'filteredKillmails');
-		component_subscribe($$self, filteredKillmails, $$value => $$invalidate(9, $filteredKillmails = $$value));
+		component_subscribe($$self, filteredKillmails, $$value => $$invalidate(10, $filteredKillmails = $$value));
 		let { $$slots: slots = {}, $$scope } = $$props;
 		validate_slots('KillmailViewer', slots, []);
 		let selectedKillmailId = null;
+		let selectedKillmail = null;
 		let scrollContainer;
 		let isUserScrolling = false;
 		let shouldAutoScroll = true;
 		let showMap = false;
 
-		function viewMap(killID) {
-			$$invalidate(1, selectedKillmailId = killID);
-			$$invalidate(3, showMap = true);
+		function viewMap(killmail) {
+			$$invalidate(1, selectedKillmailId = killmail.killID);
+			$$invalidate(2, selectedKillmail = killmail);
+			$$invalidate(4, showMap = true);
 		}
 
 		function handleScroll() {
 			if (!isUserScrolling) {
-				$$invalidate(6, isUserScrolling = true);
-				setTimeout(() => $$invalidate(6, isUserScrolling = false), 150);
+				$$invalidate(7, isUserScrolling = true);
+				setTimeout(() => $$invalidate(7, isUserScrolling = false), 150);
 			}
 
 			const { scrollTop, scrollHeight, clientHeight } = scrollContainer;
-			$$invalidate(7, shouldAutoScroll = scrollTop + clientHeight >= scrollHeight - 5);
+			$$invalidate(8, shouldAutoScroll = scrollTop + clientHeight >= scrollHeight - 5);
 		}
 
 		function scrollToBottom() {
 			if (scrollContainer && shouldAutoScroll) {
-				$$invalidate(2, scrollContainer.scrollTop = scrollContainer.scrollHeight, scrollContainer);
+				$$invalidate(3, scrollContainer.scrollTop = scrollContainer.scrollHeight, scrollContainer);
 			}
 		}
 
@@ -65357,22 +65547,23 @@ void main() {
 			if (!~writable_props.indexOf(key) && key.slice(0, 2) !== '$$' && key !== 'slot') console.warn(`<KillmailViewer> was created with unknown prop '${key}'`);
 		});
 
-		const click_handler = killmail => viewMap(killmail.killID);
+		const click_handler = killmail => viewMap(killmail);
 
 		function div0_binding($$value) {
 			binding_callbacks[$$value ? 'unshift' : 'push'](() => {
 				scrollContainer = $$value;
-				$$invalidate(2, scrollContainer);
+				$$invalidate(3, scrollContainer);
 			});
 		}
 
-		const click_handler_1 = () => $$invalidate(3, showMap = false);
+		const click_handler_1 = () => $$invalidate(4, showMap = false);
 
 		$$self.$capture_state = () => ({
 			filteredKillmails,
 			MapVisualization,
 			onMount,
 			selectedKillmailId,
+			selectedKillmail,
 			scrollContainer,
 			isUserScrolling,
 			shouldAutoScroll,
@@ -65389,12 +65580,13 @@ void main() {
 
 		$$self.$inject_state = $$props => {
 			if ('selectedKillmailId' in $$props) $$invalidate(1, selectedKillmailId = $$props.selectedKillmailId);
-			if ('scrollContainer' in $$props) $$invalidate(2, scrollContainer = $$props.scrollContainer);
-			if ('isUserScrolling' in $$props) $$invalidate(6, isUserScrolling = $$props.isUserScrolling);
-			if ('shouldAutoScroll' in $$props) $$invalidate(7, shouldAutoScroll = $$props.shouldAutoScroll);
-			if ('showMap' in $$props) $$invalidate(3, showMap = $$props.showMap);
+			if ('selectedKillmail' in $$props) $$invalidate(2, selectedKillmail = $$props.selectedKillmail);
+			if ('scrollContainer' in $$props) $$invalidate(3, scrollContainer = $$props.scrollContainer);
+			if ('isUserScrolling' in $$props) $$invalidate(7, isUserScrolling = $$props.isUserScrolling);
+			if ('shouldAutoScroll' in $$props) $$invalidate(8, shouldAutoScroll = $$props.shouldAutoScroll);
+			if ('showMap' in $$props) $$invalidate(4, showMap = $$props.showMap);
 			if ('sortedKillmails' in $$props) $$invalidate(0, sortedKillmails = $$props.sortedKillmails);
-			if ('killmailsToDisplay' in $$props) $$invalidate(8, killmailsToDisplay = $$props.killmailsToDisplay);
+			if ('killmailsToDisplay' in $$props) $$invalidate(9, killmailsToDisplay = $$props.killmailsToDisplay);
 		};
 
 		if ($$props && "$$inject" in $$props) {
@@ -65402,11 +65594,11 @@ void main() {
 		}
 
 		$$self.$$.update = () => {
-			if ($$self.$$.dirty & /*$filteredKillmails*/ 512) {
-				$$invalidate(8, killmailsToDisplay = $filteredKillmails);
+			if ($$self.$$.dirty & /*$filteredKillmails*/ 1024) {
+				$$invalidate(9, killmailsToDisplay = $filteredKillmails);
 			}
 
-			if ($$self.$$.dirty & /*killmailsToDisplay*/ 256) {
+			if ($$self.$$.dirty & /*killmailsToDisplay*/ 512) {
 				// Sort killmails by time, most recent first
 				$$invalidate(0, sortedKillmails = Array.isArray(killmailsToDisplay)
 				? [...killmailsToDisplay].sort((a, b) => {
@@ -65415,7 +65607,7 @@ void main() {
 				: []);
 			}
 
-			if ($$self.$$.dirty & /*sortedKillmails, isUserScrolling, shouldAutoScroll*/ 193) {
+			if ($$self.$$.dirty & /*sortedKillmails, isUserScrolling, shouldAutoScroll*/ 385) {
 				{
 					if (sortedKillmails.length && !isUserScrolling && shouldAutoScroll) {
 						setTimeout(scrollToBottom, 0);
@@ -65427,6 +65619,7 @@ void main() {
 		return [
 			sortedKillmails,
 			selectedKillmailId,
+			selectedKillmail,
 			scrollContainer,
 			showMap,
 			viewMap,
@@ -65467,7 +65660,7 @@ void main() {
 			c: function create() {
 				p = element("p");
 				t = text(/*error*/ ctx[2]);
-				attr_dev(p, "class", "error svelte-1vbgxqh");
+				attr_dev(p, "class", "error svelte-163whh9");
 				add_location(p, file$1, 62, 6, 1904);
 			},
 			m: function mount(target, anchor) {
@@ -65504,7 +65697,7 @@ void main() {
 			c: function create() {
 				p = element("p");
 				t = text(/*successMessage*/ ctx[3]);
-				attr_dev(p, "class", "success svelte-1vbgxqh");
+				attr_dev(p, "class", "success svelte-163whh9");
 				add_location(p, file$1, 65, 6, 1973);
 			},
 			m: function mount(target, anchor) {
@@ -65575,21 +65768,21 @@ void main() {
 				attr_dev(input0, "type", "text");
 				attr_dev(input0, "placeholder", "Username");
 				input0.required = true;
-				attr_dev(input0, "class", "svelte-1vbgxqh");
+				attr_dev(input0, "class", "svelte-163whh9");
 				add_location(input0, file$1, 56, 6, 1595);
 				attr_dev(input1, "type", "password");
 				attr_dev(input1, "placeholder", "Password");
 				input1.required = true;
-				attr_dev(input1, "class", "svelte-1vbgxqh");
+				attr_dev(input1, "class", "svelte-163whh9");
 				add_location(input1, file$1, 57, 6, 1676);
 				attr_dev(button0, "type", "submit");
-				attr_dev(button0, "class", "svelte-1vbgxqh");
+				attr_dev(button0, "class", "svelte-163whh9");
 				add_location(button0, file$1, 58, 6, 1761);
 				attr_dev(button1, "type", "button");
-				attr_dev(button1, "class", "svelte-1vbgxqh");
+				attr_dev(button1, "class", "svelte-163whh9");
 				add_location(button1, file$1, 59, 6, 1805);
 				add_location(form, file$1, 55, 2, 1541);
-				attr_dev(div, "class", "svelte-1vbgxqh");
+				attr_dev(div, "class", "svelte-163whh9");
 				add_location(div, file$1, 53, 0, 1514);
 			},
 			l: function claim(nodes) {
@@ -65835,12 +66028,12 @@ void main() {
 				t1 = space();
 				button = element("button");
 				button.textContent = "Clear All Kills";
-				attr_dev(div0, "class", "settings-section svelte-1isu0j5");
+				attr_dev(div0, "class", "settings-section svelte-u90xat");
 				add_location(div0, file, 68, 6, 1842);
 				add_location(button, file, 73, 8, 2037);
-				attr_dev(div1, "class", "killmail-section svelte-1isu0j5");
+				attr_dev(div1, "class", "killmail-section svelte-u90xat");
 				add_location(div1, file, 71, 6, 1969);
-				attr_dev(div2, "class", "dashboard svelte-1isu0j5");
+				attr_dev(div2, "class", "dashboard svelte-u90xat");
 				add_location(div2, file, 67, 4, 1811);
 			},
 			m: function mount(target, anchor) {
@@ -65959,7 +66152,7 @@ void main() {
 			c: function create() {
 				main = element("main");
 				if_block.c();
-				attr_dev(main, "class", "svelte-1isu0j5");
+				attr_dev(main, "class", "svelte-u90xat");
 				add_location(main, file, 63, 0, 1731);
 			},
 			l: function claim(nodes) {
