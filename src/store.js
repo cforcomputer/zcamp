@@ -13,7 +13,7 @@ export const settings = writable({
   location_filter_enabled: false,
   ship_type_filter_enabled: false,
   time_threshold_enabled: false,
-  audio_alerts_enabled: true,
+  audio_alerts_enabled: false,
   attacker_alliance_filter_enabled: false,
   attacker_corporation_filter_enabled: false,
   attacker_ship_type_filter_enabled: false,

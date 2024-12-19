@@ -12,6 +12,8 @@
     throw new Error("kill prop must be an object");
   }
 
+  import gsap from "gsap";
+
   let container;
   let scene, camera, renderer, controls;
   let compass;
@@ -76,8 +78,15 @@
     raycaster = new THREE.Raycaster();
     mouse = new THREE.Vector2();
 
+    // Remove any existing tooltip
+    const existingTooltip = document.querySelector(".tooltip");
+    if (existingTooltip) {
+      existingTooltip.remove();
+    }
+
     tooltipDiv = document.createElement("div");
     tooltipDiv.className = "tooltip";
+    tooltipDiv.style.display = "none";
     container.appendChild(tooltipDiv);
   }
 
@@ -112,9 +121,8 @@
 
       const data = objectsWithLabels.get(object);
       const distance = camera.position.distanceTo(object.position);
-      const scale = getScaleFactor(distance, data.type);
+      const scale = getScaleFactor(distance, data.type, data);
 
-      // Apply scale to object
       object.scale.setScalar(scale);
     });
   }
@@ -122,128 +130,137 @@
   function animate() {
     requestAnimationFrame(animate);
     controls.update();
-    updateObjectScales();
     updateDirectionalGUI();
     renderer.render(scene, camera);
   }
 
   function getScaleFactor(distance, objectType, objectData) {
-    // Base scale factors
+    // Base scale factors for different object types
     const scales = {
-      sun: { near: 0.01, far: 50 },
-      planet: { near: 0.005, far: 25 },
-      moon: { near: 0.002, far: 10 },
-      station: { near: 0.002, far: 15 },
-      stargate: { near: 0.002, far: 10 },
-      asteroid: { near: 0.001, far: 8 },
-      killmail: { near: 0.002, far: 10 },
+      sun: { base: 5.0, min: 0.5, max: 8.0 },
+      planet: { base: 2.0, min: 0.3, max: 4.0 },
+      moon: { base: 0.8, min: 0.2, max: 2.0 },
+      station: { base: 1.0, min: 0.2, max: 3.0 },
+      stargate: { base: 1.0, min: 0.2, max: 3.0 },
+      asteroid: { base: 0.5, min: 0.1, max: 1.5 },
+      killmail: { base: 0.8, min: 0.2, max: 20.0 },
     };
 
-    const NEAR = 10 * SCALE_FACTOR;
-    const FAR = 1000000 * SCALE_FACTOR;
+    // Distance thresholds for scaling
+    const NEAR = 50 * SCALE_FACTOR;
+    const FAR = 500000 * SCALE_FACTOR;
 
-    // Get base scale
-    const scale = scales[objectType] || scales.planet;
+    // Get scale configuration for object type
+    const scaleConfig = scales[objectType] || scales.planet;
 
-    // Calculate distance factor with exponential falloff for close distances
-    const distanceFactor = Math.pow(
-      THREE.MathUtils.smoothstep(distance, NEAR, FAR),
-      1.5
+    // Calculate base scale based on distance with smooth interpolation
+    const distanceFactor = THREE.MathUtils.smoothstep(distance, NEAR, FAR);
+    let scale = THREE.MathUtils.lerp(
+      scaleConfig.max,
+      scaleConfig.min,
+      distanceFactor
     );
 
-    // If selected object has Roman numeral, scale related objects
+    // Apply contextual scaling based on selected object
     if (selectedObject) {
       const selectedData = objectsWithLabels.get(selectedObject);
       const selectedGroup = getRomanNumeralGroup(selectedData.name);
-      const thisGroup = getRomanNumeralGroup(objectData.name);
+      const thisGroup = getRomanNumeralGroup(objectData?.name);
 
-      if (selectedGroup && thisGroup && selectedGroup === thisGroup) {
-        // Related objects scale more dramatically at close range
-        return THREE.MathUtils.lerp(
-          scale.near * 2,
-          scale.far * 0.5,
-          distanceFactor
-        );
+      if (selectedGroup && thisGroup) {
+        if (selectedGroup === thisGroup) {
+          // Objects in same planetary system - enhance visibility when close
+          const systemScaleFactor = THREE.MathUtils.smoothstep(
+            distance,
+            NEAR * 0.1,
+            NEAR
+          );
+          scale *= THREE.MathUtils.lerp(1.5, 0.8, systemScaleFactor);
+        } else {
+          // Objects in different systems - reduce visibility
+          const outsideScaleFactor = THREE.MathUtils.smoothstep(
+            distance,
+            NEAR * 0.5,
+            FAR
+          );
+          scale *= THREE.MathUtils.lerp(0.3, 0.5, outsideScaleFactor);
+        }
       }
     }
 
-    return THREE.MathUtils.lerp(scale.near, scale.far, distanceFactor);
+    // Adjust scale based on object type context
+    if (objectType === "sun") {
+      // Reduce sun scale when viewing planetary systems
+      const planetaryViewFactor =
+        selectedObject &&
+        objectsWithLabels.get(selectedObject).type === "planet"
+          ? 0.3
+          : 1.0;
+      scale *= planetaryViewFactor;
+    }
+
+    return scale;
   }
 
   function focusOnObject(object) {
-    if (!object || !objectsWithLabels.has(object)) return;
+    if (!camera || !controls || !object) return;
 
-    const objectData = objectsWithLabels.get(object);
     const targetPosition = object.position.clone();
-
-    // Calculate offset based on object type
-    let offsetMultiplier = 1;
-    if (objectData.type === "sun") offsetMultiplier = 3;
-    else if (objectData.type === "planet") offsetMultiplier = 2;
-
-    const offset = new THREE.Vector3(50, 50, 50).multiplyScalar(
-      SCALE_FACTOR * offsetMultiplier
-    );
-
     const startPosition = camera.position.clone();
-    const startTarget = controls.target.clone();
-    const endPosition = targetPosition.clone().add(offset);
-    const duration = 1000;
+    const duration = 1000; // 1 second
     const startTime = Date.now();
 
-    function animateCamera() {
+    function animate() {
       const elapsed = Date.now() - startTime;
       const progress = Math.min(elapsed / duration, 1);
-      const eased = 1 - Math.pow(1 - progress, 3);
 
-      camera.position.lerpVectors(startPosition, endPosition, eased);
-      controls.target.lerpVectors(startTarget, targetPosition, eased);
+      // Smooth easing
+      const easeProgress =
+        progress < 0.5
+          ? 2 * progress * progress
+          : -1 + (4 - 2 * progress) * progress;
 
-      controls.update();
+      camera.position.lerpVectors(
+        startPosition,
+        targetPosition.clone().add(new THREE.Vector3(50, 50, 50)),
+        easeProgress
+      );
+      controls.target.lerp(targetPosition, easeProgress);
 
       if (progress < 1) {
-        requestAnimationFrame(animateCamera);
-      } else {
-        // Reset controls after animation
-        controls.minDistance = 0.1;
-        controls.maxDistance = 1000000000;
-        controls.enableZoom = true;
-        controls.enableRotate = true;
-        controls.enablePan = true;
-        controls.update();
-
-        updateInfoPanel(objectData);
-        updateDirectionalGUI();
+        requestAnimationFrame(animate);
       }
     }
 
-    animateCamera();
+    animate();
   }
 
-  function updateInfoPanel(objectData) {
+  function updateInfoPanel(objectData = null) {
     const infoPanel = document.querySelector(".info-panel");
     if (!infoPanel) return;
 
-    const killPos = kill?.killmail?.victim?.position;
+    // Early check for kill data
+    if (!kill?.killmail?.victim?.position) {
+      console.error("Missing kill position data");
+      return;
+    }
 
-    // Always show kill location first
+    const killPos = kill.killmail.victim.position;
+    const formattedCoords = `(${(killPos.x * SCALE_FACTOR).toFixed(0)}, ${(killPos.y * SCALE_FACTOR).toFixed(0)}, ${(killPos.z * SCALE_FACTOR).toFixed(0)}) km`;
+
+    // Always show these elements
     infoPanel.innerHTML = `
-        <p>System name: ${systemName}</p>
-        <p>Closest Celestial: ${closestCelestial}</p>
-        <p>Kill Location:
-            <a href="#" class="kill-location">
-                (${(killPos?.x * SCALE_FACTOR).toFixed(2)},
-                ${(killPos?.y * SCALE_FACTOR).toFixed(2)},
-                ${(killPos?.z * SCALE_FACTOR).toFixed(2)}) km
-            </a>
-        </p>
-        <p>Pinpoint 1: ${pinpoints[0]}</p>
-        <p>Pinpoint 2: ${pinpoints[1]}</p>
-        <p>Pinpoint 3: ${pinpoints[2]}</p>
-        <p>Pinpoint 4: ${pinpoints[3]}</p>
+        <p>System name: ${systemName || "Unknown"}</p>
+        <p>Closest Celestial: ${closestCelestial || "Unknown"}</p>
+        <p><a href="#" class="kill-location">Kill Location: ${formattedCoords}</a></p>
+        <p>Pinpoint 1: ${pinpoints[0] || "TBD"}</p>
+        <p>Pinpoint 2: ${pinpoints[1] || "TBD"}</p>
+        <p>Pinpoint 3: ${pinpoints[2] || "TBD"}</p>
+        <p>Pinpoint 4: ${pinpoints[3] || "TBD"}</p>
+        ${objectData ? `<p>Selected: ${objectData.name} (${objectData.type})</p>` : ""}
     `;
 
-    // Always add kill location click handler
+    // Add click handler for kill location
     const killLocationLink = infoPanel.querySelector(".kill-location");
     if (killLocationLink) {
       killLocationLink.onclick = (e) => {
@@ -760,25 +777,12 @@
   }
 
   async function initVisualization(celestialData) {
-    console.log("Kill object received:", kill); // Debug log
-
     if (!kill?.killmail?.victim?.position) {
       console.error("Missing kill position data:", kill);
       error = "Invalid kill data";
       loading = false;
       return;
     }
-
-    const killPosition = kill.killmail.victim.position;
-
-    // Add kill location to celestial data
-    celestialData.push({
-      id: "killmail",
-      x: killPosition.x,
-      y: killPosition.y,
-      z: killPosition.z,
-      typename: "Kill Location",
-    });
 
     scene = new THREE.Scene();
     scene.background = new THREE.Color(0x000000);
@@ -790,63 +794,64 @@
       1000000000
     );
 
-    // Set initial camera position at kill location with offset
+    renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(container.clientWidth, container.clientHeight);
+    container.appendChild(renderer.domElement);
+
+    const killPosition = kill.killmail.victim.position;
+
+    // First create kill location
+    const killObject = createCelestialObject({
+      id: "killmail",
+      x: killPosition.x,
+      y: killPosition.y,
+      z: killPosition.z,
+      typename: "Kill Location",
+    });
+
+    if (killObject) {
+      scene.add(killObject);
+      console.log("Kill object added to scene", killObject);
+    }
+
+    // Then add other celestials
+    celestialData.forEach((celestial) => {
+      if (celestial.id !== "killmail") {
+        const mesh = createCelestialObject(celestial);
+        if (mesh) scene.add(mesh);
+      }
+    });
+
+    // Set camera position after objects are created
     camera.position.set(
       killPosition.x * SCALE_FACTOR + 50,
       killPosition.y * SCALE_FACTOR + 50,
       killPosition.z * SCALE_FACTOR + 50
     );
-
     camera.lookAt(
       killPosition.x * SCALE_FACTOR,
       killPosition.y * SCALE_FACTOR,
       killPosition.z * SCALE_FACTOR
     );
 
-    systemName = celestialData[1]?.solarsystemname || "Unknown System";
-    closestCelestial = findClosestCelestial(celestialData, killPosition);
-    pinpoints = calculatePinpoints(celestialData, killPosition);
-
-    renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setSize(container.clientWidth, container.clientHeight);
-    container.appendChild(renderer.domElement);
-
     controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
     controls.dampingFactor = 0.05;
 
+    // Initialize other components
     initRaycaster();
     initDirectionalGUI();
 
     const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
     scene.add(ambientLight);
 
-    celestialData.forEach((celestial) => {
-      const mesh = createCelestialObject(celestial);
-      scene.add(mesh);
-    });
+    // Update info panel after everything is set up
+    systemName = celestialData[1]?.solarsystemname || "Unknown System";
+    closestCelestial = findClosestCelestial(celestialData, killPosition);
+    pinpoints = calculatePinpoints(celestialData, killPosition);
+    updateInfoPanel();
 
-    camera.position.set(
-      killPosition.x * SCALE_FACTOR + 50,
-      killPosition.y * SCALE_FACTOR + 50,
-      killPosition.z * SCALE_FACTOR + 50
-    );
-    camera.lookAt(
-      killPosition.x * SCALE_FACTOR,
-      killPosition.y * SCALE_FACTOR,
-      killPosition.z * SCALE_FACTOR
-    );
-
-    container.addEventListener("mousemove", onMouseMove);
-    container.addEventListener("click", onClick);
-
-    function animate() {
-      requestAnimationFrame(animate);
-      controls.update();
-      updateDirectionalGUI(); // Add GUI update to animation loop
-      renderer.render(scene, camera);
-    }
-
+    // Start animation
     animate();
     loading = false;
   }
@@ -864,6 +869,9 @@
       const celestialData = await fetchCelestials(killmailId);
       if (celestialData) {
         await initVisualization(celestialData);
+        // Add event listeners
+        container.addEventListener("mousemove", onMouseMove);
+        container.addEventListener("click", onClick);
         window.addEventListener("resize", handleResize);
       } else {
         error = "Failed to fetch celestial data";
@@ -904,24 +912,41 @@
   });
 
   function onClick(event) {
+    if (!scene || !camera) return;
+
     const rect = container.getBoundingClientRect();
     mouse.x = ((event.clientX - rect.left) / container.clientWidth) * 2 - 1;
     mouse.y = -((event.clientY - rect.top) / container.clientHeight) * 2 + 1;
 
     raycaster.setFromCamera(mouse, camera);
-    const intersects = raycaster.intersectObjects(scene.children, true); // Added true for recursive checking
+    const intersects = raycaster.intersectObjects(scene.children, true);
 
     if (intersects.length > 0) {
       let object = intersects[0].object;
 
-      // Traverse up to find the labeled parent
+      // Find the labeled parent
       while (object && !objectsWithLabels.has(object)) {
         object = object.parent;
       }
 
       if (object && objectsWithLabels.has(object)) {
+        const objectData = objectsWithLabels.get(object);
+        console.log("Selected object:", objectData);
         selectedObject = object;
-        focusOnObject(object);
+
+        // Special handling for kill location
+        if (objectData.type === "killmail") {
+          camera.position.set(
+            object.position.x + 50,
+            object.position.y + 50,
+            object.position.z + 50
+          );
+          controls.target.copy(object.position);
+        } else {
+          focusOnObject(object);
+        }
+
+        updateInfoPanel(objectData);
       }
     }
   }
