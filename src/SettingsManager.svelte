@@ -180,8 +180,6 @@
 </script>
 
 <div class="settings-manager">
-  <h2>Settings</h2>
-
   <ProfileListManager
     profiles={localProfiles || []}
     bind:selectedProfile
@@ -226,6 +224,34 @@
       />
       Enable Total Value Filter
     </label>
+
+    <label>
+      <input
+        type="checkbox"
+        bind:checked={localSettings.triangulation_filter_enabled}
+        on:change={() =>
+          updateSetting(
+            "triangulation_filter_enabled",
+            localSettings.triangulation_filter_enabled
+          )}
+      />
+      Enable Triangulation Filter
+    </label>
+
+    {#if localSettings.triangulation_filter_enabled}
+      <label>
+        <input
+          type="checkbox"
+          bind:checked={localSettings.triangulation_filter_exclude}
+          on:change={() =>
+            updateSetting(
+              "triangulation_filter_exclude",
+              localSettings.triangulation_filter_exclude
+            )}
+        />
+        Exclude Triangulatable Kills
+      </label>
+    {/if}
 
     <h3>Item Filter</h3>
     <label>

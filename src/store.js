@@ -21,13 +21,24 @@ export const settings = writable({
   victim_corporation_filter_enabled: false,
   solar_system_filter_enabled: false,
   item_type_filter_enabled: false,
+  triangulation_filter_enabled: false,
+  triangulation_filter_exclude: false,
 });
 
 export const filteredKillmails = derived(
   [killmails, settings, filterLists],
   ([$killmails, $settings, $filterLists]) => {
-    // First apply all the filtering logic
     const filtered = $killmails.filter((killmail) => {
+      // Triangulation Filter check
+      if ($settings.triangulation_filter_enabled) {
+        const isTriangulatable =
+          killmail?.pinpoints?.triangulationPossible || false;
+        if ($settings.triangulation_filter_exclude) {
+          if (isTriangulatable) return false;
+        } else {
+          if (!isTriangulatable) return false;
+        }
+      }
       // Apply filter lists
       for (let list of $filterLists) {
         if (!list.enabled) continue;
@@ -51,6 +62,11 @@ export const filteredKillmails = derived(
               ids.includes(attacker.ship_type_id?.toString())
             );
             break;
+          case "triangulation":
+            match = killmail?.pinpoints?.triangulationPossible || false;
+            if (list.is_exclude && match) return false;
+            if (!list.is_exclude && !match) return false;
+            continue;
           case "victim_alliance":
             match = ids.includes(
               killmail.killmail.victim.alliance_id?.toString()

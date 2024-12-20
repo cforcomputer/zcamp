@@ -22,6 +22,24 @@
       })
     : [];
 
+  function getTriangulationStatus(killmail) {
+    if (!killmail?.pinpoints) return "No triangulation data";
+
+    if (killmail.pinpoints.atCelestial) {
+      return "At celestial";
+    } else if (
+      killmail.pinpoints.triangulationPossible &&
+      killmail.pinpoints.nearestCelestial
+    ) {
+      return `Near celestial: ${killmail.pinpoints.nearestCelestial.name}`;
+    } else if (killmail.pinpoints.hasTetrahedron) {
+      // Changed from hasBox
+      return "Triangulation possible";
+    } else {
+      return "Cannot be triangulated";
+    }
+  }
+
   function viewMap(killmail) {
     selectedKillmailId = killmail.killID;
     selectedKillmail = killmail;
@@ -76,48 +94,45 @@
   }
 </script>
 
-<div class="killmail-viewer">
-  <h2>Killmails from the last 24 hours</h2>
-  <div class="table-container">
-    <table>
-      <thead>
+<table>
+  <thead>
+    <tr>
+      <th>Dropped Value</th>
+      <th>Occurred</th>
+      <th>URL</th>
+      <th>Actions</th>
+    </tr>
+  </thead>
+</table>
+<div class="scroll-box" bind:this={scrollContainer} on:scroll={handleScroll}>
+  <table>
+    <tbody>
+      {#each sortedKillmails as killmail (killmail.killID)}
         <tr>
-          <th>Dropped Value</th>
-          <th>Occurred</th>
-          <th>URL</th>
-          <th>Map</th>
+          <td>{formatDroppedValue(killmail.zkb.droppedValue)}</td>
+          <td>{calculateTimeDifference(killmail.killmail.killmail_time)}</td>
+          <td>
+            <a
+              href={`https://zkillboard.com/kill/${killmail.killID}/`}
+              target="_blank"
+            >
+              View
+            </a>
+          </td>
+          <td class="actions">
+            <button on:click={() => viewMap(killmail)}>Map</button>
+            <span
+              class="triangulate-indicator"
+              class:can-triangulate={killmail?.pinpoints?.triangulationPossible}
+              title={getTriangulationStatus(killmail)}
+            >
+              {killmail?.pinpoints?.triangulationPossible ? "✅" : "❌"}
+            </span>
+          </td>
         </tr>
-      </thead>
-    </table>
-    <div
-      class="scroll-box"
-      bind:this={scrollContainer}
-      on:scroll={handleScroll}
-    >
-      <table>
-        <tbody>
-          {#each sortedKillmails as killmail (killmail.killID)}
-            <tr>
-              <td>{formatDroppedValue(killmail.zkb.droppedValue)}</td>
-              <td>{calculateTimeDifference(killmail.killmail.killmail_time)}</td
-              >
-              <td>
-                <a
-                  href={`https://zkillboard.com/kill/${killmail.killID}/`}
-                  target="_blank"
-                >
-                  View
-                </a>
-              </td>
-              <td>
-                <button on:click={() => viewMap(killmail)}>Map</button>
-              </td>
-            </tr>
-          {/each}
-        </tbody>
-      </table>
-    </div>
-  </div>
+      {/each}
+    </tbody>
+  </table>
 
   {#if showMap && selectedKillmailId}
     <div class="map-overlay">
@@ -135,15 +150,16 @@
 </div>
 
 <style>
-  .killmail-viewer {
-    margin-top: 20px;
+  .actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
   }
 
-  .table-container {
-    position: relative;
-    border: 1px solid #ddd;
-    border-radius: 4px;
-    overflow: hidden;
+  .triangulate-indicator {
+    display: inline-flex;
+    align-items: center;
+    cursor: help;
   }
 
   .scroll-box {

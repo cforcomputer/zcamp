@@ -62,3 +62,5 @@ function playSound() {
     console.error("Error playing audio:", err);
   });
 }
+
+export default socket;

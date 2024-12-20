@@ -63,75 +63,48 @@
     console.log("Kill data in MapVisualization:", kill);
   }
 
-  function createPinpointBox(pinpointData) {
-    if (!pinpointData || !pinpointData.hasBox) {
-      console.log("No valid pinpoint data:", pinpointData);
-      return null;
-    }
+  function createPinpointLines(pinpointData) {
+    if (!pinpointData || !pinpointData.hasTetrahedron) return null;
 
-    console.log("Creating pinpoint box with data:", pinpointData);
+    console.log("Creating pinpoint lines with data:", pinpointData);
 
-    const points = pinpointData.points.map(
-      (point) =>
-        new THREE.Vector3(
-          point.position.x * SCALE_FACTOR,
-          point.position.y * SCALE_FACTOR,
-          point.position.z * SCALE_FACTOR
-        )
-    );
+    const points = pinpointData.points.map((point) => {
+      // Convert string positions to numbers
+      const x = parseFloat(point.position.x) * SCALE_FACTOR;
+      const y = parseFloat(point.position.y) * SCALE_FACTOR;
+      const z = parseFloat(point.position.z) * SCALE_FACTOR;
 
-    console.log("Transformed points:", points);
-
-    const box = new THREE.Group();
-    box.userData.isPinpointBox = true;
-
-    // Create box geometry
-    const minPos = new THREE.Vector3(
-      Math.min(...points.map((p) => p.x)),
-      Math.min(...points.map((p) => p.y)),
-      Math.min(...points.map((p) => p.z))
-    );
-
-    const maxPos = new THREE.Vector3(
-      Math.max(...points.map((p) => p.x)),
-      Math.max(...points.map((p) => p.y)),
-      Math.max(...points.map((p) => p.z))
-    );
-
-    const boxGeometry = new THREE.BoxGeometry(
-      maxPos.x - minPos.x || 1,
-      maxPos.y - minPos.y || 1,
-      maxPos.z - minPos.z || 1
-    );
-
-    const boxMaterial = new THREE.MeshBasicMaterial({
-      color: 0x00ff00,
-      transparent: true,
-      opacity: 0.1,
-      side: THREE.DoubleSide,
+      console.log(`Celestial point ${point.name}:`, { x, y, z });
+      return new THREE.Vector3(x, y, z);
     });
 
-    const boxMesh = new THREE.Mesh(boxGeometry, boxMaterial);
-    boxMesh.position.set(
-      (minPos.x + maxPos.x) / 2,
-      (minPos.y + maxPos.y) / 2,
-      (minPos.z + maxPos.z) / 2
+    const lineGeometry = new THREE.BufferGeometry();
+    const linePositions = [];
+
+    // Connect all points to each other
+    for (let i = 0; i < points.length; i++) {
+      for (let j = i + 1; j < points.length; j++) {
+        linePositions.push(points[i].x, points[i].y, points[i].z);
+        linePositions.push(points[j].x, points[j].y, points[j].z);
+      }
+    }
+
+    lineGeometry.setAttribute(
+      "position",
+      new THREE.Float32BufferAttribute(linePositions, 3)
     );
 
-    // Add edges
-    const edges = new THREE.EdgesGeometry(boxGeometry);
-    const edgeMaterial = new THREE.LineBasicMaterial({
+    const lineMaterial = new THREE.LineBasicMaterial({
       color: 0x00ff00,
       transparent: true,
       opacity: 0.5,
+      linewidth: 2,
     });
-    const edgeMesh = new THREE.LineSegments(edges, edgeMaterial);
-    edgeMesh.position.copy(boxMesh.position);
 
-    box.add(boxMesh);
-    box.add(edgeMesh);
+    const lines = new THREE.LineSegments(lineGeometry, lineMaterial);
+    console.log("Created lines at positions:", linePositions);
 
-    return box;
+    return lines;
   }
 
   function createKillpointSprite(position) {
@@ -496,7 +469,10 @@
       kill.pinpoints?.triangulationPossible
     ) {
       pinpointHtml = `<p>Triangulation possible - Near celestial: ${kill.pinpoints.nearestCelestial.name} (${formatDistance(kill.pinpoints.nearestCelestial.distance)})</p>`;
-    } else if (kill.pinpoints?.hasBox && kill.pinpoints.points.length >= 4) {
+    } else if (
+      kill.pinpoints?.hasTetrahedron &&
+      kill.pinpoints.points.length >= 4
+    ) {
       pinpointHtml = kill.pinpoints.points
         .map(
           (point, i) =>
@@ -947,9 +923,9 @@
 
     // Add pinpoint box if it exists
     // Add pinpoint box if it exists
-    if (kill.pinpoints?.hasBox) {
+    if (kill.pinpoints?.hasTetrahedron) {
       console.log("Adding pinpoint box for:", kill.pinpoints);
-      const pinpointBox = createPinpointBox(kill.pinpoints);
+      const pinpointBox = createPinpointLines(kill.pinpoints);
       if (pinpointBox) {
         scene.add(pinpointBox);
         console.log("Added pinpoint box to scene");
@@ -981,7 +957,7 @@
     );
 
     // Update pinpoint information from server data
-    if (kill.pinpoints?.hasBox) {
+    if (kill.pinpoints?.hasTetrahedron) {
       pinpoints = kill.pinpoints.points.map(
         (point) =>
           `${point.name} (${(point.distance * SCALE_FACTOR).toFixed(2)} km)`
@@ -1129,7 +1105,7 @@
           kill.pinpoints.nearestCelestial.distance / 1000
         ).toFixed(2)} km)
       </p>
-    {:else if kill.pinpoints?.hasBox && kill.pinpoints.points.length >= 4}
+    {:else if kill.pinpoints?.hasTetrahedron && kill.pinpoints.points.length >= 4}
       <p>
         Pinpoint 1: {kill.pinpoints.points[0].name} ({(
           kill.pinpoints.points[0].distance / 1000

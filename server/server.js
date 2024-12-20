@@ -305,16 +305,25 @@ app.get("/api/celestials/:killmailId", async (req, res) => {
 });
 
 function calculatePinpoints(celestials, killPosition) {
+  // Constants
   const KM_PER_AU = 149597870.7;
   const THRESHOLDS = {
-    AT_CELESTIAL: 10000, // 10km in meters
-    NEAR_CELESTIAL: KM_PER_AU * 1000, // 1 AU in meters
-    MAX_BOX_SIZE: KM_PER_AU * 100000, // 100 AU in meters
+    AT_CELESTIAL: 10000,
+    NEAR_CELESTIAL: 10000000,
+    MAX_BOX_SIZE: KM_PER_AU * 100,
   };
 
+  // Initialize all variables at the start with proper scope
+  let bestPoints = [];
+  let minVolume = Infinity;
+  let nearestCelestial = null;
+  let celestialPositions = [];
+  let killPos = { x: 0, y: 0, z: 0 };
+
+  // Early return for invalid input
   if (!killPosition || !Array.isArray(celestials)) {
     return {
-      hasBox: false,
+      hasTetrahedron: false,
       points: [],
       atCelestial: false,
       nearestCelestial: null,
@@ -322,14 +331,15 @@ function calculatePinpoints(celestials, killPosition) {
     };
   }
 
-  const killPos = {
+  // Set kill position
+  killPos = {
     x: killPosition.x,
     y: killPosition.y,
     z: killPosition.z,
   };
 
-  // Filter and get valid celestials with distances
-  const celestialPositions = celestials
+  // Process celestials
+  celestialPositions = celestials
     .filter(
       (cel) =>
         cel.id !== "killmail" &&
@@ -338,11 +348,7 @@ function calculatePinpoints(celestials, killPosition) {
         cel.z !== undefined
     )
     .map((cel) => ({
-      position: {
-        x: cel.x,
-        y: cel.y,
-        z: cel.z,
-      },
+      position: { x: cel.x, y: cel.y, z: cel.z },
       distance: Math.sqrt(
         Math.pow(cel.x - killPos.x, 2) +
           Math.pow(cel.y - killPos.y, 2) +
@@ -352,11 +358,11 @@ function calculatePinpoints(celestials, killPosition) {
     }))
     .sort((a, b) => a.distance - b.distance);
 
-  const nearestCelestial = celestialPositions[0];
+  nearestCelestial = celestialPositions[0] || null;
 
-  if (!nearestCelestial) {
+  if (!killPosition || !Array.isArray(celestials)) {
     return {
-      hasBox: false,
+      hasTetrahedron: false,
       points: [],
       atCelestial: false,
       nearestCelestial: null,
@@ -364,81 +370,51 @@ function calculatePinpoints(celestials, killPosition) {
     };
   }
 
-  // Check if kill is at a celestial (within 10km)
-  if (nearestCelestial.distance <= THRESHOLDS.AT_CELESTIAL) {
-    return {
-      hasBox: false,
-      points: [nearestCelestial],
-      atCelestial: true,
-      nearestCelestial: nearestCelestial,
-      triangulationPossible: true,
-    };
-  }
-
-  // Check if kill is near a celestial (within 1 AU)
-  if (nearestCelestial.distance <= THRESHOLDS.NEAR_CELESTIAL) {
-    return {
-      hasBox: false,
-      points: [],
-      atCelestial: false,
-      nearestCelestial: nearestCelestial,
-      triangulationPossible: true,
-    };
-  }
-
-  let bestPoints = [];
-  let minVolume = Infinity;
-
-  // Check different combinations of celestials for boxing
-  for (let i = 0; i < Math.min(celestialPositions.length - 3, 10); i++) {
-    for (let j = i + 1; j < Math.min(celestialPositions.length - 2, 11); j++) {
+  // Process celestials and find tetrahedron containing kill point
+  if (celestialPositions.length >= 4) {
+    for (let i = 0; i < Math.min(celestialPositions.length - 3, 10); i++) {
       for (
-        let k = j + 1;
-        k < Math.min(celestialPositions.length - 1, 12);
-        k++
+        let j = i + 1;
+        j < Math.min(celestialPositions.length - 2, 11);
+        j++
       ) {
-        for (let l = k + 1; l < Math.min(celestialPositions.length, 13); l++) {
-          const points = [
-            celestialPositions[i],
-            celestialPositions[j],
-            celestialPositions[k],
-            celestialPositions[l],
-          ];
-
-          if (
-            isKillInsideBox(
-              killPos,
-              points.map((p) => p.position)
-            )
+        for (
+          let k = j + 1;
+          k < Math.min(celestialPositions.length - 1, 12);
+          k++
+        ) {
+          for (
+            let l = k + 1;
+            l < Math.min(celestialPositions.length, 13);
+            l++
           ) {
-            const volume = calculateBoxVolume(points.map((p) => p.position));
-            if (volume < minVolume) {
-              minVolume = volume;
-              bestPoints = points;
+            const tetraPoints = [
+              celestialPositions[i].position,
+              celestialPositions[j].position,
+              celestialPositions[k].position,
+              celestialPositions[l].position,
+            ];
+
+            if (isPointInTetrahedron(killPos, tetraPoints)) {
+              const volume = calculateTetrahedronVolume(tetraPoints);
+              if (volume < minVolume) {
+                minVolume = volume;
+                bestPoints = [
+                  celestialPositions[i],
+                  celestialPositions[j],
+                  celestialPositions[k],
+                  celestialPositions[l],
+                ];
+              }
             }
           }
         }
       }
     }
-  }
 
-  // If valid box found, check size constraints
-  if (bestPoints.length === 4) {
-    let maxDistance = 0;
-    for (let i = 0; i < 4; i++) {
-      for (let j = i + 1; j < 4; j++) {
-        const dist = Math.sqrt(
-          Math.pow(bestPoints[i].position.x - bestPoints[j].position.x, 2) +
-            Math.pow(bestPoints[i].position.y - bestPoints[j].position.y, 2) +
-            Math.pow(bestPoints[i].position.z - bestPoints[j].position.z, 2)
-        );
-        maxDistance = Math.max(maxDistance, dist);
-      }
-    }
-
-    if (maxDistance <= THRESHOLDS.MAX_BOX_SIZE) {
+    if (bestPoints.length === 4) {
       return {
-        hasBox: true,
+        hasTetrahedron: true,
         points: bestPoints,
         atCelestial: false,
         nearestCelestial: null,
@@ -447,96 +423,126 @@ function calculatePinpoints(celestials, killPosition) {
     }
   }
 
-  // No valid triangulation found
+  if (
+    nearestCelestial &&
+    nearestCelestial.distance <= THRESHOLDS.AT_CELESTIAL
+  ) {
+    return {
+      hasTetrahedron: false,
+      points: [nearestCelestial],
+      atCelestial: true,
+      nearestCelestial,
+      triangulationPossible: true,
+    };
+  }
+
+  if (
+    nearestCelestial &&
+    nearestCelestial.distance <= THRESHOLDS.NEAR_CELESTIAL
+  ) {
+    return {
+      hasTetrahedron: false,
+      points: [],
+      atCelestial: false,
+      nearestCelestial,
+      triangulationPossible: true,
+    };
+  }
+
   return {
-    hasBox: false,
+    hasTetrahedron: false,
     points: [],
     atCelestial: false,
-    nearestCelestial: nearestCelestial,
+    nearestCelestial: nearestCelestial || null,
     triangulationPossible: false,
   };
 }
 
-function isKillInsideBox(killPos, points) {
-  // Find min and max coordinates
-  const min = {
-    x: Math.min(...points.map((p) => p.x)),
-    y: Math.min(...points.map((p) => p.y)),
-    z: Math.min(...points.map((p) => p.z)),
+function calculateTetrahedronVolume(points) {
+  const [a, b, c, d] = points;
+
+  // Calculate vectors from point a to others
+  const ab = subtractVectors(b, a);
+  const ac = subtractVectors(c, a);
+  const ad = subtractVectors(d, a);
+
+  // Calculate volume using triple product formula
+  // V = (1/6)|((b-a)×(c-a))·(d-a)|
+  const crossProduct = {
+    x: ab.y * ac.z - ab.z * ac.y,
+    y: ab.z * ac.x - ab.x * ac.z,
+    z: ab.x * ac.y - ab.y * ac.x,
   };
 
-  const max = {
-    x: Math.max(...points.map((p) => p.x)),
-    y: Math.max(...points.map((p) => p.y)),
-    z: Math.max(...points.map((p) => p.z)),
+  const volume =
+    Math.abs(
+      crossProduct.x * ad.x + crossProduct.y * ad.y + crossProduct.z * ad.z
+    ) / 6;
+
+  return volume;
+}
+
+function isPointInTetrahedron(point, tetraPoints) {
+  const [a, b, c, d] = tetraPoints;
+
+  // Convert string coordinates to numbers if needed
+  const p = {
+    x: parseFloat(point.x),
+    y: parseFloat(point.y),
+    z: parseFloat(point.z),
   };
 
-  // Check if kill position is inside the box
+  // Calculate barycentric coordinates
+  const vap = subtractVectors(p, a);
+  const vbp = subtractVectors(p, b);
+  const vcp = subtractVectors(p, c);
+  const vdp = subtractVectors(p, d);
+
+  const vab = subtractVectors(b, a);
+  const vac = subtractVectors(c, a);
+  const vad = subtractVectors(d, a);
+
+  const va6 = calculateTetrahedronVolume([a, b, c, d]); // Total volume * 6
+  const v1 = dotProduct(crossProduct(vab, vac), vad); // Reference volume * 6
+
+  // Calculate barycentric coordinates
+  const v2 = dotProduct(crossProduct(vap, vcp), vdp) / v1;
+  const v3 = dotProduct(crossProduct(vab, vap), vdp) / v1;
+  const v4 = dotProduct(crossProduct(vap, vac), vbp) / v1;
+  const v5 = 1 - v2 - v3 - v4;
+
+  // Point is inside if all coordinates are between 0 and 1
+  const epsilon = 0.0001; // Account for floating point precision
   return (
-    killPos.x >= min.x &&
-    killPos.x <= max.x &&
-    killPos.y >= min.y &&
-    killPos.y <= max.y &&
-    killPos.z >= min.z &&
-    killPos.z <= max.z
+    v2 >= -epsilon &&
+    v2 <= 1 + epsilon &&
+    v3 >= -epsilon &&
+    v3 <= 1 + epsilon &&
+    v4 >= -epsilon &&
+    v4 <= 1 + epsilon &&
+    v5 >= -epsilon &&
+    v5 <= 1 + epsilon
   );
 }
 
-function calculateBoxVolume(points) {
-  const min = {
-    x: Math.min(...points.map((p) => p.x)),
-    y: Math.min(...points.map((p) => p.y)),
-    z: Math.min(...points.map((p) => p.z)),
+function subtractVectors(a, b) {
+  return {
+    x: a.x - b.x,
+    y: a.y - b.y,
+    z: a.z - b.z,
   };
-
-  const max = {
-    x: Math.max(...points.map((p) => p.x)),
-    y: Math.max(...points.map((p) => p.y)),
-    z: Math.max(...points.map((p) => p.z)),
-  };
-
-  return (max.x - min.x) * (max.y - min.y) * (max.z - min.z);
 }
 
-function isKillInsideBox(killPos, points) {
-  // Find min and max coordinates
-  const min = {
-    x: Math.min(...points.map((p) => p.x)),
-    y: Math.min(...points.map((p) => p.y)),
-    z: Math.min(...points.map((p) => p.z)),
-  };
-
-  const max = {
-    x: Math.max(...points.map((p) => p.x)),
-    y: Math.max(...points.map((p) => p.y)),
-    z: Math.max(...points.map((p) => p.z)),
-  };
-
-  // Check if kill position is inside the box
-  return (
-    killPos.x >= min.x &&
-    killPos.x <= max.x &&
-    killPos.y >= min.y &&
-    killPos.y <= max.y &&
-    killPos.z >= min.z &&
-    killPos.z <= max.z
-  );
+function dotProduct(a, b) {
+  return a.x * b.x + a.y * b.y + a.z * b.z;
 }
 
-function calculateBoxVolume(points) {
-  const min = {
-    x: Math.min(...points.map((p) => p.x)),
-    y: Math.min(...points.map((p) => p.y)),
-    z: Math.min(...points.map((p) => p.z)),
+function crossProduct(a, b) {
+  return {
+    x: a.y * b.z - a.z * b.y,
+    y: a.z * b.x - a.x * b.z,
+    z: a.x * b.y - a.y * b.x,
   };
-
-  const max = {
-    x: Math.max(...points.map((p) => p.x)),
-    y: Math.max(...points.map((p) => p.y)),
-    z: Math.max(...points.map((p) => p.z)),
-  };
-
-  return (max.x - min.x) * (max.y - min.y) * (max.z - min.z);
 }
 
 // Get all filter lists for a user
