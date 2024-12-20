@@ -69932,7 +69932,7 @@ void main() {
 	const { Error: Error_1, Object: Object_1, console: console_1$1 } = globals;
 	const file$3 = "src\\MapVisualization.svelte";
 
-	// (959:20) 
+	// (970:20) 
 	function create_if_block_1$1(ctx) {
 		let div;
 		let t;
@@ -69941,8 +69941,8 @@ void main() {
 			c: function create() {
 				div = element("div");
 				t = text(/*error*/ ctx[1]);
-				attr_dev(div, "class", "status-message error svelte-dddr89");
-				add_location(div, file$3, 959, 6, 29702);
+				attr_dev(div, "class", "status-message error svelte-1fcbdfq");
+				add_location(div, file$3, 970, 6, 28948);
 			},
 			m: function mount(target, anchor) {
 				insert_dev(target, div, anchor);
@@ -69962,14 +69962,14 @@ void main() {
 			block,
 			id: create_if_block_1$1.name,
 			type: "if",
-			source: "(959:20) ",
+			source: "(970:20) ",
 			ctx
 		});
 
 		return block;
 	}
 
-	// (957:4) {#if loading}
+	// (968:4) {#if loading}
 	function create_if_block$3(ctx) {
 		let div;
 
@@ -69977,8 +69977,8 @@ void main() {
 			c: function create() {
 				div = element("div");
 				div.textContent = "Loading map...";
-				attr_dev(div, "class", "status-message svelte-dddr89");
-				add_location(div, file$3, 957, 6, 29624);
+				attr_dev(div, "class", "status-message svelte-1fcbdfq");
+				add_location(div, file$3, 968, 6, 28870);
 			},
 			m: function mount(target, anchor) {
 				insert_dev(target, div, anchor);
@@ -69995,7 +69995,7 @@ void main() {
 			block,
 			id: create_if_block$3.name,
 			type: "if",
-			source: "(957:4) {#if loading}",
+			source: "(968:4) {#if loading}",
 			ctx
 		});
 
@@ -70003,37 +70003,42 @@ void main() {
 	}
 
 	function create_fragment$3(ctx) {
-		let div2;
+		let div3;
 		let div0;
-		let t0;
-		let div1;
-		let p0;
+		let button;
 		let t1;
+		let div1;
 		let t2;
+		let div2;
+		let p0;
 		let t3;
-		let p1;
 		let t4;
 		let t5;
+		let p1;
 		let t6;
-		let p2;
 		let t7;
-		let t8_value = /*pinpoints*/ ctx[5][0] + "";
 		let t8;
+		let p2;
 		let t9;
-		let p3;
+		let t10_value = /*pinpoints*/ ctx[5][0] + "";
 		let t10;
-		let t11_value = /*pinpoints*/ ctx[5][1] + "";
 		let t11;
+		let p3;
 		let t12;
-		let p4;
+		let t13_value = /*pinpoints*/ ctx[5][1] + "";
 		let t13;
-		let t14_value = /*pinpoints*/ ctx[5][2] + "";
 		let t14;
+		let p4;
 		let t15;
-		let p5;
+		let t16_value = /*pinpoints*/ ctx[5][2] + "";
 		let t16;
-		let t17_value = /*pinpoints*/ ctx[5][3] + "";
 		let t17;
+		let p5;
+		let t18;
+		let t19_value = /*pinpoints*/ ctx[5][3] + "";
+		let t19;
+		let mounted;
+		let dispose;
 
 		function select_block_type(ctx, dirty) {
 			if (/*loading*/ ctx[2]) return create_if_block$3;
@@ -70045,86 +70050,102 @@ void main() {
 
 		const block = {
 			c: function create() {
-				div2 = element("div");
+				div3 = element("div");
 				div0 = element("div");
-				if (if_block) if_block.c();
-				t0 = space();
+				button = element("button");
+				button.textContent = "Focus Sun";
+				t1 = space();
 				div1 = element("div");
+				if (if_block) if_block.c();
+				t2 = space();
+				div2 = element("div");
 				p0 = element("p");
-				t1 = text("System name: ");
-				t2 = text(/*systemName*/ ctx[3]);
-				t3 = space();
+				t3 = text("System name: ");
+				t4 = text(/*systemName*/ ctx[3]);
+				t5 = space();
 				p1 = element("p");
-				t4 = text("Closest Celestial: ");
-				t5 = text(/*closestCelestial*/ ctx[4]);
-				t6 = space();
+				t6 = text("Closest Celestial: ");
+				t7 = text(/*closestCelestial*/ ctx[4]);
+				t8 = space();
 				p2 = element("p");
-				t7 = text("Pinpoint 1: ");
-				t8 = text(t8_value);
-				t9 = space();
+				t9 = text("Pinpoint 1: ");
+				t10 = text(t10_value);
+				t11 = space();
 				p3 = element("p");
-				t10 = text("Pinpoint 2: ");
-				t11 = text(t11_value);
-				t12 = space();
+				t12 = text("Pinpoint 2: ");
+				t13 = text(t13_value);
+				t14 = space();
 				p4 = element("p");
-				t13 = text("Pinpoint 3: ");
-				t14 = text(t14_value);
-				t15 = space();
+				t15 = text("Pinpoint 3: ");
+				t16 = text(t16_value);
+				t17 = space();
 				p5 = element("p");
-				t16 = text("Pinpoint 4: ");
-				t17 = text(t17_value);
-				attr_dev(div0, "class", "map-container svelte-dddr89");
-				add_location(div0, file$3, 955, 2, 29548);
-				attr_dev(p0, "class", "svelte-dddr89");
-				add_location(p0, file$3, 964, 4, 29806);
-				attr_dev(p1, "class", "svelte-dddr89");
-				add_location(p1, file$3, 965, 4, 29844);
-				attr_dev(p2, "class", "svelte-dddr89");
-				add_location(p2, file$3, 966, 4, 29894);
-				attr_dev(p3, "class", "svelte-dddr89");
-				add_location(p3, file$3, 967, 4, 29933);
-				attr_dev(p4, "class", "svelte-dddr89");
-				add_location(p4, file$3, 968, 4, 29972);
-				attr_dev(p5, "class", "svelte-dddr89");
-				add_location(p5, file$3, 969, 4, 30011);
-				attr_dev(div1, "class", "info-panel svelte-dddr89");
-				add_location(div1, file$3, 963, 2, 29776);
-				attr_dev(div2, "class", "visualization-container svelte-dddr89");
-				add_location(div2, file$3, 954, 0, 29507);
+				t18 = text("Pinpoint 4: ");
+				t19 = text(t19_value);
+				attr_dev(button, "class", "focus-sun svelte-1fcbdfq");
+				add_location(button, file$3, 963, 4, 28712);
+				attr_dev(div0, "class", "controls svelte-1fcbdfq");
+				add_location(div0, file$3, 962, 2, 28684);
+				attr_dev(div1, "class", "map-container svelte-1fcbdfq");
+				add_location(div1, file$3, 966, 2, 28794);
+				attr_dev(p0, "class", "svelte-1fcbdfq");
+				add_location(p0, file$3, 975, 4, 29052);
+				attr_dev(p1, "class", "svelte-1fcbdfq");
+				add_location(p1, file$3, 976, 4, 29090);
+				attr_dev(p2, "class", "svelte-1fcbdfq");
+				add_location(p2, file$3, 977, 4, 29140);
+				attr_dev(p3, "class", "svelte-1fcbdfq");
+				add_location(p3, file$3, 978, 4, 29179);
+				attr_dev(p4, "class", "svelte-1fcbdfq");
+				add_location(p4, file$3, 979, 4, 29218);
+				attr_dev(p5, "class", "svelte-1fcbdfq");
+				add_location(p5, file$3, 980, 4, 29257);
+				attr_dev(div2, "class", "info-panel svelte-1fcbdfq");
+				add_location(div2, file$3, 974, 2, 29022);
+				attr_dev(div3, "class", "visualization-container svelte-1fcbdfq");
+				add_location(div3, file$3, 961, 0, 28643);
 			},
 			l: function claim(nodes) {
 				throw new Error_1("options.hydrate only works if the component was compiled with the `hydratable: true` option");
 			},
 			m: function mount(target, anchor) {
-				insert_dev(target, div2, anchor);
-				append_dev(div2, div0);
-				if (if_block) if_block.m(div0, null);
-				/*div0_binding*/ ctx[8](div0);
-				append_dev(div2, t0);
-				append_dev(div2, div1);
-				append_dev(div1, p0);
-				append_dev(p0, t1);
-				append_dev(p0, t2);
-				append_dev(div1, t3);
-				append_dev(div1, p1);
-				append_dev(p1, t4);
-				append_dev(p1, t5);
-				append_dev(div1, t6);
-				append_dev(div1, p2);
-				append_dev(p2, t7);
-				append_dev(p2, t8);
-				append_dev(div1, t9);
-				append_dev(div1, p3);
-				append_dev(p3, t10);
-				append_dev(p3, t11);
-				append_dev(div1, t12);
-				append_dev(div1, p4);
-				append_dev(p4, t13);
-				append_dev(p4, t14);
-				append_dev(div1, t15);
-				append_dev(div1, p5);
-				append_dev(p5, t16);
-				append_dev(p5, t17);
+				insert_dev(target, div3, anchor);
+				append_dev(div3, div0);
+				append_dev(div0, button);
+				append_dev(div3, t1);
+				append_dev(div3, div1);
+				if (if_block) if_block.m(div1, null);
+				/*div1_binding*/ ctx[9](div1);
+				append_dev(div3, t2);
+				append_dev(div3, div2);
+				append_dev(div2, p0);
+				append_dev(p0, t3);
+				append_dev(p0, t4);
+				append_dev(div2, t5);
+				append_dev(div2, p1);
+				append_dev(p1, t6);
+				append_dev(p1, t7);
+				append_dev(div2, t8);
+				append_dev(div2, p2);
+				append_dev(p2, t9);
+				append_dev(p2, t10);
+				append_dev(div2, t11);
+				append_dev(div2, p3);
+				append_dev(p3, t12);
+				append_dev(p3, t13);
+				append_dev(div2, t14);
+				append_dev(div2, p4);
+				append_dev(p4, t15);
+				append_dev(p4, t16);
+				append_dev(div2, t17);
+				append_dev(div2, p5);
+				append_dev(p5, t18);
+				append_dev(p5, t19);
+
+				if (!mounted) {
+					dispose = listen_dev(button, "click", /*focusOnSun*/ ctx[6], false, false, false, false);
+					mounted = true;
+				}
 			},
 			p: function update(ctx, dirty) {
 				if (current_block_type === (current_block_type = select_block_type(ctx)) && if_block) {
@@ -70135,29 +70156,31 @@ void main() {
 
 					if (if_block) {
 						if_block.c();
-						if_block.m(div0, null);
+						if_block.m(div1, null);
 					}
 				}
 
-				if (dirty[0] & /*systemName*/ 8) set_data_dev(t2, /*systemName*/ ctx[3]);
-				if (dirty[0] & /*closestCelestial*/ 16) set_data_dev(t5, /*closestCelestial*/ ctx[4]);
-				if (dirty[0] & /*pinpoints*/ 32 && t8_value !== (t8_value = /*pinpoints*/ ctx[5][0] + "")) set_data_dev(t8, t8_value);
-				if (dirty[0] & /*pinpoints*/ 32 && t11_value !== (t11_value = /*pinpoints*/ ctx[5][1] + "")) set_data_dev(t11, t11_value);
-				if (dirty[0] & /*pinpoints*/ 32 && t14_value !== (t14_value = /*pinpoints*/ ctx[5][2] + "")) set_data_dev(t14, t14_value);
-				if (dirty[0] & /*pinpoints*/ 32 && t17_value !== (t17_value = /*pinpoints*/ ctx[5][3] + "")) set_data_dev(t17, t17_value);
+				if (dirty[0] & /*systemName*/ 8) set_data_dev(t4, /*systemName*/ ctx[3]);
+				if (dirty[0] & /*closestCelestial*/ 16) set_data_dev(t7, /*closestCelestial*/ ctx[4]);
+				if (dirty[0] & /*pinpoints*/ 32 && t10_value !== (t10_value = /*pinpoints*/ ctx[5][0] + "")) set_data_dev(t10, t10_value);
+				if (dirty[0] & /*pinpoints*/ 32 && t13_value !== (t13_value = /*pinpoints*/ ctx[5][1] + "")) set_data_dev(t13, t13_value);
+				if (dirty[0] & /*pinpoints*/ 32 && t16_value !== (t16_value = /*pinpoints*/ ctx[5][2] + "")) set_data_dev(t16, t16_value);
+				if (dirty[0] & /*pinpoints*/ 32 && t19_value !== (t19_value = /*pinpoints*/ ctx[5][3] + "")) set_data_dev(t19, t19_value);
 			},
 			i: noop,
 			o: noop,
 			d: function destroy(detaching) {
 				if (detaching) {
-					detach_dev(div2);
+					detach_dev(div3);
 				}
 
 				if (if_block) {
 					if_block.d();
 				}
 
-				/*div0_binding*/ ctx[8](null);
+				/*div1_binding*/ ctx[9](null);
+				mounted = false;
+				dispose();
 			}
 		};
 
@@ -70173,6 +70196,16 @@ void main() {
 	}
 
 	const SCALE_FACTOR = 1e-9;
+
+	function findParentPlanet(moonData, celestialData) {
+		// Get roman numeral from moon name (e.g., "Moon I" -> "I")
+		const moonRoman = moonData.itemname.match(/ ([IVX]+)( -|$)/)?.[1];
+
+		if (!moonRoman) return null;
+
+		// Find planet with matching roman numeral
+		return celestialData.find(cel => cel.typename?.includes("Planet") && cel.itemname.match(/ ([IVX]+)( -|$)/)?.[1] === moonRoman);
+	}
 
 	async function fetchCelestials(killmailId, retryCount = 3) {
 		for (let i = 0; i < retryCount; i++) {
@@ -70273,7 +70306,176 @@ void main() {
 		let hoveredObject = null;
 		let selectedObject = null;
 		let tooltipDiv;
+		let spriteMap;
+		let cameraTarget;
+		let lastCameraPosition = new Vector3();
+		let allCelestialData = null;
 		const objectsWithLabels = new Map();
+
+		const SIZES = {
+			KILL: { radius: 20 },
+			SUN: { radius: 40 },
+			PLANET: { radius: 0.03 },
+			MOON: { radius: 0.005 },
+			ASTEROID: {
+				radius: 0.05,
+				particleCount: 5,
+				spread: 0.001
+			},
+			STARGATE: { radius: 6, length: 3, sphereRadius: 5 },
+			STATION: { size: 10 }
+		};
+
+		function createLocationSprite(position, type, name) {
+			const canvas = document.createElement("canvas");
+			canvas.width = 32;
+			canvas.height = 32;
+			const context = canvas.getContext("2d");
+			context.beginPath();
+			context.arc(16, 16, 12, 0, 2 * Math.PI);
+			let color;
+
+			switch (type) {
+				case "sun":
+					color = "#ffff00";
+					break;
+				case "planet":
+					color = "#00ff00";
+					break;
+				case "moon":
+					color = "#808080";
+					break;
+				case "stargate":
+					color = "#00ffff";
+					break;
+				case "station":
+					color = "#ff00ff";
+					break;
+				case "asteroid":
+					color = "#a0a0a0";
+					break;
+				default:
+					color = "#ffffff";
+			}
+
+			context.fillStyle = color;
+			context.fill();
+			context.strokeStyle = "#ffffff";
+			context.lineWidth = 1;
+			context.stroke();
+			const texture = new CanvasTexture(canvas);
+			const spriteMaterial = new SpriteMaterial({ map: texture, sizeAttenuation: true });
+			const sprite = new Sprite(spriteMaterial);
+			sprite.position.copy(position);
+
+			// Set the object type in objectsWithLabels BEFORE scaling
+			objectsWithLabels.set(sprite, {
+				name,
+				type,
+				position: sprite.position.clone()
+			});
+
+			// Now scale after setting the type
+			updateSpriteScale(sprite);
+
+			const label = document.createElement("div");
+			label.className = "celestial-label";
+			label.style.display = "none";
+			label.textContent = name;
+			container.appendChild(label);
+
+			const updateLabel = () => {
+				if (sprite.visible) {
+					const vector = sprite.position.clone();
+					vector.project(camera);
+					const x = (vector.x * 0.5 + 0.5) * container.clientWidth;
+					const y = (-vector.y * 0.5 + 0.5) * container.clientHeight;
+					label.style.transform = `translate(${x}px, ${y}px)`;
+					const isFacing = vector.z < 1;
+					label.style.display = isFacing ? "block" : "none";
+				}
+			};
+
+			sprite.userData.updateLabel = updateLabel;
+			sprite.userData.label = label;
+			return sprite;
+		}
+
+		function createMoonOrbit(moonPosition, planetPosition, group) {
+			// Calculate orbit parameters
+			const relativePos = moonPosition.clone().sub(planetPosition);
+
+			const orbitRadius = relativePos.length();
+			const segments = 128;
+			const orbitPoints = [];
+
+			// Create orbit points around planet
+			for (let i = 0; i <= segments; i++) {
+				const theta = i / segments * Math.PI * 2;
+				orbitPoints.push(new Vector3(Math.cos(theta) * orbitRadius, 0, Math.sin(theta) * orbitRadius));
+			}
+
+			const orbitGeometry = new BufferGeometry().setFromPoints(orbitPoints);
+
+			const orbitMaterial = new LineBasicMaterial({
+					color: 0x444444,
+					transparent: true,
+					opacity: 0.5,
+					linewidth: 1
+				});
+
+			const orbit = new Line(orbitGeometry, orbitMaterial);
+
+			// Align orbit with planet-moon axis
+			const normal = relativePos.clone().normalize();
+
+			const rotationMatrix = new Matrix4();
+			rotationMatrix.lookAt(new Vector3(), normal, new Vector3(0, 1, 0));
+			orbit.setRotationFromMatrix(rotationMatrix);
+
+			// Move orbit to be centered on planet
+			orbit.position.copy(planetPosition);
+
+			group.add(orbit);
+		}
+
+		function updateSpriteScale(sprite) {
+			const distanceToCamera = sprite.position.distanceTo(camera.position);
+			const baseScale = 0.1; // Increased from 0.01
+			const objectData = objectsWithLabels.get(sprite);
+			let scaleMultiplier = 1;
+
+			switch (objectData?.type) {
+				case "sun":
+					scaleMultiplier = 10;
+					break;
+				case "planet":
+					scaleMultiplier = 10;
+					break;
+				case "moon":
+					scaleMultiplier = 5;
+					break;
+				case "stargate":
+					scaleMultiplier = 10;
+					break;
+				case "station":
+					scaleMultiplier = 10;
+					break;
+				case "asteroid":
+					scaleMultiplier = 10;
+					break;
+				default:
+					scaleMultiplier = 5;
+			} // Increased from 2
+			// Increased from 1
+			// Increased from 0.75
+			// Increased from 1
+			// Increased from 1
+			// Increased from 0.5
+
+			const scale = baseScale * scaleMultiplier * distanceToCamera * 0.01;
+			sprite.scale.set(scale, scale, 1);
+		}
 
 		function initRaycaster() {
 			raycaster = new Raycaster();
@@ -70315,87 +70517,40 @@ void main() {
 			}
 		}
 
-		function updateObjectScales() {
-			if (!camera || !scene) return;
-
-			scene.traverse(object => {
-				if (!objectsWithLabels.has(object)) return;
-				const data = objectsWithLabels.get(object);
-				const distance = camera.position.distanceTo(object.position);
-				const scale = getScaleFactor(distance, data.type, data);
-				object.scale.setScalar(scale);
-			});
-		}
-
 		function animate() {
 			requestAnimationFrame(animate);
-			controls.update();
-			updateDirectionalGUI();
-			renderer.render(scene, camera);
-		}
 
-		function getScaleFactor(distance, objectType, objectData) {
-			// Base scale factors for different object types
-			const scales = {
-				sun: { base: 5.0, min: 0.5, max: 8.0 },
-				planet: { base: 2.0, min: 0.3, max: 4.0 },
-				moon: { base: 0.8, min: 0.2, max: 2.0 },
-				station: { base: 1.0, min: 0.2, max: 3.0 },
-				stargate: { base: 1.0, min: 0.2, max: 3.0 },
-				asteroid: { base: 0.5, min: 0.1, max: 1.5 },
-				killmail: { base: 0.8, min: 0.2, max: 20.0 }
-			};
+			if (!lastCameraPosition.equals(camera.position)) {
+				cameraTarget.position.copy(camera.position);
+				lastCameraPosition.copy(camera.position);
 
-			// Distance thresholds for scaling
-			const NEAR = 50 * SCALE_FACTOR;
-
-			const FAR = 500000 * SCALE_FACTOR;
-
-			// Get scale configuration for object type
-			const scaleConfig = scales[objectType] || scales.planet;
-
-			// Calculate base scale based on distance with smooth interpolation
-			const distanceFactor = MathUtils.smoothstep(distance, NEAR, FAR);
-
-			let scale = MathUtils.lerp(scaleConfig.max, scaleConfig.min, distanceFactor);
-
-			// Apply contextual scaling based on selected object
-			if (selectedObject) {
-				const selectedData = objectsWithLabels.get(selectedObject);
-				const selectedGroup = getRomanNumeralGroup(selectedData.name);
-				const thisGroup = getRomanNumeralGroup(objectData?.name);
-
-				if (selectedGroup && thisGroup) {
-					if (selectedGroup === thisGroup) {
-						// Objects in same planetary system - enhance visibility when close
-						const systemScaleFactor = MathUtils.smoothstep(distance, NEAR * 0.1, NEAR);
-
-						scale *= MathUtils.lerp(1.5, 0.8, systemScaleFactor);
-					} else {
-						// Objects in different systems - reduce visibility
-						const outsideScaleFactor = MathUtils.smoothstep(distance, NEAR * 0.5, FAR);
-
-						scale *= MathUtils.lerp(0.3, 0.5, outsideScaleFactor);
+				scene.traverse(object => {
+					if (object.isSprite) {
+						updateSpriteScale(object);
 					}
-				}
+				});
 			}
 
-			// Adjust scale based on object type context
-			if (objectType === "sun") {
-				// Reduce sun scale when viewing planetary systems
-				const planetaryViewFactor = selectedObject && objectsWithLabels.get(selectedObject).type === "planet"
-				? 0.3
-				: 1.0;
-
-				scale *= planetaryViewFactor;
-			}
-
-			return scale;
+			controls.update();
+			renderer.render(scene, camera);
 		}
 
 		function focusOnObject(object) {
 			if (!camera || !controls || !object) return;
 			const targetPosition = object.position.clone();
+			const objectData = objectsWithLabels.get(object);
+
+			// Get the size based on object type
+			let baseSize;
+
+			if (objectData.type === "sun") baseSize = SIZES.SUN.radius; else if (objectData.type === "planet") baseSize = SIZES.PLANET.radius; else if (objectData.type === "moon") baseSize = SIZES.MOON.radius; else if (objectData.type === "station") baseSize = SIZES.STATION.size; else if (objectData.type === "stargate") baseSize = SIZES.STARGATE.radius; else if (objectData.type === "killmail") baseSize = SIZES.KILL.radius; else baseSize = SIZES.PLANET.radius; // Default case
+
+			// Calculate view distance based on object size
+			const viewFactor = 20;
+
+			const viewDistance = baseSize * viewFactor;
+			const offset = new Vector3(viewDistance, viewDistance, viewDistance);
+			const targetCameraPosition = targetPosition.clone().add(offset);
 			const startPosition = camera.position.clone();
 			const duration = 1000; // 1 second
 			const startTime = Date.now();
@@ -70409,7 +70564,7 @@ void main() {
 				? 2 * progress * progress
 				: -1 + (4 - 2 * progress) * progress;
 
-				camera.position.lerpVectors(startPosition, targetPosition.clone().add(new Vector3(50, 50, 50)), easeProgress);
+				camera.position.lerpVectors(startPosition, targetCameraPosition, easeProgress);
 				controls.target.lerp(targetPosition, easeProgress);
 
 				if (progress < 1) {
@@ -70462,6 +70617,15 @@ void main() {
 			}
 		}
 
+		function focusOnSun() {
+			const sunObject = Array.from(objectsWithLabels.entries()).find(([_, data]) => data.type === "sun");
+
+			if (sunObject) {
+				selectedObject = null;
+				focusOnObject(sunObject[0]);
+			}
+		}
+
 		let directionIndicator;
 
 		function initDirectionalGUI() {
@@ -70505,50 +70669,6 @@ void main() {
 			});
 		}
 
-		async function createCompass(size) {
-			const compassGroup = new Group();
-			const lineLength = size;
-			const lineWidth = 1;
-
-			// Create the main axis line
-			const axisGeometry = new BoxGeometry(lineLength, lineWidth, lineWidth);
-
-			const axisMaterial = new MeshBasicMaterial({ color: 0x00ff00 });
-			const axisLine = new Mesh(axisGeometry, axisMaterial);
-			compassGroup.add(axisLine);
-
-			// Create directional markers along the line
-			const markerPositions = [
-				{ position: lineLength / 2, text: "N" },
-				{ position: -lineLength / 2, text: "S" },
-				{
-					position: 0,
-					text: "E",
-					offset: lineLength / 4
-				},
-				{
-					position: 0,
-					text: "W",
-					offset: -lineLength / 4
-				}
-			];
-
-			markerPositions.forEach(marker => {
-				const sprite = createTextSprite(marker.text);
-
-				if (marker.text === "N" || marker.text === "S") {
-					sprite.position.set(marker.position, lineWidth * 5, 0);
-				} else {
-					sprite.position.set(0, lineWidth * 5, marker.offset);
-				}
-
-				sprite.scale.set(50, 50, 1);
-				compassGroup.add(sprite);
-			});
-
-			return compassGroup;
-		}
-
 		function findClosestCelestial(celestials, killPosition) {
 			if (!killPosition?.x || !killPosition?.y || !killPosition?.z) {
 				console.error("Invalid kill position:", killPosition);
@@ -70575,63 +70695,15 @@ void main() {
 			: "Unknown";
 		}
 
-		function createCelestialObject(celestialData) {
+		function createCelestialObject(celestialData, allData) {
 			if (!celestialData) {
 				console.error("celestialData is undefined or null.");
 				return null;
 			}
 
-			// Base sizes with dynamic scale ranges
-			const SIZES = {
-				KILL: {
-					radius: 0.8,
-					near: { min: 0.5, max: 2 },
-					far: { min: 2, max: 5 }
-				},
-				SUN: {
-					radius: 5,
-					near: { min: 0.5, max: 3 },
-					far: { min: 3, max: 10 }
-				},
-				PLANET: {
-					radius: 2,
-					near: { min: 0.3, max: 2 },
-					far: { min: 2, max: 8 }
-				},
-				MOON: {
-					radius: 0.3,
-					near: { min: 0.2, max: 1 },
-					far: { min: 1, max: 4 }
-				},
-				ASTEROID: {
-					radius: 0.2,
-					particleCount: 3,
-					spread: 1,
-					near: { min: 0.1, max: 0.5 },
-					far: { min: 0.5, max: 3 }
-				},
-				STARGATE: {
-					length: 3,
-					radius: 0.5,
-					sphereRadius: 0.4,
-					near: { min: 0.2, max: 1 },
-					far: { min: 1, max: 4 }
-				},
-				STATION: {
-					size: 2,
-					near: { min: 0.3, max: 1.5 },
-					far: { min: 1.5, max: 5 }
-				}
-			};
-
 			const group = new Group();
 			const typeName = celestialData.typename || "";
-
-			// Calculate initial scale based on camera distance
 			const position = new Vector3(celestialData.x * SCALE_FACTOR, celestialData.y * SCALE_FACTOR, celestialData.z * SCALE_FACTOR);
-
-			const distance = camera.position.distanceTo(position);
-			const initialScale = getScaleFactor(distance, typeName.toLowerCase());
 
 			if (celestialData.id === "killmail") {
 				const geometry = new SphereGeometry(SIZES.KILL.radius);
@@ -70645,14 +70717,12 @@ void main() {
 
 				const sphere = new Mesh(geometry, material);
 				sphere.position.copy(position);
-				sphere.scale.setScalar(initialScale);
 				group.add(sphere);
 
 				objectsWithLabels.set(sphere, {
 					name: "Kill Location",
 					type: "killmail",
-					position: sphere.position.clone(),
-					sizeConfig: SIZES.KILL
+					position: sphere.position.clone()
 				});
 			} else if (typeName.includes("Sun")) {
 				const geometry = new SphereGeometry(SIZES.SUN.radius);
@@ -70665,86 +70735,26 @@ void main() {
 					});
 
 				const sphere = new Mesh(geometry, material);
-				sphere.position.set(celestialData.x * SCALE_FACTOR, celestialData.y * SCALE_FACTOR, celestialData.z * SCALE_FACTOR);
+				sphere.position.copy(position);
 				group.add(sphere);
+				const sprite = createLocationSprite(position, "sun", celestialData.itemname);
+				group.add(sprite);
 
-				// Add sun glow
-				const glowMaterial = new ShaderMaterial({
-						uniforms: {
-							c: { type: "f", value: 0.1 },
-							p: { type: "f", value: 1.4 },
-							glowColor: {
-								type: "c",
-								value: new Color(0xffff00)
-							}
-						},
-						vertexShader: `
-                varying vec3 vNormal;
-                void main() {
-                    vNormal = normalize(normalMatrix * normal);
-                    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-                }
-            `,
-						fragmentShader: `
-                uniform vec3 glowColor;
-                uniform float c;
-                uniform float p;
-                varying vec3 vNormal;
-                void main() {
-                    float intensity = pow(c - dot(vNormal, vec3(0.0, 0.0, 1.0)), p);
-                    gl_FragColor = vec4(glowColor, intensity);
-                }
-            `,
-						side: BackSide,
-						blending: AdditiveBlending,
-						transparent: true
-					});
-
-				const glowMesh = new Mesh(new SphereGeometry(SIZES.SUN.radius * 1.2, 32, 32), glowMaterial);
-				glowMesh.position.copy(sphere.position);
-				group.add(glowMesh);
-
-				objectsWithLabels.set(sphere, {
+				objectsWithLabels.set(sprite, {
 					name: celestialData.itemname,
 					type: "sun",
-					position: sphere.position.clone()
-				});
-			} else if (typeName.includes("Asteroid Belt")) {
-				const asteroidGroup = new Group();
-
-				for (let i = 0; i < SIZES.ASTEROID.particleCount; i++) {
-					const geometry = new IcosahedronGeometry(SIZES.ASTEROID.radius, 0);
-					const material = new MeshPhongMaterial({ color: 0x808080 });
-					const asteroid = new Mesh(geometry, material);
-					const spread = SIZES.ASTEROID.spread;
-					asteroid.position.set((Math.random() - 0.5) * spread, (Math.random() - 0.5) * spread, (Math.random() - 0.5) * spread);
-					asteroid.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
-					asteroidGroup.add(asteroid);
-				}
-
-				asteroidGroup.position.set(celestialData.x * SCALE_FACTOR, celestialData.y * SCALE_FACTOR, celestialData.z * SCALE_FACTOR);
-				group.add(asteroidGroup);
-
-				objectsWithLabels.set(asteroidGroup, {
-					name: celestialData.itemname,
-					type: "asteroid",
-					position: asteroidGroup.position.clone()
+					position: sprite.position.clone()
 				});
 			} else if (typeName.includes("Planet")) {
 				const geometry = new SphereGeometry(SIZES.PLANET.radius);
 				const material = new MeshPhongMaterial({ color: 0x00ff00, shininess: 30 });
 				const sphere = new Mesh(geometry, material);
-				sphere.position.set(celestialData.x * SCALE_FACTOR, celestialData.y * SCALE_FACTOR, celestialData.z * SCALE_FACTOR);
+				sphere.position.copy(position);
 				group.add(sphere);
-
-				// Calculate planet's distance from sun
-				const planetPosition = new Vector3(celestialData.x * SCALE_FACTOR, celestialData.y * SCALE_FACTOR, celestialData.z * SCALE_FACTOR);
-
-				const distance = planetPosition.length();
-
-				// Create orbit ring
+				const sprite = createLocationSprite(position, "planet", celestialData.itemname);
+				group.add(sprite);
+				const distance = position.length();
 				const segments = 256;
-
 				const orbitPoints = [];
 
 				for (let i = 0; i <= segments; i++) {
@@ -70762,92 +70772,102 @@ void main() {
 					});
 
 				const orbit = new Line(orbitGeometry, orbitMaterial);
-
-				// Calculate rotation to align with sun as reference plane
-				const normal = planetPosition.clone().normalize();
-
+				const normal = position.clone().normalize();
 				const rotationMatrix = new Matrix4();
 				rotationMatrix.lookAt(new Vector3(), normal, new Vector3(0, 1, 0));
 				orbit.setRotationFromMatrix(rotationMatrix);
 				group.add(orbit);
 
-				objectsWithLabels.set(sphere, {
+				objectsWithLabels.set(sprite, {
 					name: celestialData.itemname,
 					type: "planet",
-					position: sphere.position.clone()
+					position: sprite.position.clone()
 				});
 			} else if (typeName.includes("Moon")) {
 				const geometry = new SphereGeometry(SIZES.MOON.radius);
 				const material = new MeshPhongMaterial({ color: 0x808080 });
 				const sphere = new Mesh(geometry, material);
-				sphere.position.set(celestialData.x * SCALE_FACTOR, celestialData.y * SCALE_FACTOR, celestialData.z * SCALE_FACTOR);
+				sphere.position.copy(position);
 				group.add(sphere);
+				const sprite = createLocationSprite(position, "moon", celestialData.itemname);
+				group.add(sprite);
+
+				// Use the passed allData instead of window.allCelestialData
+				const parentPlanet = findParentPlanet(celestialData, allData);
+
+				if (parentPlanet) {
+					const planetPosition = new Vector3(parentPlanet.x * SCALE_FACTOR, parentPlanet.y * SCALE_FACTOR, parentPlanet.z * SCALE_FACTOR);
+					createMoonOrbit(position, planetPosition, group);
+				}
+
+				objectsWithLabels.set(sprite, {
+					name: celestialData.itemname,
+					type: "moon",
+					position: sprite.position.clone()
+				});
+			} else if (typeName.includes("Asteroid Belt")) {
+				const geometry = new SphereGeometry(SIZES.ASTEROID.radius);
+
+				const material = new MeshPhongMaterial({
+						color: 0x808080,
+						visible: false, // Hide the collision mesh but keep it for raycasting
+						
+					});
+
+				const sphere = new Mesh(geometry, material);
+				sphere.position.copy(position);
+				group.add(sphere);
+				const sprite = createLocationSprite(position, "asteroid", celestialData.itemname);
+				group.add(sprite);
 
 				objectsWithLabels.set(sphere, {
 					name: celestialData.itemname,
-					type: "moon",
+					type: "asteroid",
 					position: sphere.position.clone()
 				});
 			} else if (typeName.includes("Stargate")) {
-				const stargateGroup = new Group();
-
-				// Outer cylinder
-				const cylinderGeometry = new CylinderGeometry(SIZES.STARGATE.radius, SIZES.STARGATE.radius, SIZES.STARGATE.length, 32);
+				const geometry = new SphereGeometry(SIZES.STARGATE.radius);
 
 				const material = new MeshPhongMaterial({
 						color: 0x00ffff,
-						transparent: true,
-						opacity: 0.7
+						visible: false, // Hide the collision mesh but keep it for raycasting
+						
 					});
 
-				const cylinder = new Mesh(cylinderGeometry, material);
+				const sphere = new Mesh(geometry, material);
+				sphere.position.copy(position);
+				group.add(sphere);
+				const sprite = createLocationSprite(position, "stargate", celestialData.itemname);
+				group.add(sprite);
 
-				// Inner sphere
-				const sphereGeometry = new SphereGeometry(SIZES.STARGATE.sphereRadius);
-
-				const sphereMaterial = new MeshPhongMaterial({
-						color: 0x00ffff,
-						emissive: 0x00ffff,
-						emissiveIntensity: 0.3
-					});
-
-				const sphere = new Mesh(sphereGeometry, sphereMaterial);
-				stargateGroup.add(cylinder);
-				stargateGroup.add(sphere);
-				stargateGroup.position.set(celestialData.x * SCALE_FACTOR, celestialData.y * SCALE_FACTOR, celestialData.z * SCALE_FACTOR);
-				group.add(stargateGroup);
-
-				objectsWithLabels.set(stargateGroup, {
+				objectsWithLabels.set(sphere, {
 					name: celestialData.itemname,
 					type: "stargate",
-					position: stargateGroup.position.clone()
+					position: sphere.position.clone()
 				});
 			} else if (typeName.includes("Station")) {
-				const geometry = new BoxGeometry(SIZES.STATION.size, SIZES.STATION.size, SIZES.STATION.size);
-				const material = new MeshPhongMaterial({ color: 0x00ffff });
-				const cube = new Mesh(geometry, material);
-				cube.position.set(celestialData.x * SCALE_FACTOR, celestialData.y * SCALE_FACTOR, celestialData.z * SCALE_FACTOR);
-				group.add(cube);
+				const geometry = new SphereGeometry(SIZES.STATION.radius);
 
-				objectsWithLabels.set(cube, {
+				const material = new MeshPhongMaterial({
+						color: 0xff00ff,
+						visible: false, // Hide the collision mesh but keep it for raycasting
+						
+					});
+
+				const sphere = new Mesh(geometry, material);
+				sphere.position.copy(position);
+				group.add(sphere);
+				const sprite = createLocationSprite(position, "station", celestialData.itemname);
+				group.add(sprite);
+
+				objectsWithLabels.set(sphere, {
 					name: celestialData.itemname,
 					type: "station",
-					position: cube.position.clone()
+					position: sphere.position.clone()
 				});
 			}
 
 			return group;
-		}
-
-		function createTextSprite(text) {
-			const canvas = document.createElement("canvas");
-			const context = canvas.getContext("2d");
-			context.font = "Bold 20px Arial";
-			context.fillStyle = "white";
-			context.fillText(text, 0, 20);
-			const texture = new CanvasTexture(canvas);
-			const spriteMaterial = new SpriteMaterial({ map: texture });
-			return new Sprite(spriteMaterial);
 		}
 
 		async function initVisualization(celestialData) {
@@ -70858,61 +70878,61 @@ void main() {
 				return;
 			}
 
+			// Store celestial data at component level
+			allCelestialData = celestialData;
+
 			scene = new Scene();
 			scene.background = new Color(0x000000);
 			camera = new PerspectiveCamera(75, container.clientWidth / container.clientHeight, 0.1, 1000000000);
 			renderer = new WebGLRenderer({ antialias: true });
 			renderer.setSize(container.clientWidth, container.clientHeight);
 			container.appendChild(renderer.domElement);
+
+			// Create camera target
+			cameraTarget = new Object3D();
+
+			scene.add(cameraTarget);
 			const killPosition = kill.killmail.victim.position;
 
-			// First create kill location
-			const killObject = createCelestialObject({
-				id: "killmail",
-				x: killPosition.x,
-				y: killPosition.y,
-				z: killPosition.z,
-				typename: "Kill Location"
-			});
+			// Create kill location
+			const killObject = createCelestialObject(
+				{
+					id: "killmail",
+					x: killPosition.x,
+					y: killPosition.y,
+					z: killPosition.z,
+					typename: "Kill Location"
+				},
+				allCelestialData
+			);
 
 			if (killObject) {
 				scene.add(killObject);
 				console.log("Kill object added to scene", killObject);
 			}
 
-			// Then add other celestials
+			// Add other celestials
 			celestialData.forEach(celestial => {
 				if (celestial.id !== "killmail") {
-					const mesh = createCelestialObject(celestial);
+					const mesh = createCelestialObject(celestial, allCelestialData);
 					if (mesh) scene.add(mesh);
 				}
 			});
 
-			// Set camera position after objects are created
 			camera.position.set(killPosition.x * SCALE_FACTOR + 50, killPosition.y * SCALE_FACTOR + 50, killPosition.z * SCALE_FACTOR + 50);
-
 			camera.lookAt(killPosition.x * SCALE_FACTOR, killPosition.y * SCALE_FACTOR, killPosition.z * SCALE_FACTOR);
 			controls = new OrbitControls(camera, renderer.domElement);
 			controls.enableDamping = true;
 			controls.dampingFactor = 0.05;
-
-			// Initialize other components
 			initRaycaster();
-
 			initDirectionalGUI();
 			const ambientLight = new AmbientLight(0xffffff, 0.5);
 			scene.add(ambientLight);
-
-			// Update info panel after everything is set up
 			$$invalidate(3, systemName = celestialData[1]?.solarsystemname || "Unknown System");
-
 			$$invalidate(4, closestCelestial = findClosestCelestial(celestialData, killPosition));
 			$$invalidate(5, pinpoints = calculatePinpoints());
 			updateInfoPanel();
-
-			// Start animation
 			animate();
-
 			$$invalidate(2, loading = false);
 		}
 
@@ -70921,6 +70941,13 @@ void main() {
 				camera.aspect = container.clientWidth / container.clientHeight;
 				camera.updateProjectionMatrix();
 				renderer.setSize(container.clientWidth, container.clientHeight, true);
+
+				// Update all sprites on resize
+				scene.traverse(object => {
+					if (object.isSprite) {
+						updateSpriteScale(object);
+					}
+				});
 			}
 		}
 
@@ -70930,10 +70957,7 @@ void main() {
 
 				if (celestialData) {
 					await initVisualization(celestialData);
-
-					// Add event listeners
 					container.addEventListener("mousemove", onMouseMove);
-
 					container.addEventListener("click", onClick);
 					window.addEventListener("resize", handleResize);
 				} else {
@@ -70969,9 +70993,17 @@ void main() {
 							object.material.dispose();
 						}
 					}
+
+					if (object.userData?.label) {
+						object.userData.label.remove();
+					}
 				});
 			}
 
+			// Remove all celestial labels
+			const labels = document.querySelectorAll(".celestial-label");
+
+			labels.forEach(label => label.remove());
 			directionIndicator?.remove();
 			objectsWithLabels.clear();
 			tooltipDiv?.remove();
@@ -70983,29 +71015,16 @@ void main() {
 			mouse.x = (event.clientX - rect.left) / container.clientWidth * 2 - 1;
 			mouse.y = -((event.clientY - rect.top) / container.clientHeight) * 2 + 1;
 			raycaster.setFromCamera(mouse, camera);
-			const intersects = raycaster.intersectObjects(scene.children, true);
+			const intersects = raycaster.intersectObjects(Array.from(objectsWithLabels.keys()).filter(obj => obj.isSprite));
 
 			if (intersects.length > 0) {
-				let object = intersects[0].object;
+				const sprite = intersects[0].object;
 
-				// Find the labeled parent
-				while (object && !objectsWithLabels.has(object)) {
-					object = object.parent;
-				}
-
-				if (object && objectsWithLabels.has(object)) {
-					const objectData = objectsWithLabels.get(object);
+				if (objectsWithLabels.has(sprite)) {
+					const objectData = objectsWithLabels.get(sprite);
 					console.log("Selected object:", objectData);
-					selectedObject = object;
-
-					// Special handling for kill location
-					if (objectData.type === "killmail") {
-						camera.position.set(object.position.x + 50, object.position.y + 50, object.position.z + 50);
-						controls.target.copy(object.position);
-					} else {
-						focusOnObject(object);
-					}
-
+					selectedObject = sprite;
+					focusOnObject(sprite);
 					updateInfoPanel(objectData);
 				}
 			}
@@ -71027,7 +71046,7 @@ void main() {
 			if (!~writable_props.indexOf(key) && key.slice(0, 2) !== '$$' && key !== 'slot') console_1$1.warn(`<MapVisualization> was created with unknown prop '${key}'`);
 		});
 
-		function div0_binding($$value) {
+		function div1_binding($$value) {
 			binding_callbacks[$$value ? 'unshift' : 'push'](() => {
 				container = $$value;
 				$$invalidate(0, container);
@@ -71035,8 +71054,8 @@ void main() {
 		}
 
 		$$self.$$set = $$props => {
-			if ('killmailId' in $$props) $$invalidate(6, killmailId = $$props.killmailId);
-			if ('kill' in $$props) $$invalidate(7, kill = $$props.kill);
+			if ('killmailId' in $$props) $$invalidate(7, killmailId = $$props.killmailId);
+			if ('kill' in $$props) $$invalidate(8, kill = $$props.kill);
 		};
 
 		$$self.$capture_state = () => ({
@@ -71063,34 +71082,40 @@ void main() {
 			hoveredObject,
 			selectedObject,
 			tooltipDiv,
+			spriteMap,
+			cameraTarget,
+			lastCameraPosition,
+			allCelestialData,
 			SCALE_FACTOR,
 			objectsWithLabels,
+			SIZES,
+			createLocationSprite,
+			findParentPlanet,
+			createMoonOrbit,
+			updateSpriteScale,
 			fetchCelestials,
 			initRaycaster,
 			onMouseMove,
-			updateObjectScales,
 			animate,
-			getScaleFactor,
 			focusOnObject,
 			updateInfoPanel,
 			getRomanNumeralGroup,
+			focusOnSun,
 			directionIndicator,
 			initDirectionalGUI,
 			createDirectionalGUI,
 			updateDirectionalGUI,
-			createCompass,
 			findClosestCelestial,
 			calculatePinpoints,
 			createCelestialObject,
-			createTextSprite,
 			initVisualization,
 			handleResize,
 			onClick
 		});
 
 		$$self.$inject_state = $$props => {
-			if ('killmailId' in $$props) $$invalidate(6, killmailId = $$props.killmailId);
-			if ('kill' in $$props) $$invalidate(7, kill = $$props.kill);
+			if ('killmailId' in $$props) $$invalidate(7, killmailId = $$props.killmailId);
+			if ('kill' in $$props) $$invalidate(8, kill = $$props.kill);
 			if ('container' in $$props) $$invalidate(0, container = $$props.container);
 			if ('scene' in $$props) scene = $$props.scene;
 			if ('camera' in $$props) camera = $$props.camera;
@@ -71107,6 +71132,10 @@ void main() {
 			if ('hoveredObject' in $$props) hoveredObject = $$props.hoveredObject;
 			if ('selectedObject' in $$props) selectedObject = $$props.selectedObject;
 			if ('tooltipDiv' in $$props) tooltipDiv = $$props.tooltipDiv;
+			if ('spriteMap' in $$props) spriteMap = $$props.spriteMap;
+			if ('cameraTarget' in $$props) cameraTarget = $$props.cameraTarget;
+			if ('lastCameraPosition' in $$props) lastCameraPosition = $$props.lastCameraPosition;
+			if ('allCelestialData' in $$props) allCelestialData = $$props.allCelestialData;
 			if ('directionIndicator' in $$props) directionIndicator = $$props.directionIndicator;
 		};
 
@@ -71115,14 +71144,14 @@ void main() {
 		}
 
 		$$self.$$.update = () => {
-			if ($$self.$$.dirty[0] & /*kill*/ 128) {
+			if ($$self.$$.dirty[0] & /*kill*/ 256) {
 				// Type checking
 				if (kill && typeof kill !== "object") {
 					throw new Error("kill prop must be an object");
 				}
 			}
 
-			if ($$self.$$.dirty[0] & /*kill*/ 128) {
+			if ($$self.$$.dirty[0] & /*kill*/ 256) {
 				if (kill) {
 					console.log("Kill data in MapVisualization:", kill);
 				}
@@ -71136,16 +71165,17 @@ void main() {
 			systemName,
 			closestCelestial,
 			pinpoints,
+			focusOnSun,
 			killmailId,
 			kill,
-			div0_binding
+			div1_binding
 		];
 	}
 
 	class MapVisualization extends SvelteComponentDev {
 		constructor(options) {
 			super(options);
-			init(this, options, instance$3, create_fragment$3, safe_not_equal, { killmailId: 6, kill: 7 }, null, [-1, -1]);
+			init(this, options, instance$3, create_fragment$3, safe_not_equal, { killmailId: 7, kill: 8 }, null, [-1, -1]);
 
 			dispatch_dev("SvelteRegisterComponent", {
 				component: this,

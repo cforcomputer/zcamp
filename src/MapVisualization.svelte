@@ -18,6 +18,7 @@
   let scene, camera, renderer, controls;
   let compass;
   let error = null;
+
   let loading = true;
   let systemName = "";
   let closestCelestial = "Calculating...";
@@ -32,12 +33,210 @@
   let hoveredObject = null;
   let selectedObject = null;
   let tooltipDiv;
-
+  let spriteMap;
+  let cameraTarget;
+  let lastCameraPosition = new THREE.Vector3();
+  let allCelestialData = null;
   const SCALE_FACTOR = 1e-9;
   const objectsWithLabels = new Map();
 
+  const SIZES = {
+    KILL: { radius: 20 },
+    SUN: { radius: 40 },
+    PLANET: { radius: 0.03 },
+    MOON: { radius: 0.005 },
+    ASTEROID: {
+      radius: 0.05,
+      particleCount: 5,
+      spread: 0.001,
+    },
+    STARGATE: {
+      radius: 6,
+      length: 3,
+      sphereRadius: 5,
+    },
+    STATION: { size: 10 },
+  };
+
   $: if (kill) {
     console.log("Kill data in MapVisualization:", kill);
+  }
+
+  function createLocationSprite(position, type, name) {
+    const canvas = document.createElement("canvas");
+    canvas.width = 32;
+    canvas.height = 32;
+    const context = canvas.getContext("2d");
+
+    context.beginPath();
+    context.arc(16, 16, 12, 0, 2 * Math.PI);
+
+    let color;
+    switch (type) {
+      case "sun":
+        color = "#ffff00";
+        break;
+      case "planet":
+        color = "#00ff00";
+        break;
+      case "moon":
+        color = "#808080";
+        break;
+      case "stargate":
+        color = "#00ffff";
+        break;
+      case "station":
+        color = "#ff00ff";
+        break;
+      case "asteroid":
+        color = "#a0a0a0";
+        break;
+      default:
+        color = "#ffffff";
+    }
+
+    context.fillStyle = color;
+    context.fill();
+    context.strokeStyle = "#ffffff";
+    context.lineWidth = 1;
+    context.stroke();
+
+    const texture = new THREE.CanvasTexture(canvas);
+    const spriteMaterial = new THREE.SpriteMaterial({
+      map: texture,
+      sizeAttenuation: true,
+    });
+
+    const sprite = new THREE.Sprite(spriteMaterial);
+    sprite.position.copy(position);
+
+    // Set the object type in objectsWithLabels BEFORE scaling
+    objectsWithLabels.set(sprite, {
+      name: name,
+      type: type,
+      position: sprite.position.clone(),
+    });
+
+    // Now scale after setting the type
+    updateSpriteScale(sprite);
+
+    const label = document.createElement("div");
+    label.className = "celestial-label";
+    label.style.display = "none";
+    label.textContent = name;
+    container.appendChild(label);
+
+    const updateLabel = () => {
+      if (sprite.visible) {
+        const vector = sprite.position.clone();
+        vector.project(camera);
+
+        const x = (vector.x * 0.5 + 0.5) * container.clientWidth;
+        const y = (-vector.y * 0.5 + 0.5) * container.clientHeight;
+
+        label.style.transform = `translate(${x}px, ${y}px)`;
+
+        const isFacing = vector.z < 1;
+        label.style.display = isFacing ? "block" : "none";
+      }
+    };
+
+    sprite.userData.updateLabel = updateLabel;
+    sprite.userData.label = label;
+
+    return sprite;
+  }
+
+  function findParentPlanet(moonData, celestialData) {
+    // Get roman numeral from moon name (e.g., "Moon I" -> "I")
+    const moonRoman = moonData.itemname.match(/ ([IVX]+)( -|$)/)?.[1];
+    if (!moonRoman) return null;
+
+    // Find planet with matching roman numeral
+    return celestialData.find(
+      (cel) =>
+        cel.typename?.includes("Planet") &&
+        cel.itemname.match(/ ([IVX]+)( -|$)/)?.[1] === moonRoman
+    );
+  }
+
+  function createMoonOrbit(moonPosition, planetPosition, group) {
+    // Calculate orbit parameters
+    const relativePos = moonPosition.clone().sub(planetPosition);
+    const orbitRadius = relativePos.length();
+    const segments = 128;
+    const orbitPoints = [];
+
+    // Create orbit points around planet
+    for (let i = 0; i <= segments; i++) {
+      const theta = (i / segments) * Math.PI * 2;
+      orbitPoints.push(
+        new THREE.Vector3(
+          Math.cos(theta) * orbitRadius,
+          0,
+          Math.sin(theta) * orbitRadius
+        )
+      );
+    }
+
+    const orbitGeometry = new THREE.BufferGeometry().setFromPoints(orbitPoints);
+    const orbitMaterial = new THREE.LineBasicMaterial({
+      color: 0x444444,
+      transparent: true,
+      opacity: 0.5,
+      linewidth: 1,
+    });
+
+    const orbit = new THREE.Line(orbitGeometry, orbitMaterial);
+
+    // Align orbit with planet-moon axis
+    const normal = relativePos.clone().normalize();
+    const rotationMatrix = new THREE.Matrix4();
+    rotationMatrix.lookAt(
+      new THREE.Vector3(),
+      normal,
+      new THREE.Vector3(0, 1, 0)
+    );
+    orbit.setRotationFromMatrix(rotationMatrix);
+
+    // Move orbit to be centered on planet
+    orbit.position.copy(planetPosition);
+
+    group.add(orbit);
+  }
+
+  function updateSpriteScale(sprite) {
+    const distanceToCamera = sprite.position.distanceTo(camera.position);
+    const baseScale = 0.1; // Increased from 0.01
+
+    const objectData = objectsWithLabels.get(sprite);
+    let scaleMultiplier = 1;
+
+    switch (objectData?.type) {
+      case "sun":
+        scaleMultiplier = 10; // Increased from 2
+        break;
+      case "planet":
+        scaleMultiplier = 10; // Increased from 1
+        break;
+      case "moon":
+        scaleMultiplier = 5; // Increased from 0.75
+        break;
+      case "stargate":
+        scaleMultiplier = 10; // Increased from 1
+        break;
+      case "station":
+        scaleMultiplier = 10; // Increased from 1
+        break;
+      case "asteroid":
+        scaleMultiplier = 10; // Increased from 0.5
+        break;
+      default:
+        scaleMultiplier = 5;
+    }
+
+    const scale = baseScale * scaleMultiplier * distanceToCamera * 0.01;
+    sprite.scale.set(scale, scale, 1);
   }
 
   async function fetchCelestials(killmailId, retryCount = 3) {
@@ -113,99 +312,47 @@
     }
   }
 
-  function updateObjectScales() {
-    if (!camera || !scene) return;
-
-    scene.traverse((object) => {
-      if (!objectsWithLabels.has(object)) return;
-
-      const data = objectsWithLabels.get(object);
-      const distance = camera.position.distanceTo(object.position);
-      const scale = getScaleFactor(distance, data.type, data);
-
-      object.scale.setScalar(scale);
-    });
-  }
-
   function animate() {
     requestAnimationFrame(animate);
-    controls.update();
-    updateDirectionalGUI();
-    renderer.render(scene, camera);
-  }
 
-  function getScaleFactor(distance, objectType, objectData) {
-    // Base scale factors for different object types
-    const scales = {
-      sun: { base: 5.0, min: 0.5, max: 8.0 },
-      planet: { base: 2.0, min: 0.3, max: 4.0 },
-      moon: { base: 0.8, min: 0.2, max: 2.0 },
-      station: { base: 1.0, min: 0.2, max: 3.0 },
-      stargate: { base: 1.0, min: 0.2, max: 3.0 },
-      asteroid: { base: 0.5, min: 0.1, max: 1.5 },
-      killmail: { base: 0.8, min: 0.2, max: 20.0 },
-    };
+    if (!lastCameraPosition.equals(camera.position)) {
+      cameraTarget.position.copy(camera.position);
+      lastCameraPosition.copy(camera.position);
 
-    // Distance thresholds for scaling
-    const NEAR = 50 * SCALE_FACTOR;
-    const FAR = 500000 * SCALE_FACTOR;
-
-    // Get scale configuration for object type
-    const scaleConfig = scales[objectType] || scales.planet;
-
-    // Calculate base scale based on distance with smooth interpolation
-    const distanceFactor = THREE.MathUtils.smoothstep(distance, NEAR, FAR);
-    let scale = THREE.MathUtils.lerp(
-      scaleConfig.max,
-      scaleConfig.min,
-      distanceFactor
-    );
-
-    // Apply contextual scaling based on selected object
-    if (selectedObject) {
-      const selectedData = objectsWithLabels.get(selectedObject);
-      const selectedGroup = getRomanNumeralGroup(selectedData.name);
-      const thisGroup = getRomanNumeralGroup(objectData?.name);
-
-      if (selectedGroup && thisGroup) {
-        if (selectedGroup === thisGroup) {
-          // Objects in same planetary system - enhance visibility when close
-          const systemScaleFactor = THREE.MathUtils.smoothstep(
-            distance,
-            NEAR * 0.1,
-            NEAR
-          );
-          scale *= THREE.MathUtils.lerp(1.5, 0.8, systemScaleFactor);
-        } else {
-          // Objects in different systems - reduce visibility
-          const outsideScaleFactor = THREE.MathUtils.smoothstep(
-            distance,
-            NEAR * 0.5,
-            FAR
-          );
-          scale *= THREE.MathUtils.lerp(0.3, 0.5, outsideScaleFactor);
+      scene.traverse((object) => {
+        if (object.isSprite) {
+          updateSpriteScale(object);
         }
-      }
+      });
     }
 
-    // Adjust scale based on object type context
-    if (objectType === "sun") {
-      // Reduce sun scale when viewing planetary systems
-      const planetaryViewFactor =
-        selectedObject &&
-        objectsWithLabels.get(selectedObject).type === "planet"
-          ? 0.3
-          : 1.0;
-      scale *= planetaryViewFactor;
-    }
-
-    return scale;
+    controls.update();
+    renderer.render(scene, camera);
   }
 
   function focusOnObject(object) {
     if (!camera || !controls || !object) return;
 
     const targetPosition = object.position.clone();
+    const objectData = objectsWithLabels.get(object);
+
+    // Get the size based on object type
+    let baseSize;
+    if (objectData.type === "sun") baseSize = SIZES.SUN.radius;
+    else if (objectData.type === "planet") baseSize = SIZES.PLANET.radius;
+    else if (objectData.type === "moon") baseSize = SIZES.MOON.radius;
+    else if (objectData.type === "station") baseSize = SIZES.STATION.size;
+    else if (objectData.type === "stargate") baseSize = SIZES.STARGATE.radius;
+    else if (objectData.type === "killmail") baseSize = SIZES.KILL.radius;
+    else baseSize = SIZES.PLANET.radius; // Default case
+
+    // Calculate view distance based on object size
+    const viewFactor = 20;
+    const viewDistance = baseSize * viewFactor;
+
+    const offset = new THREE.Vector3(viewDistance, viewDistance, viewDistance);
+    const targetCameraPosition = targetPosition.clone().add(offset);
+
     const startPosition = camera.position.clone();
     const duration = 1000; // 1 second
     const startTime = Date.now();
@@ -222,7 +369,7 @@
 
       camera.position.lerpVectors(
         startPosition,
-        targetPosition.clone().add(new THREE.Vector3(50, 50, 50)),
+        targetCameraPosition,
         easeProgress
       );
       controls.target.lerp(targetPosition, easeProgress);
@@ -278,6 +425,16 @@
   function getRomanNumeralGroup(name) {
     const match = name?.match(/ ([IVX]+)( -|$)/);
     return match ? match[1] : null;
+  }
+
+  function focusOnSun() {
+    const sunObject = Array.from(objectsWithLabels.entries()).find(
+      ([_, data]) => data.type === "sun"
+    );
+    if (sunObject) {
+      selectedObject = null;
+      focusOnObject(sunObject[0]);
+    }
   }
 
   let directionIndicator;
@@ -370,43 +527,6 @@
     });
   }
 
-  async function createCompass(size) {
-    const compassGroup = new THREE.Group();
-    const lineLength = size;
-    const lineWidth = 1;
-
-    // Create the main axis line
-    const axisGeometry = new THREE.BoxGeometry(
-      lineLength,
-      lineWidth,
-      lineWidth
-    );
-    const axisMaterial = new THREE.MeshBasicMaterial({ color: 0x00ff00 });
-    const axisLine = new THREE.Mesh(axisGeometry, axisMaterial);
-    compassGroup.add(axisLine);
-
-    // Create directional markers along the line
-    const markerPositions = [
-      { position: lineLength / 2, text: "N" },
-      { position: -lineLength / 2, text: "S" },
-      { position: 0, text: "E", offset: lineLength / 4 },
-      { position: 0, text: "W", offset: -lineLength / 4 },
-    ];
-
-    markerPositions.forEach((marker) => {
-      const sprite = createTextSprite(marker.text);
-      if (marker.text === "N" || marker.text === "S") {
-        sprite.position.set(marker.position, lineWidth * 5, 0);
-      } else {
-        sprite.position.set(0, lineWidth * 5, marker.offset);
-      }
-      sprite.scale.set(50, 50, 1);
-      compassGroup.add(sprite);
-    });
-
-    return compassGroup;
-  }
-
   function findClosestCelestial(celestials, killPosition) {
     if (!killPosition?.x || !killPosition?.y || !killPosition?.z) {
       console.error("Invalid kill position:", killPosition);
@@ -447,67 +567,19 @@
     return ["TBD", "TBD", "TBD", "TBD"];
   }
 
-  function createCelestialObject(celestialData) {
+  function createCelestialObject(celestialData, allData) {
     if (!celestialData) {
       console.error("celestialData is undefined or null.");
       return null;
     }
 
-    // Base sizes with dynamic scale ranges
-    const SIZES = {
-      KILL: {
-        radius: 0.8,
-        near: { min: 0.5, max: 2 },
-        far: { min: 2, max: 5 },
-      },
-      SUN: {
-        radius: 5,
-        near: { min: 0.5, max: 3 },
-        far: { min: 3, max: 10 },
-      },
-      PLANET: {
-        radius: 2,
-        near: { min: 0.3, max: 2 },
-        far: { min: 2, max: 8 },
-      },
-      MOON: {
-        radius: 0.3,
-        near: { min: 0.2, max: 1 },
-        far: { min: 1, max: 4 },
-      },
-      ASTEROID: {
-        radius: 0.2,
-        particleCount: 3,
-        spread: 1,
-        near: { min: 0.1, max: 0.5 },
-        far: { min: 0.5, max: 3 },
-      },
-      STARGATE: {
-        length: 3,
-        radius: 0.5,
-        sphereRadius: 0.4,
-        near: { min: 0.2, max: 1 },
-        far: { min: 1, max: 4 },
-      },
-      STATION: {
-        size: 2,
-        near: { min: 0.3, max: 1.5 },
-        far: { min: 1.5, max: 5 },
-      },
-    };
-
     const group = new THREE.Group();
     const typeName = celestialData.typename || "";
-
-    // Calculate initial scale based on camera distance
     const position = new THREE.Vector3(
       celestialData.x * SCALE_FACTOR,
       celestialData.y * SCALE_FACTOR,
       celestialData.z * SCALE_FACTOR
     );
-
-    const distance = camera.position.distanceTo(position);
-    const initialScale = getScaleFactor(distance, typeName.toLowerCase());
 
     if (celestialData.id === "killmail") {
       const geometry = new THREE.SphereGeometry(SIZES.KILL.radius);
@@ -519,13 +591,11 @@
       });
       const sphere = new THREE.Mesh(geometry, material);
       sphere.position.copy(position);
-      sphere.scale.setScalar(initialScale);
       group.add(sphere);
       objectsWithLabels.set(sphere, {
         name: "Kill Location",
         type: "killmail",
         position: sphere.position.clone(),
-        sizeConfig: SIZES.KILL,
       });
     } else if (typeName.includes("Sun")) {
       const geometry = new THREE.SphereGeometry(SIZES.SUN.radius);
@@ -536,87 +606,20 @@
         shininess: 100,
       });
       const sphere = new THREE.Mesh(geometry, material);
-      sphere.position.set(
-        celestialData.x * SCALE_FACTOR,
-        celestialData.y * SCALE_FACTOR,
-        celestialData.z * SCALE_FACTOR
-      );
+      sphere.position.copy(position);
       group.add(sphere);
 
-      // Add sun glow
-      const glowMaterial = new THREE.ShaderMaterial({
-        uniforms: {
-          c: { type: "f", value: 0.1 },
-          p: { type: "f", value: 1.4 },
-          glowColor: { type: "c", value: new THREE.Color(0xffff00) },
-        },
-        vertexShader: `
-                varying vec3 vNormal;
-                void main() {
-                    vNormal = normalize(normalMatrix * normal);
-                    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-                }
-            `,
-        fragmentShader: `
-                uniform vec3 glowColor;
-                uniform float c;
-                uniform float p;
-                varying vec3 vNormal;
-                void main() {
-                    float intensity = pow(c - dot(vNormal, vec3(0.0, 0.0, 1.0)), p);
-                    gl_FragColor = vec4(glowColor, intensity);
-                }
-            `,
-        side: THREE.BackSide,
-        blending: THREE.AdditiveBlending,
-        transparent: true,
-      });
-
-      const glowMesh = new THREE.Mesh(
-        new THREE.SphereGeometry(SIZES.SUN.radius * 1.2, 32, 32),
-        glowMaterial
+      const sprite = createLocationSprite(
+        position,
+        "sun",
+        celestialData.itemname
       );
-      glowMesh.position.copy(sphere.position);
-      group.add(glowMesh);
+      group.add(sprite);
 
-      objectsWithLabels.set(sphere, {
+      objectsWithLabels.set(sprite, {
         name: celestialData.itemname,
         type: "sun",
-        position: sphere.position.clone(),
-      });
-    } else if (typeName.includes("Asteroid Belt")) {
-      const asteroidGroup = new THREE.Group();
-      for (let i = 0; i < SIZES.ASTEROID.particleCount; i++) {
-        const geometry = new THREE.IcosahedronGeometry(
-          SIZES.ASTEROID.radius,
-          0
-        );
-        const material = new THREE.MeshPhongMaterial({ color: 0x808080 });
-        const asteroid = new THREE.Mesh(geometry, material);
-
-        const spread = SIZES.ASTEROID.spread;
-        asteroid.position.set(
-          (Math.random() - 0.5) * spread,
-          (Math.random() - 0.5) * spread,
-          (Math.random() - 0.5) * spread
-        );
-        asteroid.rotation.set(
-          Math.random() * Math.PI,
-          Math.random() * Math.PI,
-          Math.random() * Math.PI
-        );
-        asteroidGroup.add(asteroid);
-      }
-      asteroidGroup.position.set(
-        celestialData.x * SCALE_FACTOR,
-        celestialData.y * SCALE_FACTOR,
-        celestialData.z * SCALE_FACTOR
-      );
-      group.add(asteroidGroup);
-      objectsWithLabels.set(asteroidGroup, {
-        name: celestialData.itemname,
-        type: "asteroid",
-        position: asteroidGroup.position.clone(),
+        position: sprite.position.clone(),
       });
     } else if (typeName.includes("Planet")) {
       const geometry = new THREE.SphereGeometry(SIZES.PLANET.radius);
@@ -625,23 +628,17 @@
         shininess: 30,
       });
       const sphere = new THREE.Mesh(geometry, material);
-      sphere.position.set(
-        celestialData.x * SCALE_FACTOR,
-        celestialData.y * SCALE_FACTOR,
-        celestialData.z * SCALE_FACTOR
-      );
+      sphere.position.copy(position);
       group.add(sphere);
 
-      // Calculate planet's distance from sun
-      const planetPosition = new THREE.Vector3(
-        celestialData.x * SCALE_FACTOR,
-        celestialData.y * SCALE_FACTOR,
-        celestialData.z * SCALE_FACTOR
+      const sprite = createLocationSprite(
+        position,
+        "planet",
+        celestialData.itemname
       );
+      group.add(sprite);
 
-      const distance = planetPosition.length();
-
-      // Create orbit ring
+      const distance = position.length();
       const segments = 256;
       const orbitPoints = [];
       for (let i = 0; i <= segments; i++) {
@@ -666,9 +663,7 @@
       });
 
       const orbit = new THREE.Line(orbitGeometry, orbitMaterial);
-
-      // Calculate rotation to align with sun as reference plane
-      const normal = planetPosition.clone().normalize();
+      const normal = position.clone().normalize();
       const rotationMatrix = new THREE.Matrix4();
       rotationMatrix.lookAt(
         new THREE.Vector3(),
@@ -676,104 +671,112 @@
         new THREE.Vector3(0, 1, 0)
       );
       orbit.setRotationFromMatrix(rotationMatrix);
-
       group.add(orbit);
 
-      objectsWithLabels.set(sphere, {
+      objectsWithLabels.set(sprite, {
         name: celestialData.itemname,
         type: "planet",
-        position: sphere.position.clone(),
+        position: sprite.position.clone(),
       });
     } else if (typeName.includes("Moon")) {
       const geometry = new THREE.SphereGeometry(SIZES.MOON.radius);
       const material = new THREE.MeshPhongMaterial({ color: 0x808080 });
       const sphere = new THREE.Mesh(geometry, material);
-      sphere.position.set(
-        celestialData.x * SCALE_FACTOR,
-        celestialData.y * SCALE_FACTOR,
-        celestialData.z * SCALE_FACTOR
-      );
+      sphere.position.copy(position);
       group.add(sphere);
-      objectsWithLabels.set(sphere, {
+
+      const sprite = createLocationSprite(
+        position,
+        "moon",
+        celestialData.itemname
+      );
+      group.add(sprite);
+
+      // Use the passed allData instead of window.allCelestialData
+      const parentPlanet = findParentPlanet(celestialData, allData);
+      if (parentPlanet) {
+        const planetPosition = new THREE.Vector3(
+          parentPlanet.x * SCALE_FACTOR,
+          parentPlanet.y * SCALE_FACTOR,
+          parentPlanet.z * SCALE_FACTOR
+        );
+        createMoonOrbit(position, planetPosition, group);
+      }
+
+      objectsWithLabels.set(sprite, {
         name: celestialData.itemname,
         type: "moon",
+        position: sprite.position.clone(),
+      });
+    } else if (typeName.includes("Asteroid Belt")) {
+      const geometry = new THREE.SphereGeometry(SIZES.ASTEROID.radius);
+      const material = new THREE.MeshPhongMaterial({
+        color: 0x808080,
+        visible: false, // Hide the collision mesh but keep it for raycasting
+      });
+      const sphere = new THREE.Mesh(geometry, material);
+      sphere.position.copy(position);
+      group.add(sphere);
+
+      const sprite = createLocationSprite(
+        position,
+        "asteroid",
+        celestialData.itemname
+      );
+      group.add(sprite);
+
+      objectsWithLabels.set(sphere, {
+        name: celestialData.itemname,
+        type: "asteroid",
         position: sphere.position.clone(),
       });
     } else if (typeName.includes("Stargate")) {
-      const stargateGroup = new THREE.Group();
-
-      // Outer cylinder
-      const cylinderGeometry = new THREE.CylinderGeometry(
-        SIZES.STARGATE.radius,
-        SIZES.STARGATE.radius,
-        SIZES.STARGATE.length,
-        32
-      );
+      const geometry = new THREE.SphereGeometry(SIZES.STARGATE.radius);
       const material = new THREE.MeshPhongMaterial({
         color: 0x00ffff,
-        transparent: true,
-        opacity: 0.7,
+        visible: false, // Hide the collision mesh but keep it for raycasting
       });
-      const cylinder = new THREE.Mesh(cylinderGeometry, material);
+      const sphere = new THREE.Mesh(geometry, material);
+      sphere.position.copy(position);
+      group.add(sphere);
 
-      // Inner sphere
-      const sphereGeometry = new THREE.SphereGeometry(
-        SIZES.STARGATE.sphereRadius
+      const sprite = createLocationSprite(
+        position,
+        "stargate",
+        celestialData.itemname
       );
-      const sphereMaterial = new THREE.MeshPhongMaterial({
-        color: 0x00ffff,
-        emissive: 0x00ffff,
-        emissiveIntensity: 0.3,
-      });
-      const sphere = new THREE.Mesh(sphereGeometry, sphereMaterial);
+      group.add(sprite);
 
-      stargateGroup.add(cylinder);
-      stargateGroup.add(sphere);
-      stargateGroup.position.set(
-        celestialData.x * SCALE_FACTOR,
-        celestialData.y * SCALE_FACTOR,
-        celestialData.z * SCALE_FACTOR
-      );
-      group.add(stargateGroup);
-      objectsWithLabels.set(stargateGroup, {
+      objectsWithLabels.set(sphere, {
         name: celestialData.itemname,
         type: "stargate",
-        position: stargateGroup.position.clone(),
+        position: sphere.position.clone(),
       });
     } else if (typeName.includes("Station")) {
-      const geometry = new THREE.BoxGeometry(
-        SIZES.STATION.size,
-        SIZES.STATION.size,
-        SIZES.STATION.size
+      const geometry = new THREE.SphereGeometry(SIZES.STATION.radius);
+      const material = new THREE.MeshPhongMaterial({
+        color: 0xff00ff,
+        visible: false, // Hide the collision mesh but keep it for raycasting
+      });
+      const sphere = new THREE.Mesh(geometry, material);
+      sphere.position.copy(position);
+      group.add(sphere);
+
+      const sprite = createLocationSprite(
+        position,
+        "station",
+        celestialData.itemname
       );
-      const material = new THREE.MeshPhongMaterial({ color: 0x00ffff });
-      const cube = new THREE.Mesh(geometry, material);
-      cube.position.set(
-        celestialData.x * SCALE_FACTOR,
-        celestialData.y * SCALE_FACTOR,
-        celestialData.z * SCALE_FACTOR
-      );
-      group.add(cube);
-      objectsWithLabels.set(cube, {
+      group.add(sprite);
+
+      objectsWithLabels.set(sphere, {
         name: celestialData.itemname,
         type: "station",
-        position: cube.position.clone(),
+        position: sphere.position.clone(),
       });
     }
 
     return group;
-  }
-
-  function createTextSprite(text) {
-    const canvas = document.createElement("canvas");
-    const context = canvas.getContext("2d");
-    context.font = "Bold 20px Arial";
-    context.fillStyle = "white";
-    context.fillText(text, 0, 20);
-
-    const texture = new THREE.CanvasTexture(canvas);
-    const spriteMaterial = new THREE.SpriteMaterial({ map: texture });
-    return new THREE.Sprite(spriteMaterial);
   }
 
   async function initVisualization(celestialData) {
@@ -783,6 +786,9 @@
       loading = false;
       return;
     }
+
+    // Store celestial data at component level
+    allCelestialData = celestialData;
 
     scene = new THREE.Scene();
     scene.background = new THREE.Color(0x000000);
@@ -798,31 +804,37 @@
     renderer.setSize(container.clientWidth, container.clientHeight);
     container.appendChild(renderer.domElement);
 
+    // Create camera target
+    cameraTarget = new THREE.Object3D();
+    scene.add(cameraTarget);
+
     const killPosition = kill.killmail.victim.position;
 
-    // First create kill location
-    const killObject = createCelestialObject({
-      id: "killmail",
-      x: killPosition.x,
-      y: killPosition.y,
-      z: killPosition.z,
-      typename: "Kill Location",
-    });
+    // Create kill location
+    const killObject = createCelestialObject(
+      {
+        id: "killmail",
+        x: killPosition.x,
+        y: killPosition.y,
+        z: killPosition.z,
+        typename: "Kill Location",
+      },
+      allCelestialData
+    );
 
     if (killObject) {
       scene.add(killObject);
       console.log("Kill object added to scene", killObject);
     }
 
-    // Then add other celestials
+    // Add other celestials
     celestialData.forEach((celestial) => {
       if (celestial.id !== "killmail") {
-        const mesh = createCelestialObject(celestial);
+        const mesh = createCelestialObject(celestial, allCelestialData);
         if (mesh) scene.add(mesh);
       }
     });
 
-    // Set camera position after objects are created
     camera.position.set(
       killPosition.x * SCALE_FACTOR + 50,
       killPosition.y * SCALE_FACTOR + 50,
@@ -838,20 +850,17 @@
     controls.enableDamping = true;
     controls.dampingFactor = 0.05;
 
-    // Initialize other components
     initRaycaster();
     initDirectionalGUI();
 
     const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
     scene.add(ambientLight);
 
-    // Update info panel after everything is set up
     systemName = celestialData[1]?.solarsystemname || "Unknown System";
     closestCelestial = findClosestCelestial(celestialData, killPosition);
     pinpoints = calculatePinpoints(celestialData, killPosition);
     updateInfoPanel();
 
-    // Start animation
     animate();
     loading = false;
   }
@@ -861,6 +870,13 @@
       camera.aspect = container.clientWidth / container.clientHeight;
       camera.updateProjectionMatrix();
       renderer.setSize(container.clientWidth, container.clientHeight, true);
+
+      // Update all sprites on resize
+      scene.traverse((object) => {
+        if (object.isSprite) {
+          updateSpriteScale(object);
+        }
+      });
     }
   }
 
@@ -869,7 +885,6 @@
       const celestialData = await fetchCelestials(killmailId);
       if (celestialData) {
         await initVisualization(celestialData);
-        // Add event listeners
         container.addEventListener("mousemove", onMouseMove);
         container.addEventListener("click", onClick);
         window.addEventListener("resize", handleResize);
@@ -904,8 +919,16 @@
             object.material.dispose();
           }
         }
+        if (object.userData?.label) {
+          object.userData.label.remove();
+        }
       });
     }
+
+    // Remove all celestial labels
+    const labels = document.querySelectorAll(".celestial-label");
+    labels.forEach((label) => label.remove());
+
     directionIndicator?.remove();
     objectsWithLabels.clear();
     tooltipDiv?.remove();
@@ -919,33 +942,17 @@
     mouse.y = -((event.clientY - rect.top) / container.clientHeight) * 2 + 1;
 
     raycaster.setFromCamera(mouse, camera);
-    const intersects = raycaster.intersectObjects(scene.children, true);
+    const intersects = raycaster.intersectObjects(
+      Array.from(objectsWithLabels.keys()).filter((obj) => obj.isSprite)
+    );
 
     if (intersects.length > 0) {
-      let object = intersects[0].object;
-
-      // Find the labeled parent
-      while (object && !objectsWithLabels.has(object)) {
-        object = object.parent;
-      }
-
-      if (object && objectsWithLabels.has(object)) {
-        const objectData = objectsWithLabels.get(object);
+      const sprite = intersects[0].object;
+      if (objectsWithLabels.has(sprite)) {
+        const objectData = objectsWithLabels.get(sprite);
         console.log("Selected object:", objectData);
-        selectedObject = object;
-
-        // Special handling for kill location
-        if (objectData.type === "killmail") {
-          camera.position.set(
-            object.position.x + 50,
-            object.position.y + 50,
-            object.position.z + 50
-          );
-          controls.target.copy(object.position);
-        } else {
-          focusOnObject(object);
-        }
-
+        selectedObject = sprite;
+        focusOnObject(sprite);
         updateInfoPanel(objectData);
       }
     }
@@ -953,6 +960,10 @@
 </script>
 
 <div class="visualization-container">
+  <div class="controls">
+    <button class="focus-sun" on:click={focusOnSun}>Focus Sun</button>
+  </div>
+
   <div bind:this={container} class="map-container">
     {#if loading}
       <div class="status-message">Loading map...</div>
@@ -984,6 +995,15 @@
     background: #000;
   }
 
+  :global(.celestial-sprite) {
+    pointer-events: auto;
+    cursor: pointer;
+  }
+
+  :global(.celestial-sprite:hover) {
+    filter: brightness(1.5);
+  }
+
   .info-panel {
     position: absolute;
     bottom: 20px;
@@ -998,6 +1018,18 @@
   .info-panel p {
     margin: 5px 0;
     white-space: nowrap;
+  }
+
+  :global(.celestial-label) {
+    position: absolute;
+    background: rgba(0, 0, 0, 0.8);
+    color: white;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 12px;
+    pointer-events: none;
+    transform-origin: left top;
+    z-index: 1000;
   }
 
   .status-message {
@@ -1028,5 +1060,25 @@
     pointer-events: none;
     z-index: 1000;
     font-family: monospace;
+  }
+
+  .controls {
+    position: absolute;
+    top: 20px;
+    left: 20px;
+    z-index: 1000;
+  }
+
+  .focus-sun {
+    background: rgba(255, 165, 0, 0.8);
+    color: white;
+    border: none;
+    padding: 8px 16px;
+    border-radius: 4px;
+    cursor: pointer;
+  }
+
+  .focus-sun:hover {
+    background: rgba(255, 165, 0, 1);
   }
 </style>
