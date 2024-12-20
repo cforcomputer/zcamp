@@ -39,27 +39,127 @@
   let allCelestialData = null;
   const SCALE_FACTOR = 1e-9;
   const objectsWithLabels = new Map();
+  const KM_PER_AU = 149597870.7;
 
   const SIZES = {
-    KILL: { radius: 20 },
-    SUN: { radius: 40 },
-    PLANET: { radius: 0.03 },
-    MOON: { radius: 0.005 },
+    KILL: { radius: 10 },
+    SUN: { radius: 30 },
+    PLANET: { radius: 0.003 },
+    MOON: { radius: 0.00009 },
     ASTEROID: {
       radius: 0.05,
       particleCount: 5,
-      spread: 0.001,
+      spread: 0.1,
     },
     STARGATE: {
       radius: 6,
       length: 3,
       sphereRadius: 5,
     },
-    STATION: { size: 10 },
+    STATION: { size: 20 },
   };
 
   $: if (kill) {
     console.log("Kill data in MapVisualization:", kill);
+  }
+
+  function createPinpointBox(pinpointData) {
+    if (!pinpointData || !pinpointData.hasBox) {
+      console.log("No valid pinpoint data:", pinpointData);
+      return null;
+    }
+
+    console.log("Creating pinpoint box with data:", pinpointData);
+
+    const points = pinpointData.points.map(
+      (point) =>
+        new THREE.Vector3(
+          point.position.x * SCALE_FACTOR,
+          point.position.y * SCALE_FACTOR,
+          point.position.z * SCALE_FACTOR
+        )
+    );
+
+    console.log("Transformed points:", points);
+
+    const box = new THREE.Group();
+    box.userData.isPinpointBox = true;
+
+    // Create box geometry
+    const minPos = new THREE.Vector3(
+      Math.min(...points.map((p) => p.x)),
+      Math.min(...points.map((p) => p.y)),
+      Math.min(...points.map((p) => p.z))
+    );
+
+    const maxPos = new THREE.Vector3(
+      Math.max(...points.map((p) => p.x)),
+      Math.max(...points.map((p) => p.y)),
+      Math.max(...points.map((p) => p.z))
+    );
+
+    const boxGeometry = new THREE.BoxGeometry(
+      maxPos.x - minPos.x || 1,
+      maxPos.y - minPos.y || 1,
+      maxPos.z - minPos.z || 1
+    );
+
+    const boxMaterial = new THREE.MeshBasicMaterial({
+      color: 0x00ff00,
+      transparent: true,
+      opacity: 0.1,
+      side: THREE.DoubleSide,
+    });
+
+    const boxMesh = new THREE.Mesh(boxGeometry, boxMaterial);
+    boxMesh.position.set(
+      (minPos.x + maxPos.x) / 2,
+      (minPos.y + maxPos.y) / 2,
+      (minPos.z + maxPos.z) / 2
+    );
+
+    // Add edges
+    const edges = new THREE.EdgesGeometry(boxGeometry);
+    const edgeMaterial = new THREE.LineBasicMaterial({
+      color: 0x00ff00,
+      transparent: true,
+      opacity: 0.5,
+    });
+    const edgeMesh = new THREE.LineSegments(edges, edgeMaterial);
+    edgeMesh.position.copy(boxMesh.position);
+
+    box.add(boxMesh);
+    box.add(edgeMesh);
+
+    return box;
+  }
+
+  function createKillpointSprite(position) {
+    const canvas = document.createElement("canvas");
+    canvas.width = 32;
+    canvas.height = 32;
+    const context = canvas.getContext("2d");
+
+    // Draw red circle with white border
+    context.beginPath();
+    context.arc(16, 16, 12, 0, 2 * Math.PI);
+    context.fillStyle = "#ff0000";
+    context.fill();
+    context.strokeStyle = "#ffffff";
+    context.lineWidth = 2;
+    context.stroke();
+
+    const texture = new THREE.CanvasTexture(canvas);
+    const spriteMaterial = new THREE.SpriteMaterial({
+      map: texture,
+      sizeAttenuation: true,
+    });
+
+    const sprite = new THREE.Sprite(spriteMaterial);
+    sprite.position.copy(position);
+    sprite.scale.set(20, 20, 1); // Adjust size as needed
+
+    return sprite;
   }
 
   function createLocationSprite(position, type, name) {
@@ -347,8 +447,8 @@
     else baseSize = SIZES.PLANET.radius; // Default case
 
     // Calculate view distance based on object size
-    const viewFactor = 20;
-    const viewDistance = baseSize * viewFactor;
+    const viewFactor = 5;
+    const viewDistance = Math.max(baseSize * viewFactor, 0.1);
 
     const offset = new THREE.Vector3(viewDistance, viewDistance, viewDistance);
     const targetCameraPosition = targetPosition.clone().add(offset);
@@ -386,28 +486,37 @@
     const infoPanel = document.querySelector(".info-panel");
     if (!infoPanel) return;
 
-    // Early check for kill data
-    if (!kill?.killmail?.victim?.position) {
-      console.error("Missing kill position data");
-      return;
+    const killPos = kill.killmail.victim.position;
+    let pinpointHtml = "";
+
+    if (kill.pinpoints?.atCelestial) {
+      pinpointHtml = "<p>Triangulation possible - At celestial</p>";
+    } else if (
+      kill.pinpoints?.nearestCelestial &&
+      kill.pinpoints?.triangulationPossible
+    ) {
+      pinpointHtml = `<p>Triangulation possible - Near celestial: ${kill.pinpoints.nearestCelestial.name} (${formatDistance(kill.pinpoints.nearestCelestial.distance)})</p>`;
+    } else if (kill.pinpoints?.hasBox && kill.pinpoints.points.length >= 4) {
+      pinpointHtml = kill.pinpoints.points
+        .map(
+          (point, i) =>
+            `<p>Pinpoint ${i + 1}: ${point.name} (${formatDistance(point.distance)})</p>`
+        )
+        .join("");
+    } else {
+      pinpointHtml = "<p>Wreck triangulation not possible</p>";
     }
 
-    const killPos = kill.killmail.victim.position;
-    const formattedCoords = `(${(killPos.x * SCALE_FACTOR).toFixed(0)}, ${(killPos.y * SCALE_FACTOR).toFixed(0)}, ${(killPos.z * SCALE_FACTOR).toFixed(0)}) km`;
-
-    // Always show these elements
     infoPanel.innerHTML = `
-        <p>System name: ${systemName || "Unknown"}</p>
-        <p>Closest Celestial: ${closestCelestial || "Unknown"}</p>
-        <p><a href="#" class="kill-location">Kill Location: ${formattedCoords}</a></p>
-        <p>Pinpoint 1: ${pinpoints[0] || "TBD"}</p>
-        <p>Pinpoint 2: ${pinpoints[1] || "TBD"}</p>
-        <p>Pinpoint 3: ${pinpoints[2] || "TBD"}</p>
-        <p>Pinpoint 4: ${pinpoints[3] || "TBD"}</p>
-        ${objectData ? `<p>Selected: ${objectData.name} (${objectData.type})</p>` : ""}
-    `;
+    <p>System name: ${systemName || "Unknown"}</p>
+    <p>Closest Celestial: ${closestCelestial || "Unknown"}</p>
+    <p><a href="#" class="kill-location" style="color: white; text-decoration: none;">Kill Location</a> 
+      <span style="color: #666;">(${killPos.x}, ${killPos.y}, ${killPos.z})</span></p>
+    ${pinpointHtml}
+    ${objectData ? `<p>Selected: ${objectData.name} (${objectData.type})</p>` : ""}
+  `;
 
-    // Add click handler for kill location
+    // Re-add click handler for kill location
     const killLocationLink = infoPanel.querySelector(".kill-location");
     if (killLocationLink) {
       killLocationLink.onclick = (e) => {
@@ -543,7 +652,7 @@
     let minDistance = Infinity;
 
     celestials.forEach((celestial) => {
-      if (celestial.id === "killmail") return;
+      if (celestial.id === "killmail" || !celestial.itemname) return;
 
       const celestialPos = new THREE.Vector3(
         celestial.x || 0,
@@ -559,12 +668,17 @@
     });
 
     return closest
-      ? `${closest.itemname} (${(minDistance * SCALE_FACTOR).toFixed(2)} km)`
+      ? `${closest.itemname} (${formatDistance(minDistance)})`
       : "Unknown";
   }
 
-  function calculatePinpoints(celestials, killPosition) {
-    return ["TBD", "TBD", "TBD", "TBD"];
+  // Add new formatter function
+  function formatDistance(meters) {
+    const km = meters / 1000;
+    if (km >= KM_PER_AU * 0.5) {
+      return `${(km / KM_PER_AU).toFixed(2)} AU`;
+    }
+    return `${km.toFixed(2)} km`;
   }
 
   function createCelestialObject(celestialData, allData) {
@@ -796,7 +910,7 @@
     camera = new THREE.PerspectiveCamera(
       75,
       container.clientWidth / container.clientHeight,
-      0.1,
+      0.001, // Much smaller near plane
       1000000000
     );
 
@@ -808,26 +922,22 @@
     cameraTarget = new THREE.Object3D();
     scene.add(cameraTarget);
 
-    const killPosition = kill.killmail.victim.position;
-
-    // Create kill location
-    const killObject = createCelestialObject(
-      {
-        id: "killmail",
-        x: killPosition.x,
-        y: killPosition.y,
-        z: killPosition.z,
-        typename: "Kill Location",
-      },
-      allCelestialData
+    const killPosition = new THREE.Vector3(
+      kill.killmail.victim.position.x * SCALE_FACTOR,
+      kill.killmail.victim.position.y * SCALE_FACTOR,
+      kill.killmail.victim.position.z * SCALE_FACTOR
     );
 
-    if (killObject) {
-      scene.add(killObject);
-      console.log("Kill object added to scene", killObject);
-    }
+    // Create kill location sprite
+    const killSprite = createKillpointSprite(killPosition);
+    scene.add(killSprite);
+    objectsWithLabels.set(killSprite, {
+      name: "Kill Location",
+      type: "killmail",
+      position: killSprite.position.clone(),
+    });
 
-    // Add other celestials
+    // Add celestials
     celestialData.forEach((celestial) => {
       if (celestial.id !== "killmail") {
         const mesh = createCelestialObject(celestial, allCelestialData);
@@ -835,16 +945,23 @@
       }
     });
 
+    // Add pinpoint box if it exists
+    // Add pinpoint box if it exists
+    if (kill.pinpoints?.hasBox) {
+      console.log("Adding pinpoint box for:", kill.pinpoints);
+      const pinpointBox = createPinpointBox(kill.pinpoints);
+      if (pinpointBox) {
+        scene.add(pinpointBox);
+        console.log("Added pinpoint box to scene");
+      }
+    }
+
     camera.position.set(
-      killPosition.x * SCALE_FACTOR + 50,
-      killPosition.y * SCALE_FACTOR + 50,
-      killPosition.z * SCALE_FACTOR + 50
+      killPosition.x + 50,
+      killPosition.y + 50,
+      killPosition.z + 50
     );
-    camera.lookAt(
-      killPosition.x * SCALE_FACTOR,
-      killPosition.y * SCALE_FACTOR,
-      killPosition.z * SCALE_FACTOR
-    );
+    camera.lookAt(killPosition);
 
     controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
@@ -856,9 +973,23 @@
     const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
     scene.add(ambientLight);
 
+    // Update system information
     systemName = celestialData[1]?.solarsystemname || "Unknown System";
-    closestCelestial = findClosestCelestial(celestialData, killPosition);
-    pinpoints = calculatePinpoints(celestialData, killPosition);
+    closestCelestial = findClosestCelestial(
+      celestialData,
+      kill.killmail.victim.position
+    );
+
+    // Update pinpoint information from server data
+    if (kill.pinpoints?.hasBox) {
+      pinpoints = kill.pinpoints.points.map(
+        (point) =>
+          `${point.name} (${(point.distance * SCALE_FACTOR).toFixed(2)} km)`
+      );
+    } else {
+      pinpoints = ["No valid pinpoint box found", "", "", ""];
+    }
+
     updateInfoPanel();
 
     animate();
@@ -973,12 +1104,61 @@
   </div>
 
   <div class="info-panel">
+    {#if kill.pinpoints}
+      <pre style="display: none">{JSON.stringify(kill.pinpoints, null, 2)}</pre>
+    {/if}
     <p>System name: {systemName}</p>
     <p>Closest Celestial: {closestCelestial}</p>
-    <p>Pinpoint 1: {pinpoints[0]}</p>
-    <p>Pinpoint 2: {pinpoints[1]}</p>
-    <p>Pinpoint 3: {pinpoints[2]}</p>
-    <p>Pinpoint 4: {pinpoints[3]}</p>
+    <p>
+      <!-- svelte-ignore a11y-invalid-attribute -->
+      <a
+        href="#"
+        class="kill-location"
+        style="color: white; text-decoration: none;">Kill Location</a
+      >
+      <span style="color: #666;"
+        >({kill.killmail.victim.position.x}, {kill.killmail.victim.position.y}, {kill
+          .killmail.victim.position.z})</span
+      >
+    </p>
+    {#if kill.pinpoints?.atCelestial}
+      <p>Triangulation possible - At celestial</p>
+    {:else if kill.pinpoints?.nearestCelestial && kill.pinpoints?.triangulationPossible}
+      <p>
+        Triangulation possible - Near celestial ({(
+          kill.pinpoints.nearestCelestial.distance / 1000
+        ).toFixed(2)} km)
+      </p>
+    {:else if kill.pinpoints?.hasBox && kill.pinpoints.points.length >= 4}
+      <p>
+        Pinpoint 1: {kill.pinpoints.points[0].name} ({(
+          kill.pinpoints.points[0].distance / 1000
+        ).toFixed(2)} km)
+      </p>
+      <p>
+        Pinpoint 2: {kill.pinpoints.points[1].name} ({(
+          kill.pinpoints.points[1].distance / 1000
+        ).toFixed(2)} km)
+      </p>
+      <p>
+        Pinpoint 3: {kill.pinpoints.points[2].name} ({(
+          kill.pinpoints.points[2].distance / 1000
+        ).toFixed(2)} km)
+      </p>
+      <p>
+        Pinpoint 4: {kill.pinpoints.points[3].name} ({(
+          kill.pinpoints.points[3].distance / 1000
+        ).toFixed(2)} km)
+      </p>
+    {:else if kill.pinpoints?.triangulationPossible && kill.pinpoints?.nearestCelestial}
+      <p>
+        Nearest celestial: {kill.pinpoints.nearestCelestial.name} ({(
+          kill.pinpoints.nearestCelestial.distance / 1000
+        ).toFixed(2)} km)
+      </p>
+    {:else}
+      <p>Wreck triangulation not possible</p>
+    {/if}
   </div>
 </div>
 

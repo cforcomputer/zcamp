@@ -304,6 +304,241 @@ app.get("/api/celestials/:killmailId", async (req, res) => {
   }
 });
 
+function calculatePinpoints(celestials, killPosition) {
+  const KM_PER_AU = 149597870.7;
+  const THRESHOLDS = {
+    AT_CELESTIAL: 10000, // 10km in meters
+    NEAR_CELESTIAL: KM_PER_AU * 1000, // 1 AU in meters
+    MAX_BOX_SIZE: KM_PER_AU * 100000, // 100 AU in meters
+  };
+
+  if (!killPosition || !Array.isArray(celestials)) {
+    return {
+      hasBox: false,
+      points: [],
+      atCelestial: false,
+      nearestCelestial: null,
+      triangulationPossible: false,
+    };
+  }
+
+  const killPos = {
+    x: killPosition.x,
+    y: killPosition.y,
+    z: killPosition.z,
+  };
+
+  // Filter and get valid celestials with distances
+  const celestialPositions = celestials
+    .filter(
+      (cel) =>
+        cel.id !== "killmail" &&
+        cel.x !== undefined &&
+        cel.y !== undefined &&
+        cel.z !== undefined
+    )
+    .map((cel) => ({
+      position: {
+        x: cel.x,
+        y: cel.y,
+        z: cel.z,
+      },
+      distance: Math.sqrt(
+        Math.pow(cel.x - killPos.x, 2) +
+          Math.pow(cel.y - killPos.y, 2) +
+          Math.pow(cel.z - killPos.z, 2)
+      ),
+      name: cel.itemname,
+    }))
+    .sort((a, b) => a.distance - b.distance);
+
+  const nearestCelestial = celestialPositions[0];
+
+  if (!nearestCelestial) {
+    return {
+      hasBox: false,
+      points: [],
+      atCelestial: false,
+      nearestCelestial: null,
+      triangulationPossible: false,
+    };
+  }
+
+  // Check if kill is at a celestial (within 10km)
+  if (nearestCelestial.distance <= THRESHOLDS.AT_CELESTIAL) {
+    return {
+      hasBox: false,
+      points: [nearestCelestial],
+      atCelestial: true,
+      nearestCelestial: nearestCelestial,
+      triangulationPossible: true,
+    };
+  }
+
+  // Check if kill is near a celestial (within 1 AU)
+  if (nearestCelestial.distance <= THRESHOLDS.NEAR_CELESTIAL) {
+    return {
+      hasBox: false,
+      points: [],
+      atCelestial: false,
+      nearestCelestial: nearestCelestial,
+      triangulationPossible: true,
+    };
+  }
+
+  let bestPoints = [];
+  let minVolume = Infinity;
+
+  // Check different combinations of celestials for boxing
+  for (let i = 0; i < Math.min(celestialPositions.length - 3, 10); i++) {
+    for (let j = i + 1; j < Math.min(celestialPositions.length - 2, 11); j++) {
+      for (
+        let k = j + 1;
+        k < Math.min(celestialPositions.length - 1, 12);
+        k++
+      ) {
+        for (let l = k + 1; l < Math.min(celestialPositions.length, 13); l++) {
+          const points = [
+            celestialPositions[i],
+            celestialPositions[j],
+            celestialPositions[k],
+            celestialPositions[l],
+          ];
+
+          if (
+            isKillInsideBox(
+              killPos,
+              points.map((p) => p.position)
+            )
+          ) {
+            const volume = calculateBoxVolume(points.map((p) => p.position));
+            if (volume < minVolume) {
+              minVolume = volume;
+              bestPoints = points;
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // If valid box found, check size constraints
+  if (bestPoints.length === 4) {
+    let maxDistance = 0;
+    for (let i = 0; i < 4; i++) {
+      for (let j = i + 1; j < 4; j++) {
+        const dist = Math.sqrt(
+          Math.pow(bestPoints[i].position.x - bestPoints[j].position.x, 2) +
+            Math.pow(bestPoints[i].position.y - bestPoints[j].position.y, 2) +
+            Math.pow(bestPoints[i].position.z - bestPoints[j].position.z, 2)
+        );
+        maxDistance = Math.max(maxDistance, dist);
+      }
+    }
+
+    if (maxDistance <= THRESHOLDS.MAX_BOX_SIZE) {
+      return {
+        hasBox: true,
+        points: bestPoints,
+        atCelestial: false,
+        nearestCelestial: null,
+        triangulationPossible: true,
+      };
+    }
+  }
+
+  // No valid triangulation found
+  return {
+    hasBox: false,
+    points: [],
+    atCelestial: false,
+    nearestCelestial: nearestCelestial,
+    triangulationPossible: false,
+  };
+}
+
+function isKillInsideBox(killPos, points) {
+  // Find min and max coordinates
+  const min = {
+    x: Math.min(...points.map((p) => p.x)),
+    y: Math.min(...points.map((p) => p.y)),
+    z: Math.min(...points.map((p) => p.z)),
+  };
+
+  const max = {
+    x: Math.max(...points.map((p) => p.x)),
+    y: Math.max(...points.map((p) => p.y)),
+    z: Math.max(...points.map((p) => p.z)),
+  };
+
+  // Check if kill position is inside the box
+  return (
+    killPos.x >= min.x &&
+    killPos.x <= max.x &&
+    killPos.y >= min.y &&
+    killPos.y <= max.y &&
+    killPos.z >= min.z &&
+    killPos.z <= max.z
+  );
+}
+
+function calculateBoxVolume(points) {
+  const min = {
+    x: Math.min(...points.map((p) => p.x)),
+    y: Math.min(...points.map((p) => p.y)),
+    z: Math.min(...points.map((p) => p.z)),
+  };
+
+  const max = {
+    x: Math.max(...points.map((p) => p.x)),
+    y: Math.max(...points.map((p) => p.y)),
+    z: Math.max(...points.map((p) => p.z)),
+  };
+
+  return (max.x - min.x) * (max.y - min.y) * (max.z - min.z);
+}
+
+function isKillInsideBox(killPos, points) {
+  // Find min and max coordinates
+  const min = {
+    x: Math.min(...points.map((p) => p.x)),
+    y: Math.min(...points.map((p) => p.y)),
+    z: Math.min(...points.map((p) => p.z)),
+  };
+
+  const max = {
+    x: Math.max(...points.map((p) => p.x)),
+    y: Math.max(...points.map((p) => p.y)),
+    z: Math.max(...points.map((p) => p.z)),
+  };
+
+  // Check if kill position is inside the box
+  return (
+    killPos.x >= min.x &&
+    killPos.x <= max.x &&
+    killPos.y >= min.y &&
+    killPos.y <= max.y &&
+    killPos.z >= min.z &&
+    killPos.z <= max.z
+  );
+}
+
+function calculateBoxVolume(points) {
+  const min = {
+    x: Math.min(...points.map((p) => p.x)),
+    y: Math.min(...points.map((p) => p.y)),
+    z: Math.min(...points.map((p) => p.z)),
+  };
+
+  const max = {
+    x: Math.max(...points.map((p) => p.x)),
+    y: Math.max(...points.map((p) => p.y)),
+    z: Math.max(...points.map((p) => p.z)),
+  };
+
+  return (max.x - min.x) * (max.y - min.y) * (max.z - min.z);
+}
+
 // Get all filter lists for a user
 app.get("/api/filter-lists/:userId", (req, res) => {
   const userId = req.params.userId;
@@ -913,7 +1148,23 @@ async function ensureCelestialData(systemId) {
   });
 }
 
+async function processKillmail(killmail) {
+  const systemId = killmail.killmail.solar_system_id;
+  const celestialData = await ensureCelestialData(systemId);
+
+  const pinpointData = calculatePinpoints(
+    celestialData,
+    killmail.killmail.victim.position
+  );
+
+  return {
+    ...killmail,
+    pinpoints: pinpointData,
+  };
+}
+
 // Function to poll for new killmails from RedisQ
+// Modify the polling function to use processKillmail
 async function pollRedisQ() {
   try {
     const response = await axios.get(REDISQ_URL);
@@ -921,21 +1172,16 @@ async function pollRedisQ() {
       const killmail = response.data.package;
 
       if (isWithinLast24Hours(killmail.killmail.killmail_time)) {
-        const systemId = killmail.killmail.solar_system_id;
-
-        // Ensure we have celestial data before processing the killmail
         try {
-          await ensureCelestialData(systemId);
-
-          console.log("Received killmail:", killmail);
+          const processedKillmail = await processKillmail(killmail);
+          console.log("Processed killmail with pinpoints:", processedKillmail);
+          killmails.push(processedKillmail);
+          io.emit("newKillmail", processedKillmail);
+        } catch (error) {
+          console.error("Error processing killmail:", error);
+          // Still emit the original killmail if processing fails
           killmails.push(killmail);
           io.emit("newKillmail", killmail);
-          console.log("Emitted new killmail");
-        } catch (error) {
-          console.error(
-            `Failed to ensure celestial data for system ${systemId}:`,
-            error
-          );
         }
       } else {
         console.log("Received killmail older than 24 hours, discarding");

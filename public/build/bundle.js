@@ -203,6 +203,16 @@ var app = (function () {
 
 	/**
 	 * @returns {void} */
+	function set_style(node, key, value, important) {
+		if (value == null) {
+			node.style.removeProperty(key);
+		} else {
+			node.style.setProperty(key, value, important ? 'important' : '');
+		}
+	}
+
+	/**
+	 * @returns {void} */
 	function select_option(select, value, mounting) {
 		for (let i = 0; i < select.options.length; i += 1) {
 			const option = select.options[i];
@@ -5511,7 +5521,7 @@ var app = (function () {
 	}
 
 	// (59:2) {:else}
-	function create_else_block$1(ctx) {
+	function create_else_block$2(ctx) {
 		let each_blocks = [];
 		let each_1_lookup = new Map();
 		let each_1_anchor;
@@ -5562,7 +5572,7 @@ var app = (function () {
 
 		dispatch_dev("SvelteRegisterBlock", {
 			block,
-			id: create_else_block$1.name,
+			id: create_else_block$2.name,
 			type: "else",
 			source: "(59:2) {:else}",
 			ctx
@@ -5762,7 +5772,7 @@ var app = (function () {
 
 		function select_block_type(ctx, dirty) {
 			if (/*localFilterLists*/ ctx[0].length === 0) return create_if_block$5;
-			return create_else_block$1;
+			return create_else_block$2;
 		}
 
 		let current_block_type = select_block_type(ctx);
@@ -69932,24 +69942,24 @@ void main() {
 	const { Error: Error_1, Object: Object_1, console: console_1$1 } = globals;
 	const file$3 = "src\\MapVisualization.svelte";
 
-	// (970:20) 
-	function create_if_block_1$1(ctx) {
+	// (1101:20) 
+	function create_if_block_6(ctx) {
 		let div;
 		let t;
 
 		const block = {
 			c: function create() {
 				div = element("div");
-				t = text(/*error*/ ctx[1]);
+				t = text(/*error*/ ctx[2]);
 				attr_dev(div, "class", "status-message error svelte-1fcbdfq");
-				add_location(div, file$3, 970, 6, 28948);
+				add_location(div, file$3, 1101, 6, 32848);
 			},
 			m: function mount(target, anchor) {
 				insert_dev(target, div, anchor);
 				append_dev(div, t);
 			},
 			p: function update(ctx, dirty) {
-				if (dirty[0] & /*error*/ 2) set_data_dev(t, /*error*/ ctx[1]);
+				if (dirty[0] & /*error*/ 4) set_data_dev(t, /*error*/ ctx[2]);
 			},
 			d: function destroy(detaching) {
 				if (detaching) {
@@ -69960,17 +69970,17 @@ void main() {
 
 		dispatch_dev("SvelteRegisterBlock", {
 			block,
-			id: create_if_block_1$1.name,
+			id: create_if_block_6.name,
 			type: "if",
-			source: "(970:20) ",
+			source: "(1101:20) ",
 			ctx
 		});
 
 		return block;
 	}
 
-	// (968:4) {#if loading}
-	function create_if_block$3(ctx) {
+	// (1099:4) {#if loading}
+	function create_if_block_5(ctx) {
 		let div;
 
 		const block = {
@@ -69978,7 +69988,7 @@ void main() {
 				div = element("div");
 				div.textContent = "Loading map...";
 				attr_dev(div, "class", "status-message svelte-1fcbdfq");
-				add_location(div, file$3, 968, 6, 28870);
+				add_location(div, file$3, 1099, 6, 32770);
 			},
 			m: function mount(target, anchor) {
 				insert_dev(target, div, anchor);
@@ -69993,9 +70003,348 @@ void main() {
 
 		dispatch_dev("SvelteRegisterBlock", {
 			block,
+			id: create_if_block_5.name,
+			type: "if",
+			source: "(1099:4) {#if loading}",
+			ctx
+		});
+
+		return block;
+	}
+
+	// (1107:4) {#if kill.pinpoints}
+	function create_if_block_4(ctx) {
+		let pre;
+		let t_value = JSON.stringify(/*kill*/ ctx[0].pinpoints, null, 2) + "";
+		let t;
+
+		const block = {
+			c: function create() {
+				pre = element("pre");
+				t = text(t_value);
+				set_style(pre, "display", "none");
+				add_location(pre, file$3, 1107, 6, 32980);
+			},
+			m: function mount(target, anchor) {
+				insert_dev(target, pre, anchor);
+				append_dev(pre, t);
+			},
+			p: function update(ctx, dirty) {
+				if (dirty[0] & /*kill*/ 1 && t_value !== (t_value = JSON.stringify(/*kill*/ ctx[0].pinpoints, null, 2) + "")) set_data_dev(t, t_value);
+			},
+			d: function destroy(detaching) {
+				if (detaching) {
+					detach_dev(pre);
+				}
+			}
+		};
+
+		dispatch_dev("SvelteRegisterBlock", {
+			block,
+			id: create_if_block_4.name,
+			type: "if",
+			source: "(1107:4) {#if kill.pinpoints}",
+			ctx
+		});
+
+		return block;
+	}
+
+	// (1159:4) {:else}
+	function create_else_block$1(ctx) {
+		let p;
+
+		const block = {
+			c: function create() {
+				p = element("p");
+				p.textContent = "Wreck triangulation not possible";
+				attr_dev(p, "class", "svelte-1fcbdfq");
+				add_location(p, file$3, 1159, 6, 34887);
+			},
+			m: function mount(target, anchor) {
+				insert_dev(target, p, anchor);
+			},
+			p: noop,
+			d: function destroy(detaching) {
+				if (detaching) {
+					detach_dev(p);
+				}
+			}
+		};
+
+		dispatch_dev("SvelteRegisterBlock", {
+			block,
+			id: create_else_block$1.name,
+			type: "else",
+			source: "(1159:4) {:else}",
+			ctx
+		});
+
+		return block;
+	}
+
+	// (1153:88) 
+	function create_if_block_3(ctx) {
+		let p;
+		let t0;
+		let t1_value = /*kill*/ ctx[0].pinpoints.nearestCelestial.name + "";
+		let t1;
+		let t2;
+		let t3_value = (/*kill*/ ctx[0].pinpoints.nearestCelestial.distance / 1000).toFixed(2) + "";
+		let t3;
+		let t4;
+
+		const block = {
+			c: function create() {
+				p = element("p");
+				t0 = text("Nearest celestial: ");
+				t1 = text(t1_value);
+				t2 = text(" (");
+				t3 = text(t3_value);
+				t4 = text(" km)");
+				attr_dev(p, "class", "svelte-1fcbdfq");
+				add_location(p, file$3, 1153, 6, 34694);
+			},
+			m: function mount(target, anchor) {
+				insert_dev(target, p, anchor);
+				append_dev(p, t0);
+				append_dev(p, t1);
+				append_dev(p, t2);
+				append_dev(p, t3);
+				append_dev(p, t4);
+			},
+			p: function update(ctx, dirty) {
+				if (dirty[0] & /*kill*/ 1 && t1_value !== (t1_value = /*kill*/ ctx[0].pinpoints.nearestCelestial.name + "")) set_data_dev(t1, t1_value);
+				if (dirty[0] & /*kill*/ 1 && t3_value !== (t3_value = (/*kill*/ ctx[0].pinpoints.nearestCelestial.distance / 1000).toFixed(2) + "")) set_data_dev(t3, t3_value);
+			},
+			d: function destroy(detaching) {
+				if (detaching) {
+					detach_dev(p);
+				}
+			}
+		};
+
+		dispatch_dev("SvelteRegisterBlock", {
+			block,
+			id: create_if_block_3.name,
+			type: "if",
+			source: "(1153:88) ",
+			ctx
+		});
+
+		return block;
+	}
+
+	// (1132:74) 
+	function create_if_block_2(ctx) {
+		let p0;
+		let t0;
+		let t1_value = /*kill*/ ctx[0].pinpoints.points[0].name + "";
+		let t1;
+		let t2;
+		let t3_value = (/*kill*/ ctx[0].pinpoints.points[0].distance / 1000).toFixed(2) + "";
+		let t3;
+		let t4;
+		let t5;
+		let p1;
+		let t6;
+		let t7_value = /*kill*/ ctx[0].pinpoints.points[1].name + "";
+		let t7;
+		let t8;
+		let t9_value = (/*kill*/ ctx[0].pinpoints.points[1].distance / 1000).toFixed(2) + "";
+		let t9;
+		let t10;
+		let t11;
+		let p2;
+		let t12;
+		let t13_value = /*kill*/ ctx[0].pinpoints.points[2].name + "";
+		let t13;
+		let t14;
+		let t15_value = (/*kill*/ ctx[0].pinpoints.points[2].distance / 1000).toFixed(2) + "";
+		let t15;
+		let t16;
+		let t17;
+		let p3;
+		let t18;
+		let t19_value = /*kill*/ ctx[0].pinpoints.points[3].name + "";
+		let t19;
+		let t20;
+		let t21_value = (/*kill*/ ctx[0].pinpoints.points[3].distance / 1000).toFixed(2) + "";
+		let t21;
+		let t22;
+
+		const block = {
+			c: function create() {
+				p0 = element("p");
+				t0 = text("Pinpoint 1: ");
+				t1 = text(t1_value);
+				t2 = text(" (");
+				t3 = text(t3_value);
+				t4 = text(" km)");
+				t5 = space();
+				p1 = element("p");
+				t6 = text("Pinpoint 2: ");
+				t7 = text(t7_value);
+				t8 = text(" (");
+				t9 = text(t9_value);
+				t10 = text(" km)");
+				t11 = space();
+				p2 = element("p");
+				t12 = text("Pinpoint 3: ");
+				t13 = text(t13_value);
+				t14 = text(" (");
+				t15 = text(t15_value);
+				t16 = text(" km)");
+				t17 = space();
+				p3 = element("p");
+				t18 = text("Pinpoint 4: ");
+				t19 = text(t19_value);
+				t20 = text(" (");
+				t21 = text(t21_value);
+				t22 = text(" km)");
+				attr_dev(p0, "class", "svelte-1fcbdfq");
+				add_location(p0, file$3, 1132, 6, 33968);
+				attr_dev(p1, "class", "svelte-1fcbdfq");
+				add_location(p1, file$3, 1137, 6, 34127);
+				attr_dev(p2, "class", "svelte-1fcbdfq");
+				add_location(p2, file$3, 1142, 6, 34286);
+				attr_dev(p3, "class", "svelte-1fcbdfq");
+				add_location(p3, file$3, 1147, 6, 34445);
+			},
+			m: function mount(target, anchor) {
+				insert_dev(target, p0, anchor);
+				append_dev(p0, t0);
+				append_dev(p0, t1);
+				append_dev(p0, t2);
+				append_dev(p0, t3);
+				append_dev(p0, t4);
+				insert_dev(target, t5, anchor);
+				insert_dev(target, p1, anchor);
+				append_dev(p1, t6);
+				append_dev(p1, t7);
+				append_dev(p1, t8);
+				append_dev(p1, t9);
+				append_dev(p1, t10);
+				insert_dev(target, t11, anchor);
+				insert_dev(target, p2, anchor);
+				append_dev(p2, t12);
+				append_dev(p2, t13);
+				append_dev(p2, t14);
+				append_dev(p2, t15);
+				append_dev(p2, t16);
+				insert_dev(target, t17, anchor);
+				insert_dev(target, p3, anchor);
+				append_dev(p3, t18);
+				append_dev(p3, t19);
+				append_dev(p3, t20);
+				append_dev(p3, t21);
+				append_dev(p3, t22);
+			},
+			p: function update(ctx, dirty) {
+				if (dirty[0] & /*kill*/ 1 && t1_value !== (t1_value = /*kill*/ ctx[0].pinpoints.points[0].name + "")) set_data_dev(t1, t1_value);
+				if (dirty[0] & /*kill*/ 1 && t3_value !== (t3_value = (/*kill*/ ctx[0].pinpoints.points[0].distance / 1000).toFixed(2) + "")) set_data_dev(t3, t3_value);
+				if (dirty[0] & /*kill*/ 1 && t7_value !== (t7_value = /*kill*/ ctx[0].pinpoints.points[1].name + "")) set_data_dev(t7, t7_value);
+				if (dirty[0] & /*kill*/ 1 && t9_value !== (t9_value = (/*kill*/ ctx[0].pinpoints.points[1].distance / 1000).toFixed(2) + "")) set_data_dev(t9, t9_value);
+				if (dirty[0] & /*kill*/ 1 && t13_value !== (t13_value = /*kill*/ ctx[0].pinpoints.points[2].name + "")) set_data_dev(t13, t13_value);
+				if (dirty[0] & /*kill*/ 1 && t15_value !== (t15_value = (/*kill*/ ctx[0].pinpoints.points[2].distance / 1000).toFixed(2) + "")) set_data_dev(t15, t15_value);
+				if (dirty[0] & /*kill*/ 1 && t19_value !== (t19_value = /*kill*/ ctx[0].pinpoints.points[3].name + "")) set_data_dev(t19, t19_value);
+				if (dirty[0] & /*kill*/ 1 && t21_value !== (t21_value = (/*kill*/ ctx[0].pinpoints.points[3].distance / 1000).toFixed(2) + "")) set_data_dev(t21, t21_value);
+			},
+			d: function destroy(detaching) {
+				if (detaching) {
+					detach_dev(p0);
+					detach_dev(t5);
+					detach_dev(p1);
+					detach_dev(t11);
+					detach_dev(p2);
+					detach_dev(t17);
+					detach_dev(p3);
+				}
+			}
+		};
+
+		dispatch_dev("SvelteRegisterBlock", {
+			block,
+			id: create_if_block_2.name,
+			type: "if",
+			source: "(1132:74) ",
+			ctx
+		});
+
+		return block;
+	}
+
+	// (1126:88) 
+	function create_if_block_1$1(ctx) {
+		let p;
+		let t0;
+		let t1_value = (/*kill*/ ctx[0].pinpoints.nearestCelestial.distance / 1000).toFixed(2) + "";
+		let t1;
+		let t2;
+
+		const block = {
+			c: function create() {
+				p = element("p");
+				t0 = text("Triangulation possible - Near celestial (");
+				t1 = text(t1_value);
+				t2 = text(" km)");
+				attr_dev(p, "class", "svelte-1fcbdfq");
+				add_location(p, file$3, 1126, 6, 33730);
+			},
+			m: function mount(target, anchor) {
+				insert_dev(target, p, anchor);
+				append_dev(p, t0);
+				append_dev(p, t1);
+				append_dev(p, t2);
+			},
+			p: function update(ctx, dirty) {
+				if (dirty[0] & /*kill*/ 1 && t1_value !== (t1_value = (/*kill*/ ctx[0].pinpoints.nearestCelestial.distance / 1000).toFixed(2) + "")) set_data_dev(t1, t1_value);
+			},
+			d: function destroy(detaching) {
+				if (detaching) {
+					detach_dev(p);
+				}
+			}
+		};
+
+		dispatch_dev("SvelteRegisterBlock", {
+			block,
+			id: create_if_block_1$1.name,
+			type: "if",
+			source: "(1126:88) ",
+			ctx
+		});
+
+		return block;
+	}
+
+	// (1124:4) {#if kill.pinpoints?.atCelestial}
+	function create_if_block$3(ctx) {
+		let p;
+
+		const block = {
+			c: function create() {
+				p = element("p");
+				p.textContent = "Triangulation possible - At celestial";
+				attr_dev(p, "class", "svelte-1fcbdfq");
+				add_location(p, file$3, 1124, 6, 33588);
+			},
+			m: function mount(target, anchor) {
+				insert_dev(target, p, anchor);
+			},
+			p: noop,
+			d: function destroy(detaching) {
+				if (detaching) {
+					detach_dev(p);
+				}
+			}
+		};
+
+		dispatch_dev("SvelteRegisterBlock", {
+			block,
 			id: create_if_block$3.name,
 			type: "if",
-			source: "(968:4) {#if loading}",
+			source: "(1124:4) {#if kill.pinpoints?.atCelestial}",
 			ctx
 		});
 
@@ -70010,43 +70359,52 @@ void main() {
 		let div1;
 		let t2;
 		let div2;
-		let p0;
 		let t3;
+		let p0;
 		let t4;
 		let t5;
-		let p1;
 		let t6;
+		let p1;
 		let t7;
 		let t8;
-		let p2;
 		let t9;
-		let t10_value = /*pinpoints*/ ctx[5][0] + "";
-		let t10;
+		let p2;
+		let a;
 		let t11;
-		let p3;
+		let span;
 		let t12;
-		let t13_value = /*pinpoints*/ ctx[5][1] + "";
+		let t13_value = /*kill*/ ctx[0].killmail.victim.position.x + "";
 		let t13;
 		let t14;
-		let p4;
+		let t15_value = /*kill*/ ctx[0].killmail.victim.position.y + "";
 		let t15;
-		let t16_value = /*pinpoints*/ ctx[5][2] + "";
 		let t16;
+		let t17_value = /*kill*/ ctx[0].killmail.victim.position.z + "";
 		let t17;
-		let p5;
 		let t18;
-		let t19_value = /*pinpoints*/ ctx[5][3] + "";
 		let t19;
 		let mounted;
 		let dispose;
 
 		function select_block_type(ctx, dirty) {
-			if (/*loading*/ ctx[2]) return create_if_block$3;
-			if (/*error*/ ctx[1]) return create_if_block_1$1;
+			if (/*loading*/ ctx[3]) return create_if_block_5;
+			if (/*error*/ ctx[2]) return create_if_block_6;
 		}
 
 		let current_block_type = select_block_type(ctx);
-		let if_block = current_block_type && current_block_type(ctx);
+		let if_block0 = current_block_type && current_block_type(ctx);
+		let if_block1 = /*kill*/ ctx[0].pinpoints && create_if_block_4(ctx);
+
+		function select_block_type_1(ctx, dirty) {
+			if (/*kill*/ ctx[0].pinpoints?.atCelestial) return create_if_block$3;
+			if (/*kill*/ ctx[0].pinpoints?.nearestCelestial && /*kill*/ ctx[0].pinpoints?.triangulationPossible) return create_if_block_1$1;
+			if (/*kill*/ ctx[0].pinpoints?.hasBox && /*kill*/ ctx[0].pinpoints.points.length >= 4) return create_if_block_2;
+			if (/*kill*/ ctx[0].pinpoints?.triangulationPossible && /*kill*/ ctx[0].pinpoints?.nearestCelestial) return create_if_block_3;
+			return create_else_block$1;
+		}
+
+		let current_block_type_1 = select_block_type_1(ctx);
+		let if_block2 = current_block_type_1(ctx);
 
 		const block = {
 			c: function create() {
@@ -70056,54 +70414,56 @@ void main() {
 				button.textContent = "Focus Sun";
 				t1 = space();
 				div1 = element("div");
-				if (if_block) if_block.c();
+				if (if_block0) if_block0.c();
 				t2 = space();
 				div2 = element("div");
+				if (if_block1) if_block1.c();
+				t3 = space();
 				p0 = element("p");
-				t3 = text("System name: ");
-				t4 = text(/*systemName*/ ctx[3]);
-				t5 = space();
+				t4 = text("System name: ");
+				t5 = text(/*systemName*/ ctx[4]);
+				t6 = space();
 				p1 = element("p");
-				t6 = text("Closest Celestial: ");
-				t7 = text(/*closestCelestial*/ ctx[4]);
-				t8 = space();
+				t7 = text("Closest Celestial: ");
+				t8 = text(/*closestCelestial*/ ctx[5]);
+				t9 = space();
 				p2 = element("p");
-				t9 = text("Pinpoint 1: ");
-				t10 = text(t10_value);
+				a = element("a");
+				a.textContent = "Kill Location";
 				t11 = space();
-				p3 = element("p");
-				t12 = text("Pinpoint 2: ");
+				span = element("span");
+				t12 = text("(");
 				t13 = text(t13_value);
-				t14 = space();
-				p4 = element("p");
-				t15 = text("Pinpoint 3: ");
-				t16 = text(t16_value);
-				t17 = space();
-				p5 = element("p");
-				t18 = text("Pinpoint 4: ");
-				t19 = text(t19_value);
+				t14 = text(", ");
+				t15 = text(t15_value);
+				t16 = text(", ");
+				t17 = text(t17_value);
+				t18 = text(")");
+				t19 = space();
+				if_block2.c();
 				attr_dev(button, "class", "focus-sun svelte-1fcbdfq");
-				add_location(button, file$3, 963, 4, 28712);
+				add_location(button, file$3, 1094, 4, 32612);
 				attr_dev(div0, "class", "controls svelte-1fcbdfq");
-				add_location(div0, file$3, 962, 2, 28684);
+				add_location(div0, file$3, 1093, 2, 32584);
 				attr_dev(div1, "class", "map-container svelte-1fcbdfq");
-				add_location(div1, file$3, 966, 2, 28794);
+				add_location(div1, file$3, 1097, 2, 32694);
 				attr_dev(p0, "class", "svelte-1fcbdfq");
-				add_location(p0, file$3, 975, 4, 29052);
+				add_location(p0, file$3, 1109, 4, 33071);
 				attr_dev(p1, "class", "svelte-1fcbdfq");
-				add_location(p1, file$3, 976, 4, 29090);
+				add_location(p1, file$3, 1110, 4, 33109);
+				attr_dev(a, "href", "#");
+				attr_dev(a, "class", "kill-location");
+				set_style(a, "color", "white");
+				set_style(a, "text-decoration", "none");
+				add_location(a, file$3, 1113, 6, 33223);
+				set_style(span, "color", "#666");
+				add_location(span, file$3, 1118, 6, 33362);
 				attr_dev(p2, "class", "svelte-1fcbdfq");
-				add_location(p2, file$3, 977, 4, 29140);
-				attr_dev(p3, "class", "svelte-1fcbdfq");
-				add_location(p3, file$3, 978, 4, 29179);
-				attr_dev(p4, "class", "svelte-1fcbdfq");
-				add_location(p4, file$3, 979, 4, 29218);
-				attr_dev(p5, "class", "svelte-1fcbdfq");
-				add_location(p5, file$3, 980, 4, 29257);
+				add_location(p2, file$3, 1111, 4, 33159);
 				attr_dev(div2, "class", "info-panel svelte-1fcbdfq");
-				add_location(div2, file$3, 974, 2, 29022);
+				add_location(div2, file$3, 1105, 2, 32922);
 				attr_dev(div3, "class", "visualization-container svelte-1fcbdfq");
-				add_location(div3, file$3, 961, 0, 28643);
+				add_location(div3, file$3, 1092, 0, 32543);
 			},
 			l: function claim(nodes) {
 				throw new Error_1("options.hydrate only works if the component was compiled with the `hydratable: true` option");
@@ -70114,33 +70474,33 @@ void main() {
 				append_dev(div0, button);
 				append_dev(div3, t1);
 				append_dev(div3, div1);
-				if (if_block) if_block.m(div1, null);
-				/*div1_binding*/ ctx[9](div1);
+				if (if_block0) if_block0.m(div1, null);
+				/*div1_binding*/ ctx[8](div1);
 				append_dev(div3, t2);
 				append_dev(div3, div2);
+				if (if_block1) if_block1.m(div2, null);
+				append_dev(div2, t3);
 				append_dev(div2, p0);
-				append_dev(p0, t3);
 				append_dev(p0, t4);
-				append_dev(div2, t5);
+				append_dev(p0, t5);
+				append_dev(div2, t6);
 				append_dev(div2, p1);
-				append_dev(p1, t6);
 				append_dev(p1, t7);
-				append_dev(div2, t8);
+				append_dev(p1, t8);
+				append_dev(div2, t9);
 				append_dev(div2, p2);
-				append_dev(p2, t9);
-				append_dev(p2, t10);
-				append_dev(div2, t11);
-				append_dev(div2, p3);
-				append_dev(p3, t12);
-				append_dev(p3, t13);
-				append_dev(div2, t14);
-				append_dev(div2, p4);
-				append_dev(p4, t15);
-				append_dev(p4, t16);
-				append_dev(div2, t17);
-				append_dev(div2, p5);
-				append_dev(p5, t18);
-				append_dev(p5, t19);
+				append_dev(p2, a);
+				append_dev(p2, t11);
+				append_dev(p2, span);
+				append_dev(span, t12);
+				append_dev(span, t13);
+				append_dev(span, t14);
+				append_dev(span, t15);
+				append_dev(span, t16);
+				append_dev(span, t17);
+				append_dev(span, t18);
+				append_dev(div2, t19);
+				if_block2.m(div2, null);
 
 				if (!mounted) {
 					dispose = listen_dev(button, "click", /*focusOnSun*/ ctx[6], false, false, false, false);
@@ -70148,24 +70508,48 @@ void main() {
 				}
 			},
 			p: function update(ctx, dirty) {
-				if (current_block_type === (current_block_type = select_block_type(ctx)) && if_block) {
-					if_block.p(ctx, dirty);
+				if (current_block_type === (current_block_type = select_block_type(ctx)) && if_block0) {
+					if_block0.p(ctx, dirty);
 				} else {
-					if (if_block) if_block.d(1);
-					if_block = current_block_type && current_block_type(ctx);
+					if (if_block0) if_block0.d(1);
+					if_block0 = current_block_type && current_block_type(ctx);
 
-					if (if_block) {
-						if_block.c();
-						if_block.m(div1, null);
+					if (if_block0) {
+						if_block0.c();
+						if_block0.m(div1, null);
 					}
 				}
 
-				if (dirty[0] & /*systemName*/ 8) set_data_dev(t4, /*systemName*/ ctx[3]);
-				if (dirty[0] & /*closestCelestial*/ 16) set_data_dev(t7, /*closestCelestial*/ ctx[4]);
-				if (dirty[0] & /*pinpoints*/ 32 && t10_value !== (t10_value = /*pinpoints*/ ctx[5][0] + "")) set_data_dev(t10, t10_value);
-				if (dirty[0] & /*pinpoints*/ 32 && t13_value !== (t13_value = /*pinpoints*/ ctx[5][1] + "")) set_data_dev(t13, t13_value);
-				if (dirty[0] & /*pinpoints*/ 32 && t16_value !== (t16_value = /*pinpoints*/ ctx[5][2] + "")) set_data_dev(t16, t16_value);
-				if (dirty[0] & /*pinpoints*/ 32 && t19_value !== (t19_value = /*pinpoints*/ ctx[5][3] + "")) set_data_dev(t19, t19_value);
+				if (/*kill*/ ctx[0].pinpoints) {
+					if (if_block1) {
+						if_block1.p(ctx, dirty);
+					} else {
+						if_block1 = create_if_block_4(ctx);
+						if_block1.c();
+						if_block1.m(div2, t3);
+					}
+				} else if (if_block1) {
+					if_block1.d(1);
+					if_block1 = null;
+				}
+
+				if (dirty[0] & /*systemName*/ 16) set_data_dev(t5, /*systemName*/ ctx[4]);
+				if (dirty[0] & /*closestCelestial*/ 32) set_data_dev(t8, /*closestCelestial*/ ctx[5]);
+				if (dirty[0] & /*kill*/ 1 && t13_value !== (t13_value = /*kill*/ ctx[0].killmail.victim.position.x + "")) set_data_dev(t13, t13_value);
+				if (dirty[0] & /*kill*/ 1 && t15_value !== (t15_value = /*kill*/ ctx[0].killmail.victim.position.y + "")) set_data_dev(t15, t15_value);
+				if (dirty[0] & /*kill*/ 1 && t17_value !== (t17_value = /*kill*/ ctx[0].killmail.victim.position.z + "")) set_data_dev(t17, t17_value);
+
+				if (current_block_type_1 === (current_block_type_1 = select_block_type_1(ctx)) && if_block2) {
+					if_block2.p(ctx, dirty);
+				} else {
+					if_block2.d(1);
+					if_block2 = current_block_type_1(ctx);
+
+					if (if_block2) {
+						if_block2.c();
+						if_block2.m(div2, null);
+					}
+				}
 			},
 			i: noop,
 			o: noop,
@@ -70174,11 +70558,13 @@ void main() {
 					detach_dev(div3);
 				}
 
-				if (if_block) {
-					if_block.d();
+				if (if_block0) {
+					if_block0.d();
 				}
 
-				/*div1_binding*/ ctx[9](null);
+				/*div1_binding*/ ctx[8](null);
+				if (if_block1) if_block1.d();
+				if_block2.d();
 				mounted = false;
 				dispose();
 			}
@@ -70196,6 +70582,7 @@ void main() {
 	}
 
 	const SCALE_FACTOR = 1e-9;
+	const KM_PER_AU = 149597870.7;
 
 	function findParentPlanet(moonData, celestialData) {
 		// Get roman numeral from moon name (e.g., "Moon I" -> "I")
@@ -70284,8 +70671,15 @@ void main() {
 		return guiContainer;
 	}
 
-	function calculatePinpoints(celestials, killPosition) {
-		return ["TBD", "TBD", "TBD", "TBD"];
+	// Add new formatter function
+	function formatDistance(meters) {
+		const km = meters / 1000;
+
+		if (km >= KM_PER_AU * 0.5) {
+			return `${(km / KM_PER_AU).toFixed(2)} AU`;
+		}
+
+		return `${km.toFixed(2)} km`;
 	}
 
 	function instance$3($$self, $$props, $$invalidate) {
@@ -70313,18 +70707,85 @@ void main() {
 		const objectsWithLabels = new Map();
 
 		const SIZES = {
-			KILL: { radius: 20 },
-			SUN: { radius: 40 },
-			PLANET: { radius: 0.03 },
-			MOON: { radius: 0.005 },
+			KILL: { radius: 10 },
+			SUN: { radius: 30 },
+			PLANET: { radius: 0.003 },
+			MOON: { radius: 0.00009 },
 			ASTEROID: {
 				radius: 0.05,
 				particleCount: 5,
-				spread: 0.001
+				spread: 0.1
 			},
 			STARGATE: { radius: 6, length: 3, sphereRadius: 5 },
-			STATION: { size: 10 }
+			STATION: { size: 20 }
 		};
+
+		function createPinpointBox(pinpointData) {
+			if (!pinpointData || !pinpointData.hasBox) {
+				console.log("No valid pinpoint data:", pinpointData);
+				return null;
+			}
+
+			console.log("Creating pinpoint box with data:", pinpointData);
+			const points = pinpointData.points.map(point => new Vector3(point.position.x * SCALE_FACTOR, point.position.y * SCALE_FACTOR, point.position.z * SCALE_FACTOR));
+			console.log("Transformed points:", points);
+			const box = new Group();
+			box.userData.isPinpointBox = true;
+
+			// Create box geometry
+			const minPos = new Vector3(Math.min(...points.map(p => p.x)), Math.min(...points.map(p => p.y)), Math.min(...points.map(p => p.z)));
+
+			const maxPos = new Vector3(Math.max(...points.map(p => p.x)), Math.max(...points.map(p => p.y)), Math.max(...points.map(p => p.z)));
+			const boxGeometry = new BoxGeometry(maxPos.x - minPos.x || 1, maxPos.y - minPos.y || 1, maxPos.z - minPos.z || 1);
+
+			const boxMaterial = new MeshBasicMaterial({
+					color: 0x00ff00,
+					transparent: true,
+					opacity: 0.1,
+					side: DoubleSide
+				});
+
+			const boxMesh = new Mesh(boxGeometry, boxMaterial);
+			boxMesh.position.set((minPos.x + maxPos.x) / 2, (minPos.y + maxPos.y) / 2, (minPos.z + maxPos.z) / 2);
+
+			// Add edges
+			const edges = new EdgesGeometry(boxGeometry);
+
+			const edgeMaterial = new LineBasicMaterial({
+					color: 0x00ff00,
+					transparent: true,
+					opacity: 0.5
+				});
+
+			const edgeMesh = new LineSegments(edges, edgeMaterial);
+			edgeMesh.position.copy(boxMesh.position);
+			box.add(boxMesh);
+			box.add(edgeMesh);
+			return box;
+		}
+
+		function createKillpointSprite(position) {
+			const canvas = document.createElement("canvas");
+			canvas.width = 32;
+			canvas.height = 32;
+			const context = canvas.getContext("2d");
+
+			// Draw red circle with white border
+			context.beginPath();
+
+			context.arc(16, 16, 12, 0, 2 * Math.PI);
+			context.fillStyle = "#ff0000";
+			context.fill();
+			context.strokeStyle = "#ffffff";
+			context.lineWidth = 2;
+			context.stroke();
+			const texture = new CanvasTexture(canvas);
+			const spriteMaterial = new SpriteMaterial({ map: texture, sizeAttenuation: true });
+			const sprite = new Sprite(spriteMaterial);
+			sprite.position.copy(position);
+			sprite.scale.set(20, 20, 1); // Adjust size as needed
+			return sprite;
+		}
 
 		function createLocationSprite(position, type, name) {
 			const canvas = document.createElement("canvas");
@@ -70546,9 +71007,9 @@ void main() {
 			if (objectData.type === "sun") baseSize = SIZES.SUN.radius; else if (objectData.type === "planet") baseSize = SIZES.PLANET.radius; else if (objectData.type === "moon") baseSize = SIZES.MOON.radius; else if (objectData.type === "station") baseSize = SIZES.STATION.size; else if (objectData.type === "stargate") baseSize = SIZES.STARGATE.radius; else if (objectData.type === "killmail") baseSize = SIZES.KILL.radius; else baseSize = SIZES.PLANET.radius; // Default case
 
 			// Calculate view distance based on object size
-			const viewFactor = 20;
+			const viewFactor = 5;
 
-			const viewDistance = baseSize * viewFactor;
+			const viewDistance = Math.max(baseSize * viewFactor, 0.1);
 			const offset = new Vector3(viewDistance, viewDistance, viewDistance);
 			const targetCameraPosition = targetPosition.clone().add(offset);
 			const startPosition = camera.position.clone();
@@ -70578,31 +71039,31 @@ void main() {
 		function updateInfoPanel(objectData = null) {
 			const infoPanel = document.querySelector(".info-panel");
 			if (!infoPanel) return;
+			const killPos = kill.killmail.victim.position;
+			let pinpointHtml = "";
 
-			// Early check for kill data
-			if (!kill?.killmail?.victim?.position) {
-				console.error("Missing kill position data");
-				return;
+			if (kill.pinpoints?.atCelestial) {
+				pinpointHtml = "<p>Triangulation possible - At celestial</p>";
+			} else if (kill.pinpoints?.nearestCelestial && kill.pinpoints?.triangulationPossible) {
+				pinpointHtml = `<p>Triangulation possible - Near celestial: ${kill.pinpoints.nearestCelestial.name} (${formatDistance(kill.pinpoints.nearestCelestial.distance)})</p>`;
+			} else if (kill.pinpoints?.hasBox && kill.pinpoints.points.length >= 4) {
+				pinpointHtml = kill.pinpoints.points.map((point, i) => `<p>Pinpoint ${i + 1}: ${point.name} (${formatDistance(point.distance)})</p>`).join("");
+			} else {
+				pinpointHtml = "<p>Wreck triangulation not possible</p>";
 			}
 
-			const killPos = kill.killmail.victim.position;
-			const formattedCoords = `(${(killPos.x * SCALE_FACTOR).toFixed(0)}, ${(killPos.y * SCALE_FACTOR).toFixed(0)}, ${(killPos.z * SCALE_FACTOR).toFixed(0)}) km`;
-
-			// Always show these elements
 			infoPanel.innerHTML = `
-        <p>System name: ${systemName || "Unknown"}</p>
-        <p>Closest Celestial: ${closestCelestial || "Unknown"}</p>
-        <p><a href="#" class="kill-location">Kill Location: ${formattedCoords}</a></p>
-        <p>Pinpoint 1: ${pinpoints[0] || "TBD"}</p>
-        <p>Pinpoint 2: ${pinpoints[1] || "TBD"}</p>
-        <p>Pinpoint 3: ${pinpoints[2] || "TBD"}</p>
-        <p>Pinpoint 4: ${pinpoints[3] || "TBD"}</p>
-        ${objectData
+    <p>System name: ${systemName || "Unknown"}</p>
+    <p>Closest Celestial: ${closestCelestial || "Unknown"}</p>
+    <p><a href="#" class="kill-location" style="color: white; text-decoration: none;">Kill Location</a> 
+      <span style="color: #666;">(${killPos.x}, ${killPos.y}, ${killPos.z})</span></p>
+    ${pinpointHtml}
+    ${objectData
 		? `<p>Selected: ${objectData.name} (${objectData.type})</p>`
 		: ""}
-    `;
+  `;
 
-			// Add click handler for kill location
+			// Re-add click handler for kill location
 			const killLocationLink = infoPanel.querySelector(".kill-location");
 
 			if (killLocationLink) {
@@ -70680,7 +71141,7 @@ void main() {
 			let minDistance = Infinity;
 
 			celestials.forEach(celestial => {
-				if (celestial.id === "killmail") return;
+				if (celestial.id === "killmail" || !celestial.itemname) return;
 				const celestialPos = new Vector3(celestial.x || 0, celestial.y || 0, celestial.z || 0);
 				const distance = celestialPos.distanceTo(killPos);
 
@@ -70691,7 +71152,7 @@ void main() {
 			});
 
 			return closest
-			? `${closest.itemname} (${(minDistance * SCALE_FACTOR).toFixed(2)} km)`
+			? `${closest.itemname} (${formatDistance(minDistance)})`
 			: "Unknown";
 		}
 
@@ -70873,8 +71334,8 @@ void main() {
 		async function initVisualization(celestialData) {
 			if (!kill?.killmail?.victim?.position) {
 				console.error("Missing kill position data:", kill);
-				$$invalidate(1, error = "Invalid kill data");
-				$$invalidate(2, loading = false);
+				$$invalidate(2, error = "Invalid kill data");
+				$$invalidate(3, loading = false);
 				return;
 			}
 
@@ -70883,7 +71344,7 @@ void main() {
 
 			scene = new Scene();
 			scene.background = new Color(0x000000);
-			camera = new PerspectiveCamera(75, container.clientWidth / container.clientHeight, 0.1, 1000000000);
+			camera = new PerspectiveCamera(75, container.clientWidth / container.clientHeight, 0.001, 1000000000); // Much smaller near plane
 			renderer = new WebGLRenderer({ antialias: true });
 			renderer.setSize(container.clientWidth, container.clientHeight);
 			container.appendChild(renderer.domElement);
@@ -70892,26 +71353,20 @@ void main() {
 			cameraTarget = new Object3D();
 
 			scene.add(cameraTarget);
-			const killPosition = kill.killmail.victim.position;
+			const killPosition = new Vector3(kill.killmail.victim.position.x * SCALE_FACTOR, kill.killmail.victim.position.y * SCALE_FACTOR, kill.killmail.victim.position.z * SCALE_FACTOR);
 
-			// Create kill location
-			const killObject = createCelestialObject(
-				{
-					id: "killmail",
-					x: killPosition.x,
-					y: killPosition.y,
-					z: killPosition.z,
-					typename: "Kill Location"
-				},
-				allCelestialData
-			);
+			// Create kill location sprite
+			const killSprite = createKillpointSprite(killPosition);
 
-			if (killObject) {
-				scene.add(killObject);
-				console.log("Kill object added to scene", killObject);
-			}
+			scene.add(killSprite);
 
-			// Add other celestials
+			objectsWithLabels.set(killSprite, {
+				name: "Kill Location",
+				type: "killmail",
+				position: killSprite.position.clone()
+			});
+
+			// Add celestials
 			celestialData.forEach(celestial => {
 				if (celestial.id !== "killmail") {
 					const mesh = createCelestialObject(celestial, allCelestialData);
@@ -70919,8 +71374,20 @@ void main() {
 				}
 			});
 
-			camera.position.set(killPosition.x * SCALE_FACTOR + 50, killPosition.y * SCALE_FACTOR + 50, killPosition.z * SCALE_FACTOR + 50);
-			camera.lookAt(killPosition.x * SCALE_FACTOR, killPosition.y * SCALE_FACTOR, killPosition.z * SCALE_FACTOR);
+			// Add pinpoint box if it exists
+			// Add pinpoint box if it exists
+			if (kill.pinpoints?.hasBox) {
+				console.log("Adding pinpoint box for:", kill.pinpoints);
+				const pinpointBox = createPinpointBox(kill.pinpoints);
+
+				if (pinpointBox) {
+					scene.add(pinpointBox);
+					console.log("Added pinpoint box to scene");
+				}
+			}
+
+			camera.position.set(killPosition.x + 50, killPosition.y + 50, killPosition.z + 50);
+			camera.lookAt(killPosition);
 			controls = new OrbitControls(camera, renderer.domElement);
 			controls.enableDamping = true;
 			controls.dampingFactor = 0.05;
@@ -70928,12 +71395,22 @@ void main() {
 			initDirectionalGUI();
 			const ambientLight = new AmbientLight(0xffffff, 0.5);
 			scene.add(ambientLight);
-			$$invalidate(3, systemName = celestialData[1]?.solarsystemname || "Unknown System");
-			$$invalidate(4, closestCelestial = findClosestCelestial(celestialData, killPosition));
-			$$invalidate(5, pinpoints = calculatePinpoints());
+
+			// Update system information
+			$$invalidate(4, systemName = celestialData[1]?.solarsystemname || "Unknown System");
+
+			$$invalidate(5, closestCelestial = findClosestCelestial(celestialData, kill.killmail.victim.position));
+
+			// Update pinpoint information from server data
+			if (kill.pinpoints?.hasBox) {
+				pinpoints = kill.pinpoints.points.map(point => `${point.name} (${(point.distance * SCALE_FACTOR).toFixed(2)} km)`);
+			} else {
+				pinpoints = ["No valid pinpoint box found", "", "", ""];
+			}
+
 			updateInfoPanel();
 			animate();
-			$$invalidate(2, loading = false);
+			$$invalidate(3, loading = false);
 		}
 
 		function handleResize() {
@@ -70961,13 +71438,13 @@ void main() {
 					container.addEventListener("click", onClick);
 					window.addEventListener("resize", handleResize);
 				} else {
-					$$invalidate(1, error = "Failed to fetch celestial data");
-					$$invalidate(2, loading = false);
+					$$invalidate(2, error = "Failed to fetch celestial data");
+					$$invalidate(3, loading = false);
 				}
 			} catch(err) {
-				$$invalidate(1, error = "Error initializing map visualization");
+				$$invalidate(2, error = "Error initializing map visualization");
 				console.error(err);
-				$$invalidate(2, loading = false);
+				$$invalidate(3, loading = false);
 			}
 		});
 
@@ -71049,13 +71526,13 @@ void main() {
 		function div1_binding($$value) {
 			binding_callbacks[$$value ? 'unshift' : 'push'](() => {
 				container = $$value;
-				$$invalidate(0, container);
+				$$invalidate(1, container);
 			});
 		}
 
 		$$self.$$set = $$props => {
 			if ('killmailId' in $$props) $$invalidate(7, killmailId = $$props.killmailId);
-			if ('kill' in $$props) $$invalidate(8, kill = $$props.kill);
+			if ('kill' in $$props) $$invalidate(0, kill = $$props.kill);
 		};
 
 		$$self.$capture_state = () => ({
@@ -71088,7 +71565,10 @@ void main() {
 			allCelestialData,
 			SCALE_FACTOR,
 			objectsWithLabels,
+			KM_PER_AU,
 			SIZES,
+			createPinpointBox,
+			createKillpointSprite,
 			createLocationSprite,
 			findParentPlanet,
 			createMoonOrbit,
@@ -71106,7 +71586,7 @@ void main() {
 			createDirectionalGUI,
 			updateDirectionalGUI,
 			findClosestCelestial,
-			calculatePinpoints,
+			formatDistance,
 			createCelestialObject,
 			initVisualization,
 			handleResize,
@@ -71115,18 +71595,18 @@ void main() {
 
 		$$self.$inject_state = $$props => {
 			if ('killmailId' in $$props) $$invalidate(7, killmailId = $$props.killmailId);
-			if ('kill' in $$props) $$invalidate(8, kill = $$props.kill);
-			if ('container' in $$props) $$invalidate(0, container = $$props.container);
+			if ('kill' in $$props) $$invalidate(0, kill = $$props.kill);
+			if ('container' in $$props) $$invalidate(1, container = $$props.container);
 			if ('scene' in $$props) scene = $$props.scene;
 			if ('camera' in $$props) camera = $$props.camera;
 			if ('renderer' in $$props) renderer = $$props.renderer;
 			if ('controls' in $$props) controls = $$props.controls;
 			if ('compass' in $$props) compass = $$props.compass;
-			if ('error' in $$props) $$invalidate(1, error = $$props.error);
-			if ('loading' in $$props) $$invalidate(2, loading = $$props.loading);
-			if ('systemName' in $$props) $$invalidate(3, systemName = $$props.systemName);
-			if ('closestCelestial' in $$props) $$invalidate(4, closestCelestial = $$props.closestCelestial);
-			if ('pinpoints' in $$props) $$invalidate(5, pinpoints = $$props.pinpoints);
+			if ('error' in $$props) $$invalidate(2, error = $$props.error);
+			if ('loading' in $$props) $$invalidate(3, loading = $$props.loading);
+			if ('systemName' in $$props) $$invalidate(4, systemName = $$props.systemName);
+			if ('closestCelestial' in $$props) $$invalidate(5, closestCelestial = $$props.closestCelestial);
+			if ('pinpoints' in $$props) pinpoints = $$props.pinpoints;
 			if ('raycaster' in $$props) raycaster = $$props.raycaster;
 			if ('mouse' in $$props) mouse = $$props.mouse;
 			if ('hoveredObject' in $$props) hoveredObject = $$props.hoveredObject;
@@ -71144,14 +71624,14 @@ void main() {
 		}
 
 		$$self.$$.update = () => {
-			if ($$self.$$.dirty[0] & /*kill*/ 256) {
+			if ($$self.$$.dirty[0] & /*kill*/ 1) {
 				// Type checking
 				if (kill && typeof kill !== "object") {
 					throw new Error("kill prop must be an object");
 				}
 			}
 
-			if ($$self.$$.dirty[0] & /*kill*/ 256) {
+			if ($$self.$$.dirty[0] & /*kill*/ 1) {
 				if (kill) {
 					console.log("Kill data in MapVisualization:", kill);
 				}
@@ -71159,15 +71639,14 @@ void main() {
 		};
 
 		return [
+			kill,
 			container,
 			error,
 			loading,
 			systemName,
 			closestCelestial,
-			pinpoints,
 			focusOnSun,
 			killmailId,
-			kill,
 			div1_binding
 		];
 	}
@@ -71175,7 +71654,7 @@ void main() {
 	class MapVisualization extends SvelteComponentDev {
 		constructor(options) {
 			super(options);
-			init(this, options, instance$3, create_fragment$3, safe_not_equal, { killmailId: 7, kill: 8 }, null, [-1, -1]);
+			init(this, options, instance$3, create_fragment$3, safe_not_equal, { killmailId: 7, kill: 0 }, null, [-1, -1]);
 
 			dispatch_dev("SvelteRegisterComponent", {
 				component: this,
