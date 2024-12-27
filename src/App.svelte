@@ -1,3 +1,4 @@
+<!-- src/App.svelte -->
 <script>
   import { onMount } from "svelte";
   import socket from "./socket.js";
@@ -5,10 +6,13 @@
   import KillmailViewer from "./KillmailViewer.svelte";
   import { killmails, settings, filterLists, profiles } from "./store";
   import Login from "./Login.svelte";
+  import ActiveBattles from "./ActiveBattles.svelte";
+  import ActiveCamps from "./ActiveCamps.svelte";
 
   let loggedIn = false;
   let username = "";
   let settingsManagerComponent;
+  let currentPage = "kills";
 
   // Subscribe to stores
   $: userSettings = $settings;
@@ -65,20 +69,47 @@
   {#if !loggedIn}
     <Login on:login={handleLogin} />
   {:else}
-    <div class="dashboard">
-      <div class="settings-section">
-        <SettingsManager bind:this={settingsManagerComponent} {socket} />
-      </div>
-      <div class="killmail-section">
-        <KillmailViewer />
-        <button
-          on:click={() => {
-            socket.emit("clearKills");
-            clearKills(); // Call the store's clearKills function
-          }}>Clear All Kills</button
-        >
-      </div>
+    <div class="nav-tabs">
+      <button
+        class:active={currentPage === "kills"}
+        on:click={() => (currentPage = "kills")}
+      >
+        Kills
+      </button>
+      <button
+        class:active={currentPage === "battles"}
+        on:click={() => (currentPage = "battles")}
+      >
+        Active Battles
+      </button>
+      <button
+        class:active={currentPage === "camps"}
+        on:click={() => (currentPage = "camps")}
+      >
+        Gate Camps
+      </button>
     </div>
+
+    {#if currentPage === "kills"}
+      <div class="dashboard">
+        <div class="settings-section">
+          <SettingsManager bind:this={settingsManagerComponent} {socket} />
+        </div>
+        <div class="killmail-section">
+          <KillmailViewer />
+          <button
+            on:click={() => {
+              socket.emit("clearKills");
+              clearKills();
+            }}>Clear All Kills</button
+          >
+        </div>
+      </div>
+    {:else if currentPage === "battles"}
+      <ActiveBattles />
+    {:else}
+      <ActiveCamps />
+    {/if}
   {/if}
 </main>
 
@@ -93,7 +124,7 @@
   .dashboard {
     display: flex;
     flex-direction: column;
-    height: calc(100vh - 100px); /* Adjust based on your header height */
+    height: calc(100vh - 100px);
   }
 
   .settings-section {
@@ -105,6 +136,31 @@
   .killmail-section {
     flex: 1;
     overflow-y: auto;
+  }
+
+  .nav-tabs {
+    display: flex;
+    gap: 1em;
+    margin-bottom: 1em;
+  }
+
+  .nav-tabs button {
+    padding: 0.5em 1em;
+    border: none;
+    background: #ddd;
+    cursor: pointer;
+    border-radius: 4px;
+    transition: background-color 0.2s;
+  }
+
+  .nav-tabs button.active {
+    background: #007bff;
+    color: white;
+  }
+
+  .nav-tabs button:hover {
+    background: #0056b3;
+    color: white;
   }
 
   @media (min-width: 768px) {

@@ -193,8 +193,8 @@
     cursor: help;
   }
 
-  .scroll-box {
-    height: 400px;
+  :global(.killmail-section) {
+    height: calc(100vh - 150px); /* Adjust value as needed */
     overflow-y: auto;
   }
 

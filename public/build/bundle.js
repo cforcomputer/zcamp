@@ -121,6 +121,14 @@ var app = (function () {
 	}
 
 	/**
+	 * @returns {void} */
+	function destroy_each(iterations, detaching) {
+		for (let i = 0; i < iterations.length; i += 1) {
+			if (iterations[i]) iterations[i].d(detaching);
+		}
+	}
+
+	/**
 	 * @template {keyof HTMLElementTagNameMap} K
 	 * @param {K} name
 	 * @returns {HTMLElementTagNameMap[K]}
@@ -5335,6 +5343,322 @@ var app = (function () {
 		});
 	}
 
+	// src/battleStore.js
+
+	const activeBattles = writable([]);
+
+	const BATTLE_TIMEOUT = 10 * 60 * 1000; // 10 minutes in milliseconds
+	const MAX_BATTLE_AGE = 5 * 60 * 1000; // 5 minutes in milliseconds
+
+	function areKillsRelated(kill1, kill2) {
+	  // Helper function to extract all relevant IDs from a killmail
+	  function extractIds(killmail) {
+	    const ids = {
+	      characters: new Set(),
+	      corporations: new Set(),
+	      alliances: new Set(),
+	    };
+
+	    // Add victim IDs
+	    if (killmail.killmail.victim.character_id) {
+	      ids.characters.add(killmail.killmail.victim.character_id);
+	    }
+	    if (killmail.killmail.victim.corporation_id) {
+	      ids.corporations.add(killmail.killmail.victim.corporation_id);
+	    }
+	    if (killmail.killmail.victim.alliance_id) {
+	      ids.alliances.add(killmail.killmail.victim.alliance_id);
+	    }
+
+	    // Add attacker IDs
+	    killmail.killmail.attackers.forEach((attacker) => {
+	      if (attacker.character_id) ids.characters.add(attacker.character_id);
+	      if (attacker.corporation_id)
+	        ids.corporations.add(attacker.corporation_id);
+	      if (attacker.alliance_id) ids.alliances.add(attacker.alliance_id);
+	    });
+
+	    return ids;
+	  }
+
+	  const ids1 = extractIds(kill1);
+	  const ids2 = extractIds(kill2);
+
+	  // Check for any overlapping IDs
+	  const hasOverlap =
+	    [...ids1.characters].some((id) => ids2.characters.has(id)) ||
+	    [...ids1.corporations].some((id) => ids2.corporations.has(id)) ||
+	    [...ids1.alliances].some((id) => ids2.alliances.has(id));
+
+	  return hasOverlap;
+	}
+
+	function addKillmailToBattles(killmail) {
+	  activeBattles.update((battles) => {
+	    const now = new Date().getTime();
+	    new Date(killmail.killmail.killmail_time).getTime();
+
+	    // Remove old battles
+	    battles = battles.filter((battle) => {
+	      const age = now - new Date(battle.lastKill).getTime();
+	      return age < BATTLE_TIMEOUT;
+	    });
+
+	    const systemId = killmail.killmail.solar_system_id;
+
+	    // First, look for related battles in the same system
+	    let foundBattle = battles.find(
+	      (battle) =>
+	        battle.systemId === systemId &&
+	        battle.kills.some((kill) => areKillsRelated(kill, killmail))
+	    );
+
+	    if (foundBattle) {
+	      // Add kill to existing battle
+	      foundBattle.kills.push(killmail);
+	      foundBattle.totalValue += killmail.zkb.totalValue;
+	      foundBattle.lastKill = killmail.killmail.killmail_time;
+
+	      // Update involved entities
+	      killmail.killmail.attackers.forEach((attacker) => {
+	        if (attacker.character_id)
+	          foundBattle.involvedCharacters.add(attacker.character_id);
+	        if (attacker.corporation_id)
+	          foundBattle.involvedCorporations.add(attacker.corporation_id);
+	        if (attacker.alliance_id)
+	          foundBattle.involvedAlliances.add(attacker.alliance_id);
+	      });
+
+	      if (killmail.killmail.victim.character_id) {
+	        foundBattle.involvedCharacters.add(
+	          killmail.killmail.victim.character_id
+	        );
+	      }
+	      if (killmail.killmail.victim.corporation_id) {
+	        foundBattle.involvedCorporations.add(
+	          killmail.killmail.victim.corporation_id
+	        );
+	      }
+	      if (killmail.killmail.victim.alliance_id) {
+	        foundBattle.involvedAlliances.add(killmail.killmail.victim.alliance_id);
+	      }
+	    } else {
+	      // Create new battle
+	      const newBattle = {
+	        systemId,
+	        kills: [killmail],
+	        totalValue: killmail.zkb.totalValue,
+	        lastKill: killmail.killmail.killmail_time,
+	        involvedCharacters: new Set(),
+	        involvedCorporations: new Set(),
+	        involvedAlliances: new Set(),
+	      };
+
+	      // Add initial involved entities
+	      killmail.killmail.attackers.forEach((attacker) => {
+	        if (attacker.character_id)
+	          newBattle.involvedCharacters.add(attacker.character_id);
+	        if (attacker.corporation_id)
+	          newBattle.involvedCorporations.add(attacker.corporation_id);
+	        if (attacker.alliance_id)
+	          newBattle.involvedAlliances.add(attacker.alliance_id);
+	      });
+
+	      if (killmail.killmail.victim.character_id) {
+	        newBattle.involvedCharacters.add(killmail.killmail.victim.character_id);
+	      }
+	      if (killmail.killmail.victim.corporation_id) {
+	        newBattle.involvedCorporations.add(
+	          killmail.killmail.victim.corporation_id
+	        );
+	      }
+	      if (killmail.killmail.victim.alliance_id) {
+	        newBattle.involvedAlliances.add(killmail.killmail.victim.alliance_id);
+	      }
+
+	      battles.push(newBattle);
+	    }
+
+	    // Check for battle merging
+	    battles = mergeBattles(battles);
+
+	    return battles;
+	  });
+	}
+
+	function mergeBattles(battles) {
+	  let merged = true;
+	  while (merged) {
+	    merged = false;
+	    for (let i = 0; i < battles.length; i++) {
+	      for (let j = i + 1; j < battles.length; j++) {
+	        if (
+	          battles[i].systemId === battles[j].systemId &&
+	          battles[i].kills.some((kill1) =>
+	            battles[j].kills.some((kill2) => areKillsRelated(kill1, kill2))
+	          )
+	        ) {
+	          // Merge battles[j] into battles[i]
+	          battles[i].kills = [...battles[i].kills, ...battles[j].kills];
+	          battles[i].totalValue += battles[j].totalValue;
+	          battles[i].lastKill = new Date(
+	            Math.max(
+	              new Date(battles[i].lastKill),
+	              new Date(battles[j].lastKill)
+	            )
+	          ).toISOString();
+
+	          // Merge involved entities
+	          battles[j].involvedCharacters.forEach((id) =>
+	            battles[i].involvedCharacters.add(id)
+	          );
+	          battles[j].involvedCorporations.forEach((id) =>
+	            battles[i].involvedCorporations.add(id)
+	          );
+	          battles[j].involvedAlliances.forEach((id) =>
+	            battles[i].involvedAlliances.add(id)
+	          );
+
+	          // Remove battles[j]
+	          battles.splice(j, 1);
+	          merged = true;
+	          break;
+	        }
+	      }
+	      if (merged) break;
+	    }
+	  }
+	  return battles;
+	}
+
+	const filteredBattles = derived(
+	  [activeBattles],
+	  ([$activeBattles], set, minInvolved = 2) => {
+	    const now = new Date().getTime();
+	    const filtered = $activeBattles
+	      .filter((battle) => {
+	        const age = now - new Date(battle.lastKill).getTime();
+	        return (
+	          age < MAX_BATTLE_AGE && battle.involvedCharacters.size >= minInvolved
+	        );
+	      })
+	      .map((battle) => ({
+	        ...battle,
+	        involvedCount: battle.involvedCharacters.size,
+	        corporationCount: battle.involvedCorporations.size,
+	        allianceCount: battle.involvedAlliances.size,
+	      }));
+	    set(filtered);
+	  }
+	);
+
+	// src/campStore.js
+
+	const activeCamps = writable([]);
+
+	const CAMP_TIMEOUT = 60 * 60 * 1000; // 1 hour in milliseconds
+
+	function isStargate(celestialName) {
+	  return celestialName?.toLowerCase().includes("stargate");
+	}
+
+	function getAttackerIds(attackers) {
+	  const ids = {
+	    character_ids: new Set(),
+	    corporation_ids: new Set(),
+	    alliance_ids: new Set(),
+	  };
+
+	  attackers.forEach((attacker) => {
+	    if (attacker.character_id) ids.character_ids.add(attacker.character_id);
+	    if (attacker.corporation_id)
+	      ids.corporation_ids.add(attacker.corporation_id);
+	    if (attacker.alliance_id) ids.alliance_ids.add(attacker.alliance_id);
+	  });
+
+	  return ids;
+	}
+
+	function checkRelatedAttackers(camp, killmail) {
+	  const newIds = getAttackerIds(killmail.killmail.attackers);
+
+	  // Check for any overlapping IDs
+	  return (
+	    [...camp.character_ids].some((id) => newIds.character_ids.has(id)) ||
+	    [...camp.corporation_ids].some((id) => newIds.corporation_ids.has(id)) ||
+	    [...camp.alliance_ids].some((id) => newIds.alliance_ids.has(id))
+	  );
+	}
+
+	function addKillmailToCamps(killmail) {
+	  if (
+	    !killmail.pinpoints?.nearestCelestial ||
+	    !isStargate(killmail.pinpoints.nearestCelestial.name)
+	  ) {
+	    return;
+	  }
+
+	  activeCamps.update((camps) => {
+	    const now = new Date().getTime();
+
+	    // Remove old camps
+	    camps = camps.filter((camp) => {
+	      const age = now - new Date(camp.lastKill).getTime();
+	      return age < CAMP_TIMEOUT;
+	    });
+
+	    const systemId = killmail.killmail.solar_system_id;
+	    const stargateName = killmail.pinpoints.nearestCelestial.name;
+
+	    // Find existing camp
+	    let camp = camps.find(
+	      (c) => c.systemId === systemId && c.stargateName === stargateName
+	    );
+
+	    if (camp) {
+	      // Only add kill if attackers are related
+	      if (checkRelatedAttackers(camp, killmail)) {
+	        camp.kills.push(killmail);
+	        camp.lastKill = killmail.killmail.killmail_time;
+	        camp.totalValue += killmail.zkb.totalValue;
+
+	        // Update attacker IDs
+	        const newIds = getAttackerIds(killmail.killmail.attackers);
+	        newIds.character_ids.forEach((id) => camp.character_ids.add(id));
+	        newIds.corporation_ids.forEach((id) => camp.corporation_ids.add(id));
+	        newIds.alliance_ids.forEach((id) => camp.alliance_ids.add(id));
+	      }
+	    } else {
+	      // Create new camp
+	      const ids = getAttackerIds(killmail.killmail.attackers);
+	      camp = {
+	        systemId,
+	        stargateName,
+	        kills: [killmail],
+	        totalValue: killmail.zkb.totalValue,
+	        lastKill: killmail.killmail.killmail_time,
+	        character_ids: ids.character_ids,
+	        corporation_ids: ids.corporation_ids,
+	        alliance_ids: ids.alliance_ids,
+	      };
+	      camps.push(camp);
+	    }
+
+	    return camps;
+	  });
+	}
+
+	const filteredCamps = derived([activeCamps], ([$activeCamps]) => {
+	  return $activeCamps
+	    .filter((camp) => camp.kills.length >= 2)
+	    .map((camp) => ({
+	      ...camp,
+	      numAttackers: camp.character_ids.size,
+	      numCorps: camp.corporation_ids.size,
+	      numAlliances: camp.alliance_ids.size,
+	    }));
+	});
+
 	const killmails = writable([]);
 	const filterLists = writable([]);
 	const profiles = writable([]);
@@ -5627,6 +5951,11 @@ var app = (function () {
 	      }
 	    }, 0);
 
+	    addKillmailToBattles(killmail);
+
+	    // Check for gate camps
+	    addKillmailToCamps(killmail);
+
 	    return updatedKillmails;
 	  });
 	});
@@ -5645,9 +5974,9 @@ var app = (function () {
 	/* src\FilterListManager.svelte generated by Svelte v4.2.19 */
 
 	const { console: console_1$5 } = globals;
-	const file$6 = "src\\FilterListManager.svelte";
+	const file$8 = "src\\FilterListManager.svelte";
 
-	function get_each_context$2(ctx, list, i) {
+	function get_each_context$4(ctx, list, i) {
 		const child_ctx = ctx.slice();
 		child_ctx[10] = list[i];
 		return child_ctx;
@@ -5660,12 +5989,12 @@ var app = (function () {
 		let each_1_anchor;
 		let each_value = ensure_array_like_dev(/*localFilterLists*/ ctx[0]);
 		const get_key = ctx => /*list*/ ctx[10].id;
-		validate_each_keys(ctx, each_value, get_each_context$2, get_key);
+		validate_each_keys(ctx, each_value, get_each_context$4, get_key);
 
 		for (let i = 0; i < each_value.length; i += 1) {
-			let child_ctx = get_each_context$2(ctx, each_value, i);
+			let child_ctx = get_each_context$4(ctx, each_value, i);
 			let key = get_key(child_ctx);
-			each_1_lookup.set(key, each_blocks[i] = create_each_block$2(key, child_ctx));
+			each_1_lookup.set(key, each_blocks[i] = create_each_block$4(key, child_ctx));
 		}
 
 		const block = {
@@ -5688,8 +6017,8 @@ var app = (function () {
 			p: function update(ctx, dirty) {
 				if (dirty & /*deleteFilterList, localFilterLists, toggleExclude, toggleFilterList*/ 15) {
 					each_value = ensure_array_like_dev(/*localFilterLists*/ ctx[0]);
-					validate_each_keys(ctx, each_value, get_each_context$2, get_key);
-					each_blocks = update_keyed_each(each_blocks, dirty, get_key, 1, ctx, each_value, each_1_lookup, each_1_anchor.parentNode, destroy_block, create_each_block$2, each_1_anchor, get_each_context$2);
+					validate_each_keys(ctx, each_value, get_each_context$4, get_key);
+					each_blocks = update_keyed_each(each_blocks, dirty, get_key, 1, ctx, each_value, each_1_lookup, each_1_anchor.parentNode, destroy_block, create_each_block$4, each_1_anchor, get_each_context$4);
 				}
 			},
 			d: function destroy(detaching) {
@@ -5715,14 +6044,14 @@ var app = (function () {
 	}
 
 	// (57:2) {#if localFilterLists.length === 0}
-	function create_if_block$5(ctx) {
+	function create_if_block$6(ctx) {
 		let p;
 
 		const block = {
 			c: function create() {
 				p = element("p");
 				p.textContent = "No filter lists created yet. Create one to get started!";
-				add_location(p, file$6, 57, 4, 1605);
+				add_location(p, file$8, 57, 4, 1605);
 			},
 			m: function mount(target, anchor) {
 				insert_dev(target, p, anchor);
@@ -5737,7 +6066,7 @@ var app = (function () {
 
 		dispatch_dev("SvelteRegisterBlock", {
 			block,
-			id: create_if_block$5.name,
+			id: create_if_block$6.name,
 			type: "if",
 			source: "(57:2) {#if localFilterLists.length === 0}",
 			ctx
@@ -5747,7 +6076,7 @@ var app = (function () {
 	}
 
 	// (60:4) {#each localFilterLists as list (list.id)}
-	function create_each_block$2(key_1, ctx) {
+	function create_each_block$4(key_1, ctx) {
 		let div;
 		let input;
 		let input_id_value;
@@ -5809,22 +6138,22 @@ var app = (function () {
 				attr_dev(input, "type", "checkbox");
 				attr_dev(input, "id", input_id_value = `filter-list-${/*list*/ ctx[10].id}`);
 				input.checked = input_checked_value = /*list*/ ctx[10].enabled;
-				add_location(input, file$6, 61, 8, 1774);
+				add_location(input, file$8, 61, 8, 1774);
 				attr_dev(label, "for", label_for_value = `filter-list-${/*list*/ ctx[10].id}`);
 				attr_dev(label, "class", "svelte-14z6a7f");
-				add_location(label, file$6, 67, 8, 1959);
+				add_location(label, file$8, 67, 8, 1959);
 				option0.__value = "include";
 				set_input_value(option0, option0.__value);
-				add_location(option0, file$6, 74, 10, 2223);
+				add_location(option0, file$8, 74, 10, 2223);
 				option1.__value = "exclude";
 				set_input_value(option1, option1.__value);
-				add_location(option1, file$6, 75, 10, 2275);
+				add_location(option1, file$8, 75, 10, 2275);
 				attr_dev(select, "class", "svelte-14z6a7f");
-				add_location(select, file$6, 70, 8, 2082);
+				add_location(select, file$8, 70, 8, 2082);
 				attr_dev(button, "class", "svelte-14z6a7f");
-				add_location(button, file$6, 77, 8, 2344);
+				add_location(button, file$8, 77, 8, 2344);
 				attr_dev(div, "class", "filter-list-item svelte-14z6a7f");
-				add_location(div, file$6, 60, 6, 1734);
+				add_location(div, file$8, 60, 6, 1734);
 				this.first = div;
 			},
 			m: function mount(target, anchor) {
@@ -5889,7 +6218,7 @@ var app = (function () {
 
 		dispatch_dev("SvelteRegisterBlock", {
 			block,
-			id: create_each_block$2.name,
+			id: create_each_block$4.name,
 			type: "each",
 			source: "(60:4) {#each localFilterLists as list (list.id)}",
 			ctx
@@ -5898,13 +6227,13 @@ var app = (function () {
 		return block;
 	}
 
-	function create_fragment$6(ctx) {
+	function create_fragment$8(ctx) {
 		let div;
 		let h2;
 		let t1;
 
 		function select_block_type(ctx, dirty) {
-			if (/*localFilterLists*/ ctx[0].length === 0) return create_if_block$5;
+			if (/*localFilterLists*/ ctx[0].length === 0) return create_if_block$6;
 			return create_else_block$2;
 		}
 
@@ -5918,9 +6247,9 @@ var app = (function () {
 				h2.textContent = "Filter Lists";
 				t1 = space();
 				if_block.c();
-				add_location(h2, file$6, 55, 2, 1539);
+				add_location(h2, file$8, 55, 2, 1539);
 				attr_dev(div, "class", "filter-list-manager svelte-14z6a7f");
-				add_location(div, file$6, 54, 0, 1502);
+				add_location(div, file$8, 54, 0, 1502);
 			},
 			l: function claim(nodes) {
 				throw new Error("options.hydrate only works if the component was compiled with the `hydratable: true` option");
@@ -5957,7 +6286,7 @@ var app = (function () {
 
 		dispatch_dev("SvelteRegisterBlock", {
 			block,
-			id: create_fragment$6.name,
+			id: create_fragment$8.name,
 			type: "component",
 			source: "",
 			ctx
@@ -5966,7 +6295,7 @@ var app = (function () {
 		return block;
 	}
 
-	function instance$6($$self, $$props, $$invalidate) {
+	function instance$8($$self, $$props, $$invalidate) {
 		let $filterLists;
 		validate_store(filterLists, 'filterLists');
 		component_subscribe($$self, filterLists, $$value => $$invalidate(4, $filterLists = $$value));
@@ -6071,13 +6400,13 @@ var app = (function () {
 	class FilterListManager extends SvelteComponentDev {
 		constructor(options) {
 			super(options);
-			init(this, options, instance$6, create_fragment$6, safe_not_equal, {});
+			init(this, options, instance$8, create_fragment$8, safe_not_equal, {});
 
 			dispatch_dev("SvelteRegisterComponent", {
 				component: this,
 				tagName: "FilterListManager",
 				options,
-				id: create_fragment$6.name
+				id: create_fragment$8.name
 			});
 		}
 	}
@@ -6085,16 +6414,16 @@ var app = (function () {
 	/* src\ProfileListManager.svelte generated by Svelte v4.2.19 */
 
 	const { console: console_1$4 } = globals;
-	const file$5 = "src\\ProfileListManager.svelte";
+	const file$7 = "src\\ProfileListManager.svelte";
 
-	function get_each_context$1(ctx, list, i) {
+	function get_each_context$3(ctx, list, i) {
 		const child_ctx = ctx.slice();
 		child_ctx[10] = list[i];
 		return child_ctx;
 	}
 
 	// (55:6) {#each profiles || [] as profile (profile.id)}
-	function create_each_block$1(key_1, ctx) {
+	function create_each_block$3(key_1, ctx) {
 		let option;
 		let t_value = /*profile*/ ctx[10].name + "";
 		let t;
@@ -6108,7 +6437,7 @@ var app = (function () {
 				t = text(t_value);
 				option.__value = option_value_value = /*profile*/ ctx[10].id;
 				set_input_value(option, option.__value);
-				add_location(option, file$5, 55, 8, 1584);
+				add_location(option, file$7, 55, 8, 1584);
 				this.first = option;
 			},
 			m: function mount(target, anchor) {
@@ -6133,7 +6462,7 @@ var app = (function () {
 
 		dispatch_dev("SvelteRegisterBlock", {
 			block,
-			id: create_each_block$1.name,
+			id: create_each_block$3.name,
 			type: "each",
 			source: "(55:6) {#each profiles || [] as profile (profile.id)}",
 			ctx
@@ -6142,7 +6471,7 @@ var app = (function () {
 		return block;
 	}
 
-	function create_fragment$5(ctx) {
+	function create_fragment$7(ctx) {
 		let div2;
 		let h2;
 		let t1;
@@ -6164,12 +6493,12 @@ var app = (function () {
 		let dispose;
 		let each_value = ensure_array_like_dev(/*profiles*/ ctx[1] || []);
 		const get_key = ctx => /*profile*/ ctx[10].id;
-		validate_each_keys(ctx, each_value, get_each_context$1, get_key);
+		validate_each_keys(ctx, each_value, get_each_context$3, get_key);
 
 		for (let i = 0; i < each_value.length; i += 1) {
-			let child_ctx = get_each_context$1(ctx, each_value, i);
+			let child_ctx = get_each_context$3(ctx, each_value, i);
 			let key = get_key(child_ctx);
-			each_1_lookup.set(key, each_blocks[i] = create_each_block$1(key, child_ctx));
+			each_1_lookup.set(key, each_blocks[i] = create_each_block$3(key, child_ctx));
 		}
 
 		const block = {
@@ -6199,25 +6528,25 @@ var app = (function () {
 				t8 = space();
 				button2 = element("button");
 				button2.textContent = "Save New Profile";
-				add_location(h2, file$5, 50, 2, 1341);
+				add_location(h2, file$7, 50, 2, 1341);
 				option.__value = null;
 				set_input_value(option, option.__value);
-				add_location(option, file$5, 53, 6, 1474);
+				add_location(option, file$7, 53, 6, 1474);
 				attr_dev(select, "class", "svelte-kq5f5p");
 				if (/*selectedProfile*/ ctx[0] === void 0) add_render_callback(() => /*select_change_handler*/ ctx[7].call(select));
-				add_location(select, file$5, 52, 4, 1398);
-				add_location(button0, file$5, 58, 4, 1670);
-				add_location(button1, file$5, 59, 4, 1720);
+				add_location(select, file$7, 52, 4, 1398);
+				add_location(button0, file$7, 58, 4, 1670);
+				add_location(button1, file$7, 59, 4, 1720);
 				attr_dev(div0, "class", "profile-controls svelte-kq5f5p");
-				add_location(div0, file$5, 51, 2, 1362);
+				add_location(div0, file$7, 51, 2, 1362);
 				attr_dev(input, "placeholder", "New profile name");
 				attr_dev(input, "class", "svelte-kq5f5p");
-				add_location(input, file$5, 62, 4, 1813);
-				add_location(button2, file$5, 63, 4, 1887);
+				add_location(input, file$7, 62, 4, 1813);
+				add_location(button2, file$7, 63, 4, 1887);
 				attr_dev(div1, "class", "new-profile svelte-kq5f5p");
-				add_location(div1, file$5, 61, 2, 1782);
+				add_location(div1, file$7, 61, 2, 1782);
 				attr_dev(div2, "class", "profile-list-manager svelte-kq5f5p");
-				add_location(div2, file$5, 49, 0, 1303);
+				add_location(div2, file$7, 49, 0, 1303);
 			},
 			l: function claim(nodes) {
 				throw new Error("options.hydrate only works if the component was compiled with the `hydratable: true` option");
@@ -6264,8 +6593,8 @@ var app = (function () {
 			p: function update(ctx, [dirty]) {
 				if (dirty & /*profiles*/ 2) {
 					each_value = ensure_array_like_dev(/*profiles*/ ctx[1] || []);
-					validate_each_keys(ctx, each_value, get_each_context$1, get_key);
-					each_blocks = update_keyed_each(each_blocks, dirty, get_key, 1, ctx, each_value, each_1_lookup, select, destroy_block, create_each_block$1, null, get_each_context$1);
+					validate_each_keys(ctx, each_value, get_each_context$3, get_key);
+					each_blocks = update_keyed_each(each_blocks, dirty, get_key, 1, ctx, each_value, each_1_lookup, select, destroy_block, create_each_block$3, null, get_each_context$3);
 				}
 
 				if (dirty & /*selectedProfile, profiles*/ 3) {
@@ -6294,7 +6623,7 @@ var app = (function () {
 
 		dispatch_dev("SvelteRegisterBlock", {
 			block,
-			id: create_fragment$5.name,
+			id: create_fragment$7.name,
 			type: "component",
 			source: "",
 			ctx
@@ -6303,7 +6632,7 @@ var app = (function () {
 		return block;
 	}
 
-	function instance$5($$self, $$props, $$invalidate) {
+	function instance$7($$self, $$props, $$invalidate) {
 		let { $$slots: slots = {}, $$scope } = $$props;
 		validate_slots('ProfileListManager', slots, []);
 		const dispatch = createEventDispatcher();
@@ -6414,13 +6743,13 @@ var app = (function () {
 	class ProfileListManager extends SvelteComponentDev {
 		constructor(options) {
 			super(options);
-			init(this, options, instance$5, create_fragment$5, safe_not_equal, { profiles: 1, selectedProfile: 0 });
+			init(this, options, instance$7, create_fragment$7, safe_not_equal, { profiles: 1, selectedProfile: 0 });
 
 			dispatch_dev("SvelteRegisterComponent", {
 				component: this,
 				tagName: "ProfileListManager",
 				options,
-				id: create_fragment$5.name
+				id: create_fragment$7.name
 			});
 		}
 
@@ -6444,10 +6773,10 @@ var app = (function () {
 	/* src\SettingsManager.svelte generated by Svelte v4.2.19 */
 
 	const { console: console_1$3 } = globals;
-	const file$4 = "src\\SettingsManager.svelte";
+	const file$6 = "src\\SettingsManager.svelte";
 
 	// (192:2) {#if localSettings}
-	function create_if_block_1$2(ctx) {
+	function create_if_block_1$4(ctx) {
 		let label0;
 		let input0;
 		let t0;
@@ -6580,7 +6909,7 @@ var app = (function () {
 		let input30;
 		let mounted;
 		let dispose;
-		let if_block = /*localSettings*/ ctx[6].triangulation_filter_enabled && create_if_block_2$1(ctx);
+		let if_block = /*localSettings*/ ctx[6].triangulation_filter_enabled && create_if_block_2$2(ctx);
 
 		const block = {
 			c: function create() {
@@ -6719,148 +7048,148 @@ var app = (function () {
 				t67 = text("Solar System ID:\r\n      ");
 				input30 = element("input");
 				attr_dev(input0, "type", "checkbox");
-				add_location(input0, file$4, 193, 6, 5521);
+				add_location(input0, file$6, 193, 6, 5521);
 				attr_dev(label0, "class", "svelte-gu7nlb");
-				add_location(label0, file$4, 192, 4, 5506);
+				add_location(label0, file$6, 192, 4, 5506);
 				attr_dev(input1, "type", "number");
 				attr_dev(input1, "class", "svelte-gu7nlb");
-				add_location(input1, file$4, 206, 6, 5875);
+				add_location(input1, file$6, 206, 6, 5875);
 				attr_dev(label1, "class", "svelte-gu7nlb");
-				add_location(label1, file$4, 204, 4, 5830);
+				add_location(label1, file$6, 204, 4, 5830);
 				attr_dev(input2, "type", "checkbox");
-				add_location(input2, file$4, 215, 6, 6098);
+				add_location(input2, file$6, 215, 6, 6098);
 				attr_dev(label2, "class", "svelte-gu7nlb");
-				add_location(label2, file$4, 214, 4, 6083);
+				add_location(label2, file$6, 214, 4, 6083);
 				attr_dev(input3, "type", "checkbox");
-				add_location(input3, file$4, 228, 6, 6416);
+				add_location(input3, file$6, 228, 6, 6416);
 				attr_dev(label3, "class", "svelte-gu7nlb");
-				add_location(label3, file$4, 227, 4, 6401);
+				add_location(label3, file$6, 227, 4, 6401);
 				attr_dev(h30, "class", "svelte-gu7nlb");
-				add_location(h30, file$4, 255, 4, 7185);
+				add_location(h30, file$6, 255, 4, 7185);
 				attr_dev(input4, "type", "checkbox");
-				add_location(input4, file$4, 257, 6, 7226);
+				add_location(input4, file$6, 257, 6, 7226);
 				attr_dev(label4, "class", "svelte-gu7nlb");
-				add_location(label4, file$4, 256, 4, 7211);
+				add_location(label4, file$6, 256, 4, 7211);
 				attr_dev(input5, "type", "number");
 				attr_dev(input5, "class", "svelte-gu7nlb");
-				add_location(input5, file$4, 270, 6, 7576);
+				add_location(input5, file$6, 270, 6, 7576);
 				attr_dev(label5, "class", "svelte-gu7nlb");
-				add_location(label5, file$4, 268, 4, 7540);
+				add_location(label5, file$6, 268, 4, 7540);
 				attr_dev(input6, "type", "number");
 				attr_dev(input6, "class", "svelte-gu7nlb");
-				add_location(input6, file$4, 280, 6, 7836);
+				add_location(input6, file$6, 280, 6, 7836);
 				attr_dev(label6, "class", "svelte-gu7nlb");
-				add_location(label6, file$4, 278, 4, 7793);
+				add_location(label6, file$6, 278, 4, 7793);
 				attr_dev(input7, "type", "checkbox");
-				add_location(input7, file$4, 288, 6, 8042);
+				add_location(input7, file$6, 288, 6, 8042);
 				attr_dev(label7, "class", "svelte-gu7nlb");
-				add_location(label7, file$4, 287, 4, 8027);
+				add_location(label7, file$6, 287, 4, 8027);
 				attr_dev(input8, "type", "number");
 				attr_dev(input8, "class", "svelte-gu7nlb");
-				add_location(input8, file$4, 298, 6, 8322);
+				add_location(input8, file$6, 298, 6, 8322);
 				attr_dev(label8, "class", "svelte-gu7nlb");
-				add_location(label8, file$4, 296, 4, 8284);
+				add_location(label8, file$6, 296, 4, 8284);
 				attr_dev(input9, "type", "checkbox");
-				add_location(input9, file$4, 306, 6, 8513);
+				add_location(input9, file$6, 306, 6, 8513);
 				attr_dev(label9, "class", "svelte-gu7nlb");
-				add_location(label9, file$4, 305, 4, 8498);
+				add_location(label9, file$6, 305, 4, 8498);
 				attr_dev(input10, "type", "checkbox");
-				add_location(input10, file$4, 315, 6, 8731);
+				add_location(input10, file$6, 315, 6, 8731);
 				attr_dev(label10, "class", "svelte-gu7nlb");
-				add_location(label10, file$4, 314, 4, 8716);
+				add_location(label10, file$6, 314, 4, 8716);
 				attr_dev(input11, "type", "checkbox");
-				add_location(input11, file$4, 324, 6, 8938);
+				add_location(input11, file$6, 324, 6, 8938);
 				attr_dev(label11, "class", "svelte-gu7nlb");
-				add_location(label11, file$4, 323, 4, 8923);
+				add_location(label11, file$6, 323, 4, 8923);
 				attr_dev(input12, "type", "checkbox");
-				add_location(input12, file$4, 333, 6, 9160);
+				add_location(input12, file$6, 333, 6, 9160);
 				attr_dev(label12, "class", "svelte-gu7nlb");
-				add_location(label12, file$4, 332, 4, 9145);
+				add_location(label12, file$6, 332, 4, 9145);
 				attr_dev(input13, "type", "number");
 				attr_dev(input13, "class", "svelte-gu7nlb");
-				add_location(input13, file$4, 346, 6, 9505);
+				add_location(input13, file$6, 346, 6, 9505);
 				attr_dev(label13, "class", "svelte-gu7nlb");
-				add_location(label13, file$4, 344, 4, 9470);
+				add_location(label13, file$6, 344, 4, 9470);
 				attr_dev(input14, "type", "checkbox");
-				add_location(input14, file$4, 355, 6, 9734);
+				add_location(input14, file$6, 355, 6, 9734);
 				attr_dev(label14, "class", "svelte-gu7nlb");
-				add_location(label14, file$4, 354, 4, 9719);
+				add_location(label14, file$6, 354, 4, 9719);
 				attr_dev(input15, "type", "number");
 				attr_dev(input15, "class", "svelte-gu7nlb");
-				add_location(input15, file$4, 368, 6, 10084);
+				add_location(input15, file$6, 368, 6, 10084);
 				attr_dev(label15, "class", "svelte-gu7nlb");
-				add_location(label15, file$4, 366, 4, 10048);
+				add_location(label15, file$6, 366, 4, 10048);
 				attr_dev(input16, "type", "checkbox");
-				add_location(input16, file$4, 377, 6, 10316);
+				add_location(input16, file$6, 377, 6, 10316);
 				attr_dev(label16, "class", "svelte-gu7nlb");
-				add_location(label16, file$4, 376, 4, 10301);
+				add_location(label16, file$6, 376, 4, 10301);
 				attr_dev(input17, "type", "number");
 				attr_dev(input17, "class", "svelte-gu7nlb");
-				add_location(input17, file$4, 390, 6, 10670);
+				add_location(input17, file$6, 390, 6, 10670);
 				attr_dev(label17, "class", "svelte-gu7nlb");
-				add_location(label17, file$4, 388, 4, 10622);
+				add_location(label17, file$6, 388, 4, 10622);
 				attr_dev(input18, "type", "checkbox");
-				add_location(input18, file$4, 399, 6, 10896);
+				add_location(input18, file$6, 399, 6, 10896);
 				attr_dev(label18, "class", "svelte-gu7nlb");
-				add_location(label18, file$4, 398, 4, 10881);
+				add_location(label18, file$6, 398, 4, 10881);
 				attr_dev(h31, "class", "svelte-gu7nlb");
-				add_location(h31, file$4, 411, 4, 11196);
+				add_location(h31, file$6, 411, 4, 11196);
 				attr_dev(input19, "type", "checkbox");
-				add_location(input19, file$4, 413, 6, 11242);
+				add_location(input19, file$6, 413, 6, 11242);
 				attr_dev(label19, "class", "svelte-gu7nlb");
-				add_location(label19, file$4, 412, 4, 11227);
+				add_location(label19, file$6, 412, 4, 11227);
 				attr_dev(input20, "type", "number");
 				attr_dev(input20, "class", "svelte-gu7nlb");
-				add_location(input20, file$4, 426, 6, 11632);
+				add_location(input20, file$6, 426, 6, 11632);
 				attr_dev(label20, "class", "svelte-gu7nlb");
-				add_location(label20, file$4, 424, 4, 11588);
+				add_location(label20, file$6, 424, 4, 11588);
 				attr_dev(input21, "type", "checkbox");
-				add_location(input21, file$4, 438, 6, 11927);
+				add_location(input21, file$6, 438, 6, 11927);
 				attr_dev(label21, "class", "svelte-gu7nlb");
-				add_location(label21, file$4, 437, 4, 11912);
+				add_location(label21, file$6, 437, 4, 11912);
 				attr_dev(input22, "type", "number");
 				attr_dev(input22, "class", "svelte-gu7nlb");
-				add_location(input22, file$4, 451, 6, 12332);
+				add_location(input22, file$6, 451, 6, 12332);
 				attr_dev(label22, "class", "svelte-gu7nlb");
-				add_location(label22, file$4, 449, 4, 12285);
+				add_location(label22, file$6, 449, 4, 12285);
 				attr_dev(input23, "type", "checkbox");
-				add_location(input23, file$4, 463, 6, 12636);
+				add_location(input23, file$6, 463, 6, 12636);
 				attr_dev(label23, "class", "svelte-gu7nlb");
-				add_location(label23, file$4, 462, 4, 12621);
+				add_location(label23, file$6, 462, 4, 12621);
 				attr_dev(input24, "type", "number");
 				attr_dev(input24, "class", "svelte-gu7nlb");
-				add_location(input24, file$4, 476, 6, 13031);
+				add_location(input24, file$6, 476, 6, 13031);
 				attr_dev(label24, "class", "svelte-gu7nlb");
-				add_location(label24, file$4, 474, 4, 12986);
+				add_location(label24, file$6, 474, 4, 12986);
 				attr_dev(h32, "class", "svelte-gu7nlb");
-				add_location(h32, file$4, 487, 4, 13314);
+				add_location(h32, file$6, 487, 4, 13314);
 				attr_dev(input25, "type", "checkbox");
-				add_location(input25, file$4, 489, 6, 13358);
+				add_location(input25, file$6, 489, 6, 13358);
 				attr_dev(label25, "class", "svelte-gu7nlb");
-				add_location(label25, file$4, 488, 4, 13343);
+				add_location(label25, file$6, 488, 4, 13343);
 				attr_dev(input26, "type", "number");
 				attr_dev(input26, "class", "svelte-gu7nlb");
-				add_location(input26, file$4, 502, 6, 13738);
+				add_location(input26, file$6, 502, 6, 13738);
 				attr_dev(label26, "class", "svelte-gu7nlb");
-				add_location(label26, file$4, 500, 4, 13696);
+				add_location(label26, file$6, 500, 4, 13696);
 				attr_dev(input27, "type", "checkbox");
-				add_location(input27, file$4, 514, 6, 14027);
+				add_location(input27, file$6, 514, 6, 14027);
 				attr_dev(label27, "class", "svelte-gu7nlb");
-				add_location(label27, file$4, 513, 4, 14012);
+				add_location(label27, file$6, 513, 4, 14012);
 				attr_dev(input28, "type", "number");
 				attr_dev(input28, "class", "svelte-gu7nlb");
-				add_location(input28, file$4, 527, 6, 14422);
+				add_location(input28, file$6, 527, 6, 14422);
 				attr_dev(label28, "class", "svelte-gu7nlb");
-				add_location(label28, file$4, 525, 4, 14377);
+				add_location(label28, file$6, 525, 4, 14377);
 				attr_dev(input29, "type", "checkbox");
-				add_location(input29, file$4, 539, 6, 14720);
+				add_location(input29, file$6, 539, 6, 14720);
 				attr_dev(label29, "class", "svelte-gu7nlb");
-				add_location(label29, file$4, 538, 4, 14705);
+				add_location(label29, file$6, 538, 4, 14705);
 				attr_dev(input30, "type", "number");
 				attr_dev(input30, "class", "svelte-gu7nlb");
-				add_location(input30, file$4, 552, 6, 15085);
+				add_location(input30, file$6, 552, 6, 15085);
 				attr_dev(label30, "class", "svelte-gu7nlb");
-				add_location(label30, file$4, 550, 4, 15046);
+				add_location(label30, file$6, 550, 4, 15046);
 			},
 			m: function mount(target, anchor) {
 				insert_dev(target, label0, anchor);
@@ -7116,7 +7445,7 @@ var app = (function () {
 					if (if_block) {
 						if_block.p(ctx, dirty);
 					} else {
-						if_block = create_if_block_2$1(ctx);
+						if_block = create_if_block_2$2(ctx);
 						if_block.c();
 						if_block.m(t8.parentNode, t8);
 					}
@@ -7313,7 +7642,7 @@ var app = (function () {
 
 		dispatch_dev("SvelteRegisterBlock", {
 			block,
-			id: create_if_block_1$2.name,
+			id: create_if_block_1$4.name,
 			type: "if",
 			source: "(192:2) {#if localSettings}",
 			ctx
@@ -7323,7 +7652,7 @@ var app = (function () {
 	}
 
 	// (241:4) {#if localSettings.triangulation_filter_enabled}
-	function create_if_block_2$1(ctx) {
+	function create_if_block_2$2(ctx) {
 		let label;
 		let input;
 		let t;
@@ -7336,9 +7665,9 @@ var app = (function () {
 				input = element("input");
 				t = text("\r\n        Exclude Triangulatable Kills");
 				attr_dev(input, "type", "checkbox");
-				add_location(input, file$4, 242, 8, 6821);
+				add_location(input, file$6, 242, 8, 6821);
 				attr_dev(label, "class", "svelte-gu7nlb");
-				add_location(label, file$4, 241, 6, 6804);
+				add_location(label, file$6, 241, 6, 6804);
 			},
 			m: function mount(target, anchor) {
 				insert_dev(target, label, anchor);
@@ -7372,7 +7701,7 @@ var app = (function () {
 
 		dispatch_dev("SvelteRegisterBlock", {
 			block,
-			id: create_if_block_2$1.name,
+			id: create_if_block_2$2.name,
 			type: "if",
 			source: "(241:4) {#if localSettings.triangulation_filter_enabled}",
 			ctx
@@ -7382,7 +7711,7 @@ var app = (function () {
 	}
 
 	// (576:2) {#if localSettings.webhook_enabled}
-	function create_if_block$4(ctx) {
+	function create_if_block$5(ctx) {
 		let label;
 		let t;
 		let input;
@@ -7398,9 +7727,9 @@ var app = (function () {
 				attr_dev(input, "placeholder", "https://discord.com/api/webhooks/...");
 				set_style(input, "width", "100%");
 				set_style(input, "max-width", "500px");
-				add_location(input, file$4, 578, 6, 15714);
+				add_location(input, file$6, 578, 6, 15714);
 				attr_dev(label, "class", "svelte-gu7nlb");
-				add_location(label, file$4, 576, 4, 15679);
+				add_location(label, file$6, 576, 4, 15679);
 			},
 			m: function mount(target, anchor) {
 				insert_dev(target, label, anchor);
@@ -7434,7 +7763,7 @@ var app = (function () {
 
 		dispatch_dev("SvelteRegisterBlock", {
 			block,
-			id: create_if_block$4.name,
+			id: create_if_block$5.name,
 			type: "if",
 			source: "(576:2) {#if localSettings.webhook_enabled}",
 			ctx
@@ -7443,7 +7772,7 @@ var app = (function () {
 		return block;
 	}
 
-	function create_fragment$4(ctx) {
+	function create_fragment$6(ctx) {
 		let div1;
 		let profilelistmanager;
 		let updating_selectedProfile;
@@ -7504,8 +7833,8 @@ var app = (function () {
 		profilelistmanager.$on("loadProfile", /*loadProfile*/ ctx[11]);
 		profilelistmanager.$on("fetchProfiles", /*fetchProfiles*/ ctx[13]);
 		profilelistmanager.$on("deleteProfile", /*deleteProfile*/ ctx[12]);
-		let if_block0 = /*localSettings*/ ctx[6] && create_if_block_1$2(ctx);
-		let if_block1 = /*localSettings*/ ctx[6].webhook_enabled && create_if_block$4(ctx);
+		let if_block0 = /*localSettings*/ ctx[6] && create_if_block_1$4(ctx);
+		let if_block1 = /*localSettings*/ ctx[6].webhook_enabled && create_if_block$5(ctx);
 		filterlistmanager = new FilterListManager({ $$inline: true });
 		filterlistmanager.$on("updateFilterLists", /*handleFilterListsUpdate*/ ctx[9]);
 
@@ -7560,53 +7889,53 @@ var app = (function () {
 				t23 = space();
 				create_component(filterlistmanager.$$.fragment);
 				attr_dev(h30, "class", "svelte-gu7nlb");
-				add_location(h30, file$4, 564, 2, 15357);
+				add_location(h30, file$6, 564, 2, 15357);
 				attr_dev(input0, "type", "checkbox");
-				add_location(input0, file$4, 566, 4, 15398);
+				add_location(input0, file$6, 566, 4, 15398);
 				attr_dev(label0, "class", "svelte-gu7nlb");
-				add_location(label0, file$4, 565, 2, 15385);
+				add_location(label0, file$6, 565, 2, 15385);
 				attr_dev(h31, "class", "svelte-gu7nlb");
-				add_location(h31, file$4, 588, 2, 16018);
+				add_location(h31, file$6, 588, 2, 16018);
 				attr_dev(input1, "placeholder", "New list name");
-				add_location(input1, file$4, 590, 4, 16064);
+				add_location(input1, file$6, 590, 4, 16064);
 				attr_dev(input2, "placeholder", "Comma-separated IDs");
-				add_location(input2, file$4, 591, 4, 16132);
+				add_location(input2, file$6, 591, 4, 16132);
 				attr_dev(input3, "type", "checkbox");
-				add_location(input3, file$4, 593, 6, 16220);
+				add_location(input3, file$6, 593, 6, 16220);
 				attr_dev(label1, "class", "svelte-gu7nlb");
-				add_location(label1, file$4, 592, 4, 16205);
+				add_location(label1, file$6, 592, 4, 16205);
 				option0.__value = "";
 				set_input_value(option0, option0.__value);
-				add_location(option0, file$4, 597, 6, 16359);
+				add_location(option0, file$6, 597, 6, 16359);
 				option1.__value = "attacker_alliance";
 				set_input_value(option1, option1.__value);
-				add_location(option1, file$4, 598, 6, 16411);
+				add_location(option1, file$6, 598, 6, 16411);
 				option2.__value = "attacker_corporation";
 				set_input_value(option2, option2.__value);
-				add_location(option2, file$4, 599, 6, 16479);
+				add_location(option2, file$6, 599, 6, 16479);
 				option3.__value = "attacker_ship_type";
 				set_input_value(option3, option3.__value);
-				add_location(option3, file$4, 600, 6, 16553);
+				add_location(option3, file$6, 600, 6, 16553);
 				option4.__value = "victim_alliance";
 				set_input_value(option4, option4.__value);
-				add_location(option4, file$4, 601, 6, 16623);
+				add_location(option4, file$6, 601, 6, 16623);
 				option5.__value = "victim_corporation";
 				set_input_value(option5, option5.__value);
-				add_location(option5, file$4, 602, 6, 16687);
+				add_location(option5, file$6, 602, 6, 16687);
 				option6.__value = "ship_type";
 				set_input_value(option6, option6.__value);
-				add_location(option6, file$4, 603, 6, 16757);
+				add_location(option6, file$6, 603, 6, 16757);
 				option7.__value = "solar_system";
 				set_input_value(option7, option7.__value);
-				add_location(option7, file$4, 604, 6, 16809);
+				add_location(option7, file$6, 604, 6, 16809);
 				attr_dev(select, "class", "svelte-gu7nlb");
 				if (/*newListFilterType*/ ctx[4] === void 0) add_render_callback(() => /*select_change_handler*/ ctx[90].call(select));
-				add_location(select, file$4, 596, 4, 16312);
+				add_location(select, file$6, 596, 4, 16312);
 				attr_dev(button, "class", "svelte-gu7nlb");
-				add_location(button, file$4, 606, 4, 16880);
-				add_location(div0, file$4, 589, 2, 16053);
+				add_location(button, file$6, 606, 4, 16880);
+				add_location(div0, file$6, 589, 2, 16053);
 				attr_dev(div1, "class", "settings-manager svelte-gu7nlb");
-				add_location(div1, file$4, 181, 0, 5210);
+				add_location(div1, file$6, 181, 0, 5210);
 			},
 			l: function claim(nodes) {
 				throw new Error("options.hydrate only works if the component was compiled with the `hydratable: true` option");
@@ -7686,7 +8015,7 @@ var app = (function () {
 					if (if_block0) {
 						if_block0.p(ctx, dirty);
 					} else {
-						if_block0 = create_if_block_1$2(ctx);
+						if_block0 = create_if_block_1$4(ctx);
 						if_block0.c();
 						if_block0.m(div1, t1);
 					}
@@ -7703,7 +8032,7 @@ var app = (function () {
 					if (if_block1) {
 						if_block1.p(ctx, dirty);
 					} else {
-						if_block1 = create_if_block$4(ctx);
+						if_block1 = create_if_block$5(ctx);
 						if_block1.c();
 						if_block1.m(div1, t6);
 					}
@@ -7755,7 +8084,7 @@ var app = (function () {
 
 		dispatch_dev("SvelteRegisterBlock", {
 			block,
-			id: create_fragment$4.name,
+			id: create_fragment$6.name,
 			type: "component",
 			source: "",
 			ctx
@@ -7764,7 +8093,7 @@ var app = (function () {
 		return block;
 	}
 
-	function instance$4($$self, $$props, $$invalidate) {
+	function instance$6($$self, $$props, $$invalidate) {
 		let localSettings;
 		let localFilterLists;
 		let localProfiles;
@@ -8390,13 +8719,13 @@ var app = (function () {
 	class SettingsManager extends SvelteComponentDev {
 		constructor(options) {
 			super(options);
-			init(this, options, instance$4, create_fragment$4, safe_not_equal, { socket: 14 }, null, [-1, -1, -1]);
+			init(this, options, instance$6, create_fragment$6, safe_not_equal, { socket: 14 }, null, [-1, -1, -1]);
 
 			dispatch_dev("SvelteRegisterComponent", {
 				component: this,
 				tagName: "SettingsManager",
 				options,
-				id: create_fragment$4.name
+				id: create_fragment$6.name
 			});
 		}
 
@@ -64260,7 +64589,7 @@ void main() {
 	/* src\MapVisualization.svelte generated by Svelte v4.2.19 */
 
 	const { Error: Error_1, Object: Object_1, console: console_1$2 } = globals;
-	const file$3 = "src\\MapVisualization.svelte";
+	const file$5 = "src\\MapVisualization.svelte";
 
 	// (1109:20) 
 	function create_if_block_6(ctx) {
@@ -64272,7 +64601,7 @@ void main() {
 				div = element("div");
 				t = text(/*error*/ ctx[2]);
 				attr_dev(div, "class", "status-message error svelte-ur9yx9");
-				add_location(div, file$3, 1109, 6, 32999);
+				add_location(div, file$5, 1109, 6, 32999);
 			},
 			m: function mount(target, anchor) {
 				insert_dev(target, div, anchor);
@@ -64308,7 +64637,7 @@ void main() {
 				div = element("div");
 				div.textContent = "Loading map...";
 				attr_dev(div, "class", "status-message svelte-ur9yx9");
-				add_location(div, file$3, 1107, 6, 32921);
+				add_location(div, file$5, 1107, 6, 32921);
 			},
 			m: function mount(target, anchor) {
 				insert_dev(target, div, anchor);
@@ -64343,7 +64672,7 @@ void main() {
 				pre = element("pre");
 				t = text(t_value);
 				set_style(pre, "display", "none");
-				add_location(pre, file$3, 1115, 6, 33131);
+				add_location(pre, file$5, 1115, 6, 33131);
 			},
 			m: function mount(target, anchor) {
 				insert_dev(target, pre, anchor);
@@ -64379,7 +64708,7 @@ void main() {
 				p = element("p");
 				p.textContent = "Wreck triangulation not possible";
 				attr_dev(p, "class", "svelte-ur9yx9");
-				add_location(p, file$3, 1155, 6, 34658);
+				add_location(p, file$5, 1155, 6, 34658);
 			},
 			m: function mount(target, anchor) {
 				insert_dev(target, p, anchor);
@@ -64423,7 +64752,7 @@ void main() {
 				t3 = text(t3_value);
 				t4 = text(" km)");
 				attr_dev(p, "class", "svelte-ur9yx9");
-				add_location(p, file$3, 1149, 6, 34465);
+				add_location(p, file$5, 1149, 6, 34465);
 			},
 			m: function mount(target, anchor) {
 				insert_dev(target, p, anchor);
@@ -64456,7 +64785,7 @@ void main() {
 	}
 
 	// (1128:82) 
-	function create_if_block_2(ctx) {
+	function create_if_block_2$1(ctx) {
 		let p0;
 		let t0;
 		let t1_value = /*kill*/ ctx[0].pinpoints.points[0].name + "";
@@ -64523,13 +64852,13 @@ void main() {
 				t21 = text(t21_value);
 				t22 = text(" km)");
 				attr_dev(p0, "class", "svelte-ur9yx9");
-				add_location(p0, file$3, 1128, 6, 33739);
+				add_location(p0, file$5, 1128, 6, 33739);
 				attr_dev(p1, "class", "svelte-ur9yx9");
-				add_location(p1, file$3, 1133, 6, 33898);
+				add_location(p1, file$5, 1133, 6, 33898);
 				attr_dev(p2, "class", "svelte-ur9yx9");
-				add_location(p2, file$3, 1138, 6, 34057);
+				add_location(p2, file$5, 1138, 6, 34057);
 				attr_dev(p3, "class", "svelte-ur9yx9");
-				add_location(p3, file$3, 1143, 6, 34216);
+				add_location(p3, file$5, 1143, 6, 34216);
 			},
 			m: function mount(target, anchor) {
 				insert_dev(target, p0, anchor);
@@ -64585,7 +64914,7 @@ void main() {
 
 		dispatch_dev("SvelteRegisterBlock", {
 			block,
-			id: create_if_block_2.name,
+			id: create_if_block_2$1.name,
 			type: "if",
 			source: "(1128:82) ",
 			ctx
@@ -64595,7 +64924,7 @@ void main() {
 	}
 
 	// (1122:88) 
-	function create_if_block_1$1(ctx) {
+	function create_if_block_1$3(ctx) {
 		let p;
 		let t0;
 		let t1_value = (/*kill*/ ctx[0].pinpoints.nearestCelestial.distance / 1000).toFixed(2) + "";
@@ -64609,7 +64938,7 @@ void main() {
 				t1 = text(t1_value);
 				t2 = text(" km)");
 				attr_dev(p, "class", "svelte-ur9yx9");
-				add_location(p, file$3, 1122, 6, 33493);
+				add_location(p, file$5, 1122, 6, 33493);
 			},
 			m: function mount(target, anchor) {
 				insert_dev(target, p, anchor);
@@ -64629,7 +64958,7 @@ void main() {
 
 		dispatch_dev("SvelteRegisterBlock", {
 			block,
-			id: create_if_block_1$1.name,
+			id: create_if_block_1$3.name,
 			type: "if",
 			source: "(1122:88) ",
 			ctx
@@ -64639,7 +64968,7 @@ void main() {
 	}
 
 	// (1120:4) {#if kill.pinpoints?.atCelestial}
-	function create_if_block$3(ctx) {
+	function create_if_block$4(ctx) {
 		let p;
 
 		const block = {
@@ -64647,7 +64976,7 @@ void main() {
 				p = element("p");
 				p.textContent = "Triangulation possible - At celestial";
 				attr_dev(p, "class", "svelte-ur9yx9");
-				add_location(p, file$3, 1120, 6, 33351);
+				add_location(p, file$5, 1120, 6, 33351);
 			},
 			m: function mount(target, anchor) {
 				insert_dev(target, p, anchor);
@@ -64662,7 +64991,7 @@ void main() {
 
 		dispatch_dev("SvelteRegisterBlock", {
 			block,
-			id: create_if_block$3.name,
+			id: create_if_block$4.name,
 			type: "if",
 			source: "(1120:4) {#if kill.pinpoints?.atCelestial}",
 			ctx
@@ -64671,7 +65000,7 @@ void main() {
 		return block;
 	}
 
-	function create_fragment$3(ctx) {
+	function create_fragment$5(ctx) {
 		let div3;
 		let div0;
 		let button0;
@@ -64703,9 +65032,9 @@ void main() {
 		let if_block1 = /*kill*/ ctx[0].pinpoints && create_if_block_4(ctx);
 
 		function select_block_type_1(ctx, dirty) {
-			if (/*kill*/ ctx[0].pinpoints?.atCelestial) return create_if_block$3;
-			if (/*kill*/ ctx[0].pinpoints?.nearestCelestial && /*kill*/ ctx[0].pinpoints?.triangulationPossible) return create_if_block_1$1;
-			if (/*kill*/ ctx[0].pinpoints?.hasTetrahedron && /*kill*/ ctx[0].pinpoints.points.length >= 4) return create_if_block_2;
+			if (/*kill*/ ctx[0].pinpoints?.atCelestial) return create_if_block$4;
+			if (/*kill*/ ctx[0].pinpoints?.nearestCelestial && /*kill*/ ctx[0].pinpoints?.triangulationPossible) return create_if_block_1$3;
+			if (/*kill*/ ctx[0].pinpoints?.hasTetrahedron && /*kill*/ ctx[0].pinpoints.points.length >= 4) return create_if_block_2$1;
 			if (/*kill*/ ctx[0].pinpoints?.triangulationPossible && /*kill*/ ctx[0].pinpoints?.nearestCelestial) return create_if_block_3;
 			return create_else_block$1;
 		}
@@ -64739,21 +65068,21 @@ void main() {
 				t11 = space();
 				if_block2.c();
 				attr_dev(button0, "class", "focus-sun svelte-ur9yx9");
-				add_location(button0, file$3, 1091, 4, 32444);
+				add_location(button0, file$5, 1091, 4, 32444);
 				attr_dev(button1, "class", "focus-kill svelte-ur9yx9");
-				add_location(button1, file$3, 1092, 4, 32516);
+				add_location(button1, file$5, 1092, 4, 32516);
 				attr_dev(div0, "class", "controls svelte-ur9yx9");
-				add_location(div0, file$3, 1090, 2, 32416);
+				add_location(div0, file$5, 1090, 2, 32416);
 				attr_dev(div1, "class", "map-container svelte-ur9yx9");
-				add_location(div1, file$3, 1105, 2, 32845);
+				add_location(div1, file$5, 1105, 2, 32845);
 				attr_dev(p0, "class", "svelte-ur9yx9");
-				add_location(p0, file$3, 1117, 4, 33222);
+				add_location(p0, file$5, 1117, 4, 33222);
 				attr_dev(p1, "class", "svelte-ur9yx9");
-				add_location(p1, file$3, 1118, 4, 33260);
+				add_location(p1, file$5, 1118, 4, 33260);
 				attr_dev(div2, "class", "info-panel svelte-ur9yx9");
-				add_location(div2, file$3, 1113, 2, 33073);
+				add_location(div2, file$5, 1113, 2, 33073);
 				attr_dev(div3, "class", "visualization-container svelte-ur9yx9");
-				add_location(div3, file$3, 1089, 0, 32375);
+				add_location(div3, file$5, 1089, 0, 32375);
 			},
 			l: function claim(nodes) {
 				throw new Error_1("options.hydrate only works if the component was compiled with the `hydratable: true` option");
@@ -64853,7 +65182,7 @@ void main() {
 
 		dispatch_dev("SvelteRegisterBlock", {
 			block,
-			id: create_fragment$3.name,
+			id: create_fragment$5.name,
 			type: "component",
 			source: "",
 			ctx
@@ -64963,7 +65292,7 @@ void main() {
 		return `${km.toFixed(2)} km`;
 	}
 
-	function instance$3($$self, $$props, $$invalidate) {
+	function instance$5($$self, $$props, $$invalidate) {
 		let { $$slots: slots = {}, $$scope } = $$props;
 		validate_slots('MapVisualization', slots, []);
 		let { killmailId } = $$props;
@@ -65970,13 +66299,13 @@ void main() {
 	class MapVisualization extends SvelteComponentDev {
 		constructor(options) {
 			super(options);
-			init(this, options, instance$3, create_fragment$3, safe_not_equal, { killmailId: 9, kill: 0 }, null, [-1, -1]);
+			init(this, options, instance$5, create_fragment$5, safe_not_equal, { killmailId: 9, kill: 0 }, null, [-1, -1]);
 
 			dispatch_dev("SvelteRegisterComponent", {
 				component: this,
 				tagName: "MapVisualization",
 				options,
-				id: create_fragment$3.name
+				id: create_fragment$5.name
 			});
 		}
 
@@ -66000,16 +66329,16 @@ void main() {
 	/* src\KillmailViewer.svelte generated by Svelte v4.2.19 */
 
 	const { console: console_1$1 } = globals;
-	const file$2 = "src\\KillmailViewer.svelte";
+	const file$4 = "src\\KillmailViewer.svelte";
 
-	function get_each_context(ctx, list, i) {
+	function get_each_context$2(ctx, list, i) {
 		const child_ctx = ctx.slice();
 		child_ctx[17] = list[i];
 		return child_ctx;
 	}
 
 	// (141:6) {#each sortedKillmails as killmail (killmail.killID)}
-	function create_each_block(key_1, ctx) {
+	function create_each_block$2(key_1, ctx) {
 		let tr;
 		let td0;
 		let t0_value = formatDroppedValue(/*killmail*/ ctx[17].zkb.droppedValue) + "";
@@ -66065,25 +66394,25 @@ void main() {
 				span = element("span");
 				t8 = text(t8_value);
 				t9 = space();
-				attr_dev(td0, "class", "svelte-7atykn");
-				add_location(td0, file$2, 142, 10, 4136);
-				attr_dev(td1, "class", "svelte-7atykn");
-				add_location(td1, file$2, 143, 10, 4204);
+				attr_dev(td0, "class", "svelte-1meihga");
+				add_location(td0, file$4, 142, 10, 4136);
+				attr_dev(td1, "class", "svelte-1meihga");
+				add_location(td1, file$4, 143, 10, 4204);
 				attr_dev(a, "href", a_href_value = `https://zkillboard.com/kill/${/*killmail*/ ctx[17].killID}/`);
 				attr_dev(a, "target", "_blank");
-				add_location(a, file$2, 145, 12, 4301);
-				attr_dev(td2, "class", "svelte-7atykn");
-				add_location(td2, file$2, 144, 10, 4283);
-				attr_dev(button, "class", "svelte-7atykn");
-				add_location(button, file$2, 153, 12, 4522);
-				attr_dev(span, "class", "triangulate-indicator svelte-7atykn");
+				add_location(a, file$4, 145, 12, 4301);
+				attr_dev(td2, "class", "svelte-1meihga");
+				add_location(td2, file$4, 144, 10, 4283);
+				attr_dev(button, "class", "svelte-1meihga");
+				add_location(button, file$4, 153, 12, 4522);
+				attr_dev(span, "class", "triangulate-indicator svelte-1meihga");
 				attr_dev(span, "title", span_title_value = getTriangulationStatus(/*killmail*/ ctx[17]));
 				toggle_class(span, "can-triangulate", /*killmail*/ ctx[17]?.pinpoints?.triangulationPossible);
-				add_location(span, file$2, 154, 12, 4591);
-				attr_dev(td3, "class", "actions svelte-7atykn");
-				add_location(td3, file$2, 152, 10, 4488);
-				attr_dev(tr, "class", "svelte-7atykn");
-				add_location(tr, file$2, 141, 8, 4120);
+				add_location(span, file$4, 154, 12, 4591);
+				attr_dev(td3, "class", "actions svelte-1meihga");
+				add_location(td3, file$4, 152, 10, 4488);
+				attr_dev(tr, "class", "svelte-1meihga");
+				add_location(tr, file$4, 141, 8, 4120);
 				this.first = tr;
 			},
 			m: function mount(target, anchor) {
@@ -66143,7 +66472,7 @@ void main() {
 
 		dispatch_dev("SvelteRegisterBlock", {
 			block,
-			id: create_each_block.name,
+			id: create_each_block$2.name,
 			type: "each",
 			source: "(141:6) {#each sortedKillmails as killmail (killmail.killID)}",
 			ctx
@@ -66153,7 +66482,7 @@ void main() {
 	}
 
 	// (168:2) {#if showMap && selectedKillmailId}
-	function create_if_block$2(ctx) {
+	function create_if_block$3(ctx) {
 		let div1;
 		let div0;
 		let mapvisualization;
@@ -66179,12 +66508,12 @@ void main() {
 				t0 = space();
 				button = element("button");
 				button.textContent = "Close Map";
-				attr_dev(button, "class", "close-map svelte-7atykn");
-				add_location(button, file$2, 174, 8, 5194);
-				attr_dev(div0, "class", "map-container svelte-7atykn");
-				add_location(div0, file$2, 169, 6, 5040);
-				attr_dev(div1, "class", "map-overlay svelte-7atykn");
-				add_location(div1, file$2, 168, 4, 5007);
+				attr_dev(button, "class", "close-map svelte-1meihga");
+				add_location(button, file$4, 174, 8, 5194);
+				attr_dev(div0, "class", "map-container svelte-1meihga");
+				add_location(div0, file$4, 169, 6, 5040);
+				attr_dev(div1, "class", "map-overlay svelte-1meihga");
+				add_location(div1, file$4, 168, 4, 5007);
 			},
 			m: function mount(target, anchor) {
 				insert_dev(target, div1, anchor);
@@ -66227,7 +66556,7 @@ void main() {
 
 		dispatch_dev("SvelteRegisterBlock", {
 			block,
-			id: create_if_block$2.name,
+			id: create_if_block$3.name,
 			type: "if",
 			source: "(168:2) {#if showMap && selectedKillmailId}",
 			ctx
@@ -66236,7 +66565,7 @@ void main() {
 		return block;
 	}
 
-	function create_fragment$2(ctx) {
+	function create_fragment$4(ctx) {
 		let table0;
 		let thead;
 		let tr;
@@ -66259,15 +66588,15 @@ void main() {
 		let dispose;
 		let each_value = ensure_array_like_dev(/*sortedKillmails*/ ctx[0]);
 		const get_key = ctx => /*killmail*/ ctx[17].killID;
-		validate_each_keys(ctx, each_value, get_each_context, get_key);
+		validate_each_keys(ctx, each_value, get_each_context$2, get_key);
 
 		for (let i = 0; i < each_value.length; i += 1) {
-			let child_ctx = get_each_context(ctx, each_value, i);
+			let child_ctx = get_each_context$2(ctx, each_value, i);
 			let key = get_key(child_ctx);
-			each_1_lookup.set(key, each_blocks[i] = create_each_block(key, child_ctx));
+			each_1_lookup.set(key, each_blocks[i] = create_each_block$2(key, child_ctx));
 		}
 
-		let if_block = /*showMap*/ ctx[4] && /*selectedKillmailId*/ ctx[1] && create_if_block$2(ctx);
+		let if_block = /*showMap*/ ctx[4] && /*selectedKillmailId*/ ctx[1] && create_if_block$3(ctx);
 
 		const block = {
 			c: function create() {
@@ -66296,25 +66625,25 @@ void main() {
 
 				t8 = space();
 				if (if_block) if_block.c();
-				attr_dev(th0, "class", "svelte-7atykn");
-				add_location(th0, file$2, 130, 6, 3822);
-				attr_dev(th1, "class", "svelte-7atykn");
-				add_location(th1, file$2, 131, 6, 3852);
-				attr_dev(th2, "class", "svelte-7atykn");
-				add_location(th2, file$2, 132, 6, 3877);
-				attr_dev(th3, "class", "svelte-7atykn");
-				add_location(th3, file$2, 133, 6, 3897);
-				attr_dev(tr, "class", "svelte-7atykn");
-				add_location(tr, file$2, 129, 4, 3810);
-				attr_dev(thead, "class", "svelte-7atykn");
-				add_location(thead, file$2, 128, 2, 3797);
-				attr_dev(table0, "class", "svelte-7atykn");
-				add_location(table0, file$2, 127, 0, 3786);
-				add_location(tbody, file$2, 139, 4, 4042);
-				attr_dev(table1, "class", "svelte-7atykn");
-				add_location(table1, file$2, 138, 2, 4029);
-				attr_dev(div, "class", "scroll-box svelte-7atykn");
-				add_location(div, file$2, 137, 0, 3948);
+				attr_dev(th0, "class", "svelte-1meihga");
+				add_location(th0, file$4, 130, 6, 3822);
+				attr_dev(th1, "class", "svelte-1meihga");
+				add_location(th1, file$4, 131, 6, 3852);
+				attr_dev(th2, "class", "svelte-1meihga");
+				add_location(th2, file$4, 132, 6, 3877);
+				attr_dev(th3, "class", "svelte-1meihga");
+				add_location(th3, file$4, 133, 6, 3897);
+				attr_dev(tr, "class", "svelte-1meihga");
+				add_location(tr, file$4, 129, 4, 3810);
+				attr_dev(thead, "class", "svelte-1meihga");
+				add_location(thead, file$4, 128, 2, 3797);
+				attr_dev(table0, "class", "svelte-1meihga");
+				add_location(table0, file$4, 127, 0, 3786);
+				add_location(tbody, file$4, 139, 4, 4042);
+				attr_dev(table1, "class", "svelte-1meihga");
+				add_location(table1, file$4, 138, 2, 4029);
+				attr_dev(div, "class", "scroll-box");
+				add_location(div, file$4, 137, 0, 3948);
 			},
 			l: function claim(nodes) {
 				throw new Error("options.hydrate only works if the component was compiled with the `hydratable: true` option");
@@ -66354,8 +66683,8 @@ void main() {
 			p: function update(ctx, [dirty]) {
 				if (dirty & /*getTriangulationStatus, sortedKillmails, viewMap, calculateTimeDifference, formatDroppedValue*/ 33) {
 					each_value = ensure_array_like_dev(/*sortedKillmails*/ ctx[0]);
-					validate_each_keys(ctx, each_value, get_each_context, get_key);
-					each_blocks = update_keyed_each(each_blocks, dirty, get_key, 1, ctx, each_value, each_1_lookup, tbody, destroy_block, create_each_block, null, get_each_context);
+					validate_each_keys(ctx, each_value, get_each_context$2, get_key);
+					each_blocks = update_keyed_each(each_blocks, dirty, get_key, 1, ctx, each_value, each_1_lookup, tbody, destroy_block, create_each_block$2, null, get_each_context$2);
 				}
 
 				if (/*showMap*/ ctx[4] && /*selectedKillmailId*/ ctx[1]) {
@@ -66366,7 +66695,7 @@ void main() {
 							transition_in(if_block, 1);
 						}
 					} else {
-						if_block = create_if_block$2(ctx);
+						if_block = create_if_block$3(ctx);
 						if_block.c();
 						transition_in(if_block, 1);
 						if_block.m(div, null);
@@ -66410,7 +66739,7 @@ void main() {
 
 		dispatch_dev("SvelteRegisterBlock", {
 			block,
-			id: create_fragment$2.name,
+			id: create_fragment$4.name,
 			type: "component",
 			source: "",
 			ctx
@@ -66455,7 +66784,7 @@ void main() {
 		return `${Math.floor(seconds / 86400)} days ago`;
 	}
 
-	function instance$2($$self, $$props, $$invalidate) {
+	function instance$4($$self, $$props, $$invalidate) {
 		let killmailsToDisplay;
 		let sortedKillmails;
 		let $settings;
@@ -66624,22 +66953,22 @@ void main() {
 	class KillmailViewer extends SvelteComponentDev {
 		constructor(options) {
 			super(options);
-			init(this, options, instance$2, create_fragment$2, safe_not_equal, {});
+			init(this, options, instance$4, create_fragment$4, safe_not_equal, {});
 
 			dispatch_dev("SvelteRegisterComponent", {
 				component: this,
 				tagName: "KillmailViewer",
 				options,
-				id: create_fragment$2.name
+				id: create_fragment$4.name
 			});
 		}
 	}
 
 	/* src\Login.svelte generated by Svelte v4.2.19 */
-	const file$1 = "src\\Login.svelte";
+	const file$3 = "src\\Login.svelte";
 
 	// (62:2) {#if error}
-	function create_if_block_1(ctx) {
+	function create_if_block_1$2(ctx) {
 		let p;
 		let t;
 
@@ -66648,7 +66977,7 @@ void main() {
 				p = element("p");
 				t = text(/*error*/ ctx[2]);
 				attr_dev(p, "class", "error svelte-163whh9");
-				add_location(p, file$1, 62, 6, 1904);
+				add_location(p, file$3, 62, 6, 1904);
 			},
 			m: function mount(target, anchor) {
 				insert_dev(target, p, anchor);
@@ -66666,7 +66995,7 @@ void main() {
 
 		dispatch_dev("SvelteRegisterBlock", {
 			block,
-			id: create_if_block_1.name,
+			id: create_if_block_1$2.name,
 			type: "if",
 			source: "(62:2) {#if error}",
 			ctx
@@ -66676,7 +67005,7 @@ void main() {
 	}
 
 	// (65:2) {#if successMessage}
-	function create_if_block$1(ctx) {
+	function create_if_block$2(ctx) {
 		let p;
 		let t;
 
@@ -66685,7 +67014,7 @@ void main() {
 				p = element("p");
 				t = text(/*successMessage*/ ctx[3]);
 				attr_dev(p, "class", "success svelte-163whh9");
-				add_location(p, file$1, 65, 6, 1973);
+				add_location(p, file$3, 65, 6, 1973);
 			},
 			m: function mount(target, anchor) {
 				insert_dev(target, p, anchor);
@@ -66703,7 +67032,7 @@ void main() {
 
 		dispatch_dev("SvelteRegisterBlock", {
 			block,
-			id: create_if_block$1.name,
+			id: create_if_block$2.name,
 			type: "if",
 			source: "(65:2) {#if successMessage}",
 			ctx
@@ -66712,7 +67041,7 @@ void main() {
 		return block;
 	}
 
-	function create_fragment$1(ctx) {
+	function create_fragment$3(ctx) {
 		let div;
 		let h2;
 		let t1;
@@ -66728,8 +67057,8 @@ void main() {
 		let t8;
 		let mounted;
 		let dispose;
-		let if_block0 = /*error*/ ctx[2] && create_if_block_1(ctx);
-		let if_block1 = /*successMessage*/ ctx[3] && create_if_block$1(ctx);
+		let if_block0 = /*error*/ ctx[2] && create_if_block_1$2(ctx);
+		let if_block1 = /*successMessage*/ ctx[3] && create_if_block$2(ctx);
 
 		const block = {
 			c: function create() {
@@ -66751,26 +67080,26 @@ void main() {
 				if (if_block0) if_block0.c();
 				t8 = space();
 				if (if_block1) if_block1.c();
-				add_location(h2, file$1, 54, 2, 1523);
+				add_location(h2, file$3, 54, 2, 1523);
 				attr_dev(input0, "type", "text");
 				attr_dev(input0, "placeholder", "Username");
 				input0.required = true;
 				attr_dev(input0, "class", "svelte-163whh9");
-				add_location(input0, file$1, 56, 6, 1595);
+				add_location(input0, file$3, 56, 6, 1595);
 				attr_dev(input1, "type", "password");
 				attr_dev(input1, "placeholder", "Password");
 				input1.required = true;
 				attr_dev(input1, "class", "svelte-163whh9");
-				add_location(input1, file$1, 57, 6, 1676);
+				add_location(input1, file$3, 57, 6, 1676);
 				attr_dev(button0, "type", "submit");
 				attr_dev(button0, "class", "svelte-163whh9");
-				add_location(button0, file$1, 58, 6, 1761);
+				add_location(button0, file$3, 58, 6, 1761);
 				attr_dev(button1, "type", "button");
 				attr_dev(button1, "class", "svelte-163whh9");
-				add_location(button1, file$1, 59, 6, 1805);
-				add_location(form, file$1, 55, 2, 1541);
+				add_location(button1, file$3, 59, 6, 1805);
+				add_location(form, file$3, 55, 2, 1541);
 				attr_dev(div, "class", "svelte-163whh9");
-				add_location(div, file$1, 53, 0, 1514);
+				add_location(div, file$3, 53, 0, 1514);
 			},
 			l: function claim(nodes) {
 				throw new Error("options.hydrate only works if the component was compiled with the `hydratable: true` option");
@@ -66818,7 +67147,7 @@ void main() {
 					if (if_block0) {
 						if_block0.p(ctx, dirty);
 					} else {
-						if_block0 = create_if_block_1(ctx);
+						if_block0 = create_if_block_1$2(ctx);
 						if_block0.c();
 						if_block0.m(div, t8);
 					}
@@ -66831,7 +67160,7 @@ void main() {
 					if (if_block1) {
 						if_block1.p(ctx, dirty);
 					} else {
-						if_block1 = create_if_block$1(ctx);
+						if_block1 = create_if_block$2(ctx);
 						if_block1.c();
 						if_block1.m(div, null);
 					}
@@ -66856,7 +67185,7 @@ void main() {
 
 		dispatch_dev("SvelteRegisterBlock", {
 			block,
-			id: create_fragment$1.name,
+			id: create_fragment$3.name,
 			type: "component",
 			source: "",
 			ctx
@@ -66865,7 +67194,7 @@ void main() {
 		return block;
 	}
 
-	function instance$1($$self, $$props, $$invalidate) {
+	function instance$3($$self, $$props, $$invalidate) {
 		let { $$slots: slots = {}, $$scope } = $$props;
 		validate_slots('Login', slots, []);
 		let username = '';
@@ -66965,11 +67294,799 @@ void main() {
 	class Login extends SvelteComponentDev {
 		constructor(options) {
 			super(options);
-			init(this, options, instance$1, create_fragment$1, safe_not_equal, {});
+			init(this, options, instance$3, create_fragment$3, safe_not_equal, {});
 
 			dispatch_dev("SvelteRegisterComponent", {
 				component: this,
 				tagName: "Login",
+				options,
+				id: create_fragment$3.name
+			});
+		}
+	}
+
+	/* src\ActiveBattles.svelte generated by Svelte v4.2.19 */
+	const file$2 = "src\\ActiveBattles.svelte";
+
+	function get_each_context$1(ctx, list, i) {
+		const child_ctx = ctx.slice();
+		child_ctx[4] = list[i];
+		return child_ctx;
+	}
+
+	// (31:4) {#each battles as battle}
+	function create_each_block$1(ctx) {
+		let div1;
+		let h3;
+		let t0_value = /*battle*/ ctx[4].systemId + "";
+		let t0;
+		let t1;
+		let div0;
+		let p0;
+		let t2;
+		let t3_value = formatValue$1(/*battle*/ ctx[4].totalValue) + "";
+		let t3;
+		let t4;
+		let t5;
+		let p1;
+		let t6;
+		let t7_value = /*battle*/ ctx[4].kills.length + "";
+		let t7;
+		let t8;
+		let p2;
+		let t9;
+		let t10_value = /*battle*/ ctx[4].involvedCount + "";
+		let t10;
+		let t11;
+		let p3;
+		let t12;
+		let t13_value = new Date(/*battle*/ ctx[4].lastKill).toLocaleTimeString() + "";
+		let t13;
+		let t14;
+
+		const block = {
+			c: function create() {
+				div1 = element("div");
+				h3 = element("h3");
+				t0 = text(t0_value);
+				t1 = space();
+				div0 = element("div");
+				p0 = element("p");
+				t2 = text("Value Lost: ");
+				t3 = text(t3_value);
+				t4 = text(" ISK");
+				t5 = space();
+				p1 = element("p");
+				t6 = text("Ships Lost: ");
+				t7 = text(t7_value);
+				t8 = space();
+				p2 = element("p");
+				t9 = text("Pilots Involved: ");
+				t10 = text(t10_value);
+				t11 = space();
+				p3 = element("p");
+				t12 = text("Last Activity: ");
+				t13 = text(t13_value);
+				t14 = space();
+				add_location(h3, file$2, 35, 8, 894);
+				add_location(p0, file$2, 37, 10, 961);
+				add_location(p1, file$2, 38, 10, 1028);
+				add_location(p2, file$2, 39, 10, 1080);
+				add_location(p3, file$2, 40, 10, 1138);
+				attr_dev(div0, "class", "stats svelte-17bzvk");
+				add_location(div0, file$2, 36, 8, 930);
+				attr_dev(div1, "class", "battle-bubble svelte-17bzvk");
+				set_style(div1, "--size", Math.log(/*battle*/ ctx[4].totalValue) * 0.1 + "em");
+				add_location(div1, file$2, 31, 6, 777);
+			},
+			m: function mount(target, anchor) {
+				insert_dev(target, div1, anchor);
+				append_dev(div1, h3);
+				append_dev(h3, t0);
+				append_dev(div1, t1);
+				append_dev(div1, div0);
+				append_dev(div0, p0);
+				append_dev(p0, t2);
+				append_dev(p0, t3);
+				append_dev(p0, t4);
+				append_dev(div0, t5);
+				append_dev(div0, p1);
+				append_dev(p1, t6);
+				append_dev(p1, t7);
+				append_dev(div0, t8);
+				append_dev(div0, p2);
+				append_dev(p2, t9);
+				append_dev(p2, t10);
+				append_dev(div0, t11);
+				append_dev(div0, p3);
+				append_dev(p3, t12);
+				append_dev(p3, t13);
+				append_dev(div1, t14);
+			},
+			p: function update(ctx, dirty) {
+				if (dirty & /*battles*/ 2 && t0_value !== (t0_value = /*battle*/ ctx[4].systemId + "")) set_data_dev(t0, t0_value);
+				if (dirty & /*battles*/ 2 && t3_value !== (t3_value = formatValue$1(/*battle*/ ctx[4].totalValue) + "")) set_data_dev(t3, t3_value);
+				if (dirty & /*battles*/ 2 && t7_value !== (t7_value = /*battle*/ ctx[4].kills.length + "")) set_data_dev(t7, t7_value);
+				if (dirty & /*battles*/ 2 && t10_value !== (t10_value = /*battle*/ ctx[4].involvedCount + "")) set_data_dev(t10, t10_value);
+				if (dirty & /*battles*/ 2 && t13_value !== (t13_value = new Date(/*battle*/ ctx[4].lastKill).toLocaleTimeString() + "")) set_data_dev(t13, t13_value);
+
+				if (dirty & /*battles*/ 2) {
+					set_style(div1, "--size", Math.log(/*battle*/ ctx[4].totalValue) * 0.1 + "em");
+				}
+			},
+			d: function destroy(detaching) {
+				if (detaching) {
+					detach_dev(div1);
+				}
+			}
+		};
+
+		dispatch_dev("SvelteRegisterBlock", {
+			block,
+			id: create_each_block$1.name,
+			type: "each",
+			source: "(31:4) {#each battles as battle}",
+			ctx
+		});
+
+		return block;
+	}
+
+	function create_fragment$2(ctx) {
+		let div2;
+		let div0;
+		let label;
+		let t0;
+		let t1;
+		let t2;
+		let input;
+		let t3;
+		let div1;
+		let mounted;
+		let dispose;
+		let each_value = ensure_array_like_dev(/*battles*/ ctx[1]);
+		let each_blocks = [];
+
+		for (let i = 0; i < each_value.length; i += 1) {
+			each_blocks[i] = create_each_block$1(get_each_context$1(ctx, each_value, i));
+		}
+
+		const block = {
+			c: function create() {
+				div2 = element("div");
+				div0 = element("div");
+				label = element("label");
+				t0 = text("Minimum Involved: ");
+				t1 = text(/*minInvolved*/ ctx[0]);
+				t2 = space();
+				input = element("input");
+				t3 = space();
+				div1 = element("div");
+
+				for (let i = 0; i < each_blocks.length; i += 1) {
+					each_blocks[i].c();
+				}
+
+				attr_dev(input, "type", "range");
+				attr_dev(input, "min", "2");
+				attr_dev(input, "max", "20");
+				attr_dev(input, "step", "1");
+				attr_dev(input, "class", "svelte-17bzvk");
+				add_location(input, file$2, 25, 6, 610);
+				add_location(label, file$2, 23, 4, 556);
+				attr_dev(div0, "class", "controls svelte-17bzvk");
+				add_location(div0, file$2, 22, 2, 528);
+				attr_dev(div1, "class", "battle-grid svelte-17bzvk");
+				add_location(div1, file$2, 29, 2, 713);
+				attr_dev(div2, "class", "active-battles svelte-17bzvk");
+				add_location(div2, file$2, 21, 0, 496);
+			},
+			l: function claim(nodes) {
+				throw new Error("options.hydrate only works if the component was compiled with the `hydratable: true` option");
+			},
+			m: function mount(target, anchor) {
+				insert_dev(target, div2, anchor);
+				append_dev(div2, div0);
+				append_dev(div0, label);
+				append_dev(label, t0);
+				append_dev(label, t1);
+				append_dev(label, t2);
+				append_dev(label, input);
+				set_input_value(input, /*minInvolved*/ ctx[0]);
+				append_dev(div2, t3);
+				append_dev(div2, div1);
+
+				for (let i = 0; i < each_blocks.length; i += 1) {
+					if (each_blocks[i]) {
+						each_blocks[i].m(div1, null);
+					}
+				}
+
+				if (!mounted) {
+					dispose = [
+						listen_dev(input, "change", /*input_change_input_handler*/ ctx[3]),
+						listen_dev(input, "input", /*input_change_input_handler*/ ctx[3])
+					];
+
+					mounted = true;
+				}
+			},
+			p: function update(ctx, [dirty]) {
+				if (dirty & /*minInvolved*/ 1) set_data_dev(t1, /*minInvolved*/ ctx[0]);
+
+				if (dirty & /*minInvolved*/ 1) {
+					set_input_value(input, /*minInvolved*/ ctx[0]);
+				}
+
+				if (dirty & /*Math, battles, Date, formatValue*/ 2) {
+					each_value = ensure_array_like_dev(/*battles*/ ctx[1]);
+					let i;
+
+					for (i = 0; i < each_value.length; i += 1) {
+						const child_ctx = get_each_context$1(ctx, each_value, i);
+
+						if (each_blocks[i]) {
+							each_blocks[i].p(child_ctx, dirty);
+						} else {
+							each_blocks[i] = create_each_block$1(child_ctx);
+							each_blocks[i].c();
+							each_blocks[i].m(div1, null);
+						}
+					}
+
+					for (; i < each_blocks.length; i += 1) {
+						each_blocks[i].d(1);
+					}
+
+					each_blocks.length = each_value.length;
+				}
+			},
+			i: noop,
+			o: noop,
+			d: function destroy(detaching) {
+				if (detaching) {
+					detach_dev(div2);
+				}
+
+				destroy_each(each_blocks, detaching);
+				mounted = false;
+				run_all(dispose);
+			}
+		};
+
+		dispatch_dev("SvelteRegisterBlock", {
+			block,
+			id: create_fragment$2.name,
+			type: "component",
+			source: "",
+			ctx
+		});
+
+		return block;
+	}
+
+	function formatValue$1(value) {
+		if (value >= 1000000000) {
+			return (value / 1000000000).toFixed(2) + "B";
+		}
+
+		if (value >= 1000000) {
+			return (value / 1000000).toFixed(2) + "M";
+		}
+
+		return (value / 1000).toFixed(2) + "K";
+	}
+
+	function instance$2($$self, $$props, $$invalidate) {
+		let $filteredBattles;
+		validate_store(filteredBattles, 'filteredBattles');
+		component_subscribe($$self, filteredBattles, $$value => $$invalidate(2, $filteredBattles = $$value));
+		let { $$slots: slots = {}, $$scope } = $$props;
+		validate_slots('ActiveBattles', slots, []);
+		let minInvolved = 2;
+		let battles = [];
+		const writable_props = [];
+
+		Object.keys($$props).forEach(key => {
+			if (!~writable_props.indexOf(key) && key.slice(0, 2) !== '$$' && key !== 'slot') console.warn(`<ActiveBattles> was created with unknown prop '${key}'`);
+		});
+
+		function input_change_input_handler() {
+			minInvolved = to_number(this.value);
+			$$invalidate(0, minInvolved);
+		}
+
+		$$self.$capture_state = () => ({
+			filteredBattles,
+			onMount,
+			minInvolved,
+			battles,
+			formatValue: formatValue$1,
+			$filteredBattles
+		});
+
+		$$self.$inject_state = $$props => {
+			if ('minInvolved' in $$props) $$invalidate(0, minInvolved = $$props.minInvolved);
+			if ('battles' in $$props) $$invalidate(1, battles = $$props.battles);
+		};
+
+		if ($$props && "$$inject" in $$props) {
+			$$self.$inject_state($$props.$$inject);
+		}
+
+		$$self.$$.update = () => {
+			if ($$self.$$.dirty & /*$filteredBattles*/ 4) {
+				$$invalidate(1, battles = $filteredBattles);
+			}
+		};
+
+		return [minInvolved, battles, $filteredBattles, input_change_input_handler];
+	}
+
+	class ActiveBattles extends SvelteComponentDev {
+		constructor(options) {
+			super(options);
+			init(this, options, instance$2, create_fragment$2, safe_not_equal, {});
+
+			dispatch_dev("SvelteRegisterComponent", {
+				component: this,
+				tagName: "ActiveBattles",
+				options,
+				id: create_fragment$2.name
+			});
+		}
+	}
+
+	/* src\ActiveCamps.svelte generated by Svelte v4.2.19 */
+	const file$1 = "src\\ActiveCamps.svelte";
+
+	function get_each_context(ctx, list, i) {
+		const child_ctx = ctx.slice();
+		child_ctx[3] = list[i];
+		return child_ctx;
+	}
+
+	// (56:12) {#if camp.numAlliances > 0}
+	function create_if_block_1$1(ctx) {
+		let t0;
+		let t1_value = /*camp*/ ctx[3].numAlliances + "";
+		let t1;
+		let t2;
+
+		const block = {
+			c: function create() {
+				t0 = text("in ");
+				t1 = text(t1_value);
+				t2 = text(" alliances");
+			},
+			m: function mount(target, anchor) {
+				insert_dev(target, t0, anchor);
+				insert_dev(target, t1, anchor);
+				insert_dev(target, t2, anchor);
+			},
+			p: function update(ctx, dirty) {
+				if (dirty & /*camps*/ 1 && t1_value !== (t1_value = /*camp*/ ctx[3].numAlliances + "")) set_data_dev(t1, t1_value);
+			},
+			d: function destroy(detaching) {
+				if (detaching) {
+					detach_dev(t0);
+					detach_dev(t1);
+					detach_dev(t2);
+				}
+			}
+		};
+
+		dispatch_dev("SvelteRegisterBlock", {
+			block,
+			id: create_if_block_1$1.name,
+			type: "if",
+			source: "(56:12) {#if camp.numAlliances > 0}",
+			ctx
+		});
+
+		return block;
+	}
+
+	// (34:4) {#each camps as camp}
+	function create_each_block(ctx) {
+		let button;
+		let h3;
+		let t0_value = /*camp*/ ctx[3].stargateName + "";
+		let t0;
+		let t1;
+		let div;
+		let p0;
+		let t2;
+		let t3_value = /*camp*/ ctx[3].systemId + "";
+		let t3;
+		let t4;
+		let p1;
+		let t5;
+		let t6_value = /*camp*/ ctx[3].kills.length + "";
+		let t6;
+		let t7;
+		let p2;
+		let t8;
+		let t9_value = formatValue(/*camp*/ ctx[3].totalValue) + "";
+		let t9;
+		let t10;
+		let t11;
+		let p3;
+		let t12;
+		let t13_value = /*camp*/ ctx[3].numAttackers + "";
+		let t13;
+		let t14;
+		let t15_value = /*camp*/ ctx[3].numCorps + "";
+		let t15;
+		let t16;
+		let t17;
+		let p4;
+		let t18;
+		let t19_value = getTimeAgo(/*camp*/ ctx[3].lastKill) + "";
+		let t19;
+		let button_aria_label_value;
+		let mounted;
+		let dispose;
+		let if_block = /*camp*/ ctx[3].numAlliances > 0 && create_if_block_1$1(ctx);
+
+		function click_handler() {
+			return /*click_handler*/ ctx[2](/*camp*/ ctx[3]);
+		}
+
+		const block = {
+			c: function create() {
+				button = element("button");
+				h3 = element("h3");
+				t0 = text(t0_value);
+				t1 = space();
+				div = element("div");
+				p0 = element("p");
+				t2 = text("System: ");
+				t3 = text(t3_value);
+				t4 = space();
+				p1 = element("p");
+				t5 = text("Ships Destroyed: ");
+				t6 = text(t6_value);
+				t7 = space();
+				p2 = element("p");
+				t8 = text("Total Value: ");
+				t9 = text(t9_value);
+				t10 = text(" ISK");
+				t11 = space();
+				p3 = element("p");
+				t12 = text("Campers: ");
+				t13 = text(t13_value);
+				t14 = text(" pilots from ");
+				t15 = text(t15_value);
+				t16 = text(" corps\r\n            ");
+				if (if_block) if_block.c();
+				t17 = space();
+				p4 = element("p");
+				t18 = text("Last kill: ");
+				t19 = text(t19_value);
+				add_location(h3, file$1, 48, 8, 1333);
+				attr_dev(p0, "class", "system svelte-lufc5h");
+				add_location(p0, file$1, 50, 10, 1407);
+				attr_dev(p1, "class", "kills svelte-lufc5h");
+				add_location(p1, file$1, 51, 10, 1464);
+				attr_dev(p2, "class", "value svelte-lufc5h");
+				add_location(p2, file$1, 52, 10, 1533);
+				attr_dev(p3, "class", "attackers svelte-lufc5h");
+				add_location(p3, file$1, 53, 10, 1613);
+				attr_dev(p4, "class", "time svelte-lufc5h");
+				add_location(p4, file$1, 59, 10, 1846);
+				attr_dev(div, "class", "camp-stats svelte-lufc5h");
+				add_location(div, file$1, 49, 8, 1371);
+				attr_dev(button, "class", "camp-card svelte-lufc5h");
+				attr_dev(button, "type", "button");
+				attr_dev(button, "aria-label", button_aria_label_value = `View latest kill for gate camp at ${/*camp*/ ctx[3].stargateName}`);
+				add_location(button, file$1, 34, 6, 898);
+			},
+			m: function mount(target, anchor) {
+				insert_dev(target, button, anchor);
+				append_dev(button, h3);
+				append_dev(h3, t0);
+				append_dev(button, t1);
+				append_dev(button, div);
+				append_dev(div, p0);
+				append_dev(p0, t2);
+				append_dev(p0, t3);
+				append_dev(div, t4);
+				append_dev(div, p1);
+				append_dev(p1, t5);
+				append_dev(p1, t6);
+				append_dev(div, t7);
+				append_dev(div, p2);
+				append_dev(p2, t8);
+				append_dev(p2, t9);
+				append_dev(p2, t10);
+				append_dev(div, t11);
+				append_dev(div, p3);
+				append_dev(p3, t12);
+				append_dev(p3, t13);
+				append_dev(p3, t14);
+				append_dev(p3, t15);
+				append_dev(p3, t16);
+				if (if_block) if_block.m(p3, null);
+				append_dev(div, t17);
+				append_dev(div, p4);
+				append_dev(p4, t18);
+				append_dev(p4, t19);
+
+				if (!mounted) {
+					dispose = listen_dev(button, "click", click_handler, false, false, false, false);
+					mounted = true;
+				}
+			},
+			p: function update(new_ctx, dirty) {
+				ctx = new_ctx;
+				if (dirty & /*camps*/ 1 && t0_value !== (t0_value = /*camp*/ ctx[3].stargateName + "")) set_data_dev(t0, t0_value);
+				if (dirty & /*camps*/ 1 && t3_value !== (t3_value = /*camp*/ ctx[3].systemId + "")) set_data_dev(t3, t3_value);
+				if (dirty & /*camps*/ 1 && t6_value !== (t6_value = /*camp*/ ctx[3].kills.length + "")) set_data_dev(t6, t6_value);
+				if (dirty & /*camps*/ 1 && t9_value !== (t9_value = formatValue(/*camp*/ ctx[3].totalValue) + "")) set_data_dev(t9, t9_value);
+				if (dirty & /*camps*/ 1 && t13_value !== (t13_value = /*camp*/ ctx[3].numAttackers + "")) set_data_dev(t13, t13_value);
+				if (dirty & /*camps*/ 1 && t15_value !== (t15_value = /*camp*/ ctx[3].numCorps + "")) set_data_dev(t15, t15_value);
+
+				if (/*camp*/ ctx[3].numAlliances > 0) {
+					if (if_block) {
+						if_block.p(ctx, dirty);
+					} else {
+						if_block = create_if_block_1$1(ctx);
+						if_block.c();
+						if_block.m(p3, null);
+					}
+				} else if (if_block) {
+					if_block.d(1);
+					if_block = null;
+				}
+
+				if (dirty & /*camps*/ 1 && t19_value !== (t19_value = getTimeAgo(/*camp*/ ctx[3].lastKill) + "")) set_data_dev(t19, t19_value);
+
+				if (dirty & /*camps*/ 1 && button_aria_label_value !== (button_aria_label_value = `View latest kill for gate camp at ${/*camp*/ ctx[3].stargateName}`)) {
+					attr_dev(button, "aria-label", button_aria_label_value);
+				}
+			},
+			d: function destroy(detaching) {
+				if (detaching) {
+					detach_dev(button);
+				}
+
+				if (if_block) if_block.d();
+				mounted = false;
+				dispose();
+			}
+		};
+
+		dispatch_dev("SvelteRegisterBlock", {
+			block,
+			id: create_each_block.name,
+			type: "each",
+			source: "(34:4) {#each camps as camp}",
+			ctx
+		});
+
+		return block;
+	}
+
+	// (65:4) {#if camps.length === 0}
+	function create_if_block$1(ctx) {
+		let p;
+
+		const block = {
+			c: function create() {
+				p = element("p");
+				p.textContent = "No active gate camps detected";
+				attr_dev(p, "class", "no-camps svelte-lufc5h");
+				add_location(p, file$1, 65, 6, 1990);
+			},
+			m: function mount(target, anchor) {
+				insert_dev(target, p, anchor);
+			},
+			d: function destroy(detaching) {
+				if (detaching) {
+					detach_dev(p);
+				}
+			}
+		};
+
+		dispatch_dev("SvelteRegisterBlock", {
+			block,
+			id: create_if_block$1.name,
+			type: "if",
+			source: "(65:4) {#if camps.length === 0}",
+			ctx
+		});
+
+		return block;
+	}
+
+	function create_fragment$1(ctx) {
+		let div1;
+		let h2;
+		let t1;
+		let div0;
+		let t2;
+		let each_value = ensure_array_like_dev(/*camps*/ ctx[0]);
+		let each_blocks = [];
+
+		for (let i = 0; i < each_value.length; i += 1) {
+			each_blocks[i] = create_each_block(get_each_context(ctx, each_value, i));
+		}
+
+		let if_block = /*camps*/ ctx[0].length === 0 && create_if_block$1(ctx);
+
+		const block = {
+			c: function create() {
+				div1 = element("div");
+				h2 = element("h2");
+				h2.textContent = "Active Gate Camps";
+				t1 = space();
+				div0 = element("div");
+
+				for (let i = 0; i < each_blocks.length; i += 1) {
+					each_blocks[i].c();
+				}
+
+				t2 = space();
+				if (if_block) if_block.c();
+				add_location(h2, file$1, 31, 2, 810);
+				attr_dev(div0, "class", "camp-grid svelte-lufc5h");
+				add_location(div0, file$1, 32, 2, 840);
+				attr_dev(div1, "class", "active-camps svelte-lufc5h");
+				add_location(div1, file$1, 30, 0, 780);
+			},
+			l: function claim(nodes) {
+				throw new Error("options.hydrate only works if the component was compiled with the `hydratable: true` option");
+			},
+			m: function mount(target, anchor) {
+				insert_dev(target, div1, anchor);
+				append_dev(div1, h2);
+				append_dev(div1, t1);
+				append_dev(div1, div0);
+
+				for (let i = 0; i < each_blocks.length; i += 1) {
+					if (each_blocks[i]) {
+						each_blocks[i].m(div0, null);
+					}
+				}
+
+				append_dev(div0, t2);
+				if (if_block) if_block.m(div0, null);
+			},
+			p: function update(ctx, [dirty]) {
+				if (dirty & /*camps, window, getTimeAgo, formatValue*/ 1) {
+					each_value = ensure_array_like_dev(/*camps*/ ctx[0]);
+					let i;
+
+					for (i = 0; i < each_value.length; i += 1) {
+						const child_ctx = get_each_context(ctx, each_value, i);
+
+						if (each_blocks[i]) {
+							each_blocks[i].p(child_ctx, dirty);
+						} else {
+							each_blocks[i] = create_each_block(child_ctx);
+							each_blocks[i].c();
+							each_blocks[i].m(div0, t2);
+						}
+					}
+
+					for (; i < each_blocks.length; i += 1) {
+						each_blocks[i].d(1);
+					}
+
+					each_blocks.length = each_value.length;
+				}
+
+				if (/*camps*/ ctx[0].length === 0) {
+					if (if_block) ; else {
+						if_block = create_if_block$1(ctx);
+						if_block.c();
+						if_block.m(div0, null);
+					}
+				} else if (if_block) {
+					if_block.d(1);
+					if_block = null;
+				}
+			},
+			i: noop,
+			o: noop,
+			d: function destroy(detaching) {
+				if (detaching) {
+					detach_dev(div1);
+				}
+
+				destroy_each(each_blocks, detaching);
+				if (if_block) if_block.d();
+			}
+		};
+
+		dispatch_dev("SvelteRegisterBlock", {
+			block,
+			id: create_fragment$1.name,
+			type: "component",
+			source: "",
+			ctx
+		});
+
+		return block;
+	}
+
+	function formatValue(value) {
+		if (value >= 1000000000) {
+			return (value / 1000000000).toFixed(2) + "B";
+		}
+
+		if (value >= 1000000) {
+			return (value / 1000000).toFixed(2) + "M";
+		}
+
+		return (value / 1000).toFixed(2) + "K";
+	}
+
+	function getTimeAgo(timestamp) {
+		const now = new Date().getTime();
+		const then = new Date(timestamp).getTime();
+		const minutes = Math.floor((now - then) / (1000 * 60));
+		if (minutes < 1) return "just now";
+		if (minutes === 1) return "1 minute ago";
+		return `${minutes} minutes ago`;
+	}
+
+	function instance$1($$self, $$props, $$invalidate) {
+		let $filteredCamps;
+		validate_store(filteredCamps, 'filteredCamps');
+		component_subscribe($$self, filteredCamps, $$value => $$invalidate(1, $filteredCamps = $$value));
+		let { $$slots: slots = {}, $$scope } = $$props;
+		validate_slots('ActiveCamps', slots, []);
+		let camps = [];
+		const writable_props = [];
+
+		Object.keys($$props).forEach(key => {
+			if (!~writable_props.indexOf(key) && key.slice(0, 2) !== '$$' && key !== 'slot') console.warn(`<ActiveCamps> was created with unknown prop '${key}'`);
+		});
+
+		const click_handler = camp => {
+			const latestKill = camp.kills[camp.kills.length - 1];
+
+			if (latestKill) {
+				window.open(`https://zkillboard.com/kill/${latestKill.killID}/`, "_blank");
+			}
+		};
+
+		$$self.$capture_state = () => ({
+			filteredCamps,
+			onMount,
+			camps,
+			formatValue,
+			getTimeAgo,
+			$filteredCamps
+		});
+
+		$$self.$inject_state = $$props => {
+			if ('camps' in $$props) $$invalidate(0, camps = $$props.camps);
+		};
+
+		if ($$props && "$$inject" in $$props) {
+			$$self.$inject_state($$props.$$inject);
+		}
+
+		$$self.$$.update = () => {
+			if ($$self.$$.dirty & /*$filteredCamps*/ 2) {
+				$$invalidate(0, camps = $filteredCamps);
+			}
+		};
+
+		return [camps, $filteredCamps, click_handler];
+	}
+
+	class ActiveCamps extends SvelteComponentDev {
+		constructor(options) {
+			super(options);
+			init(this, options, instance$1, create_fragment$1, safe_not_equal, {});
+
+			dispatch_dev("SvelteRegisterComponent", {
+				component: this,
+				tagName: "ActiveCamps",
 				options,
 				id: create_fragment$1.name
 			});
@@ -66981,89 +68098,139 @@ void main() {
 	const { console: console_1 } = globals;
 	const file = "src\\App.svelte";
 
-	// (67:2) {:else}
+	// (71:2) {:else}
 	function create_else_block(ctx) {
-		let div2;
-		let div0;
-		let settingsmanager;
-		let t0;
-		let div1;
-		let killmailviewer;
+		let div;
+		let button0;
 		let t1;
-		let button;
+		let button1;
+		let t3;
+		let button2;
+		let t5;
+		let current_block_type_index;
+		let if_block;
+		let if_block_anchor;
 		let current;
 		let mounted;
 		let dispose;
-		let settingsmanager_props = { socket };
+		const if_block_creators = [create_if_block_1, create_if_block_2, create_else_block_1];
+		const if_blocks = [];
 
-		settingsmanager = new SettingsManager({
-				props: settingsmanager_props,
-				$$inline: true
-			});
+		function select_block_type_1(ctx, dirty) {
+			if (/*currentPage*/ ctx[3] === "kills") return 0;
+			if (/*currentPage*/ ctx[3] === "battles") return 1;
+			return 2;
+		}
 
-		/*settingsmanager_binding*/ ctx[9](settingsmanager);
-		killmailviewer = new KillmailViewer({ $$inline: true });
+		current_block_type_index = select_block_type_1(ctx);
+		if_block = if_blocks[current_block_type_index] = if_block_creators[current_block_type_index](ctx);
 
 		const block = {
 			c: function create() {
-				div2 = element("div");
-				div0 = element("div");
-				create_component(settingsmanager.$$.fragment);
-				t0 = space();
-				div1 = element("div");
-				create_component(killmailviewer.$$.fragment);
+				div = element("div");
+				button0 = element("button");
+				button0.textContent = "Kills";
 				t1 = space();
-				button = element("button");
-				button.textContent = "Clear All Kills";
-				attr_dev(div0, "class", "settings-section svelte-u90xat");
-				add_location(div0, file, 68, 6, 1842);
-				add_location(button, file, 73, 8, 2037);
-				attr_dev(div1, "class", "killmail-section svelte-u90xat");
-				add_location(div1, file, 71, 6, 1969);
-				attr_dev(div2, "class", "dashboard svelte-u90xat");
-				add_location(div2, file, 67, 4, 1811);
+				button1 = element("button");
+				button1.textContent = "Active Battles";
+				t3 = space();
+				button2 = element("button");
+				button2.textContent = "Gate Camps";
+				t5 = space();
+				if_block.c();
+				if_block_anchor = empty$1();
+				attr_dev(button0, "class", "svelte-d6m7ck");
+				toggle_class(button0, "active", /*currentPage*/ ctx[3] === "kills");
+				add_location(button0, file, 72, 6, 2002);
+				attr_dev(button1, "class", "svelte-d6m7ck");
+				toggle_class(button1, "active", /*currentPage*/ ctx[3] === "battles");
+				add_location(button1, file, 78, 6, 2156);
+				attr_dev(button2, "class", "svelte-d6m7ck");
+				toggle_class(button2, "active", /*currentPage*/ ctx[3] === "camps");
+				add_location(button2, file, 84, 6, 2323);
+				attr_dev(div, "class", "nav-tabs svelte-d6m7ck");
+				add_location(div, file, 71, 4, 1972);
 			},
 			m: function mount(target, anchor) {
-				insert_dev(target, div2, anchor);
-				append_dev(div2, div0);
-				mount_component(settingsmanager, div0, null);
-				append_dev(div2, t0);
-				append_dev(div2, div1);
-				mount_component(killmailviewer, div1, null);
-				append_dev(div1, t1);
-				append_dev(div1, button);
+				insert_dev(target, div, anchor);
+				append_dev(div, button0);
+				append_dev(div, t1);
+				append_dev(div, button1);
+				append_dev(div, t3);
+				append_dev(div, button2);
+				insert_dev(target, t5, anchor);
+				if_blocks[current_block_type_index].m(target, anchor);
+				insert_dev(target, if_block_anchor, anchor);
 				current = true;
 
 				if (!mounted) {
-					dispose = listen_dev(button, "click", /*click_handler*/ ctx[10], false, false, false, false);
+					dispose = [
+						listen_dev(button0, "click", /*click_handler*/ ctx[10], false, false, false, false),
+						listen_dev(button1, "click", /*click_handler_1*/ ctx[11], false, false, false, false),
+						listen_dev(button2, "click", /*click_handler_2*/ ctx[12], false, false, false, false)
+					];
+
 					mounted = true;
 				}
 			},
 			p: function update(ctx, dirty) {
-				const settingsmanager_changes = {};
-				settingsmanager.$set(settingsmanager_changes);
+				if (!current || dirty & /*currentPage*/ 8) {
+					toggle_class(button0, "active", /*currentPage*/ ctx[3] === "kills");
+				}
+
+				if (!current || dirty & /*currentPage*/ 8) {
+					toggle_class(button1, "active", /*currentPage*/ ctx[3] === "battles");
+				}
+
+				if (!current || dirty & /*currentPage*/ 8) {
+					toggle_class(button2, "active", /*currentPage*/ ctx[3] === "camps");
+				}
+
+				let previous_block_index = current_block_type_index;
+				current_block_type_index = select_block_type_1(ctx);
+
+				if (current_block_type_index === previous_block_index) {
+					if_blocks[current_block_type_index].p(ctx, dirty);
+				} else {
+					group_outros();
+
+					transition_out(if_blocks[previous_block_index], 1, 1, () => {
+						if_blocks[previous_block_index] = null;
+					});
+
+					check_outros();
+					if_block = if_blocks[current_block_type_index];
+
+					if (!if_block) {
+						if_block = if_blocks[current_block_type_index] = if_block_creators[current_block_type_index](ctx);
+						if_block.c();
+					} else {
+						if_block.p(ctx, dirty);
+					}
+
+					transition_in(if_block, 1);
+					if_block.m(if_block_anchor.parentNode, if_block_anchor);
+				}
 			},
 			i: function intro(local) {
 				if (current) return;
-				transition_in(settingsmanager.$$.fragment, local);
-				transition_in(killmailviewer.$$.fragment, local);
+				transition_in(if_block);
 				current = true;
 			},
 			o: function outro(local) {
-				transition_out(settingsmanager.$$.fragment, local);
-				transition_out(killmailviewer.$$.fragment, local);
+				transition_out(if_block);
 				current = false;
 			},
 			d: function destroy(detaching) {
 				if (detaching) {
-					detach_dev(div2);
+					detach_dev(div);
+					detach_dev(t5);
+					detach_dev(if_block_anchor);
 				}
 
-				/*settingsmanager_binding*/ ctx[9](null);
-				destroy_component(settingsmanager);
-				destroy_component(killmailviewer);
+				if_blocks[current_block_type_index].d(detaching);
 				mounted = false;
-				dispose();
+				run_all(dispose);
 			}
 		};
 
@@ -67071,19 +68238,19 @@ void main() {
 			block,
 			id: create_else_block.name,
 			type: "else",
-			source: "(67:2) {:else}",
+			source: "(71:2) {:else}",
 			ctx
 		});
 
 		return block;
 	}
 
-	// (65:2) {#if !loggedIn}
+	// (69:2) {#if !loggedIn}
 	function create_if_block(ctx) {
 		let login;
 		let current;
 		login = new Login({ $$inline: true });
-		login.$on("login", /*handleLogin*/ ctx[3]);
+		login.$on("login", /*handleLogin*/ ctx[4]);
 
 		const block = {
 			c: function create() {
@@ -67112,7 +68279,184 @@ void main() {
 			block,
 			id: create_if_block.name,
 			type: "if",
-			source: "(65:2) {#if !loggedIn}",
+			source: "(69:2) {#if !loggedIn}",
+			ctx
+		});
+
+		return block;
+	}
+
+	// (110:4) {:else}
+	function create_else_block_1(ctx) {
+		let activecamps;
+		let current;
+		activecamps = new ActiveCamps({ $$inline: true });
+
+		const block = {
+			c: function create() {
+				create_component(activecamps.$$.fragment);
+			},
+			m: function mount(target, anchor) {
+				mount_component(activecamps, target, anchor);
+				current = true;
+			},
+			p: noop,
+			i: function intro(local) {
+				if (current) return;
+				transition_in(activecamps.$$.fragment, local);
+				current = true;
+			},
+			o: function outro(local) {
+				transition_out(activecamps.$$.fragment, local);
+				current = false;
+			},
+			d: function destroy(detaching) {
+				destroy_component(activecamps, detaching);
+			}
+		};
+
+		dispatch_dev("SvelteRegisterBlock", {
+			block,
+			id: create_else_block_1.name,
+			type: "else",
+			source: "(110:4) {:else}",
+			ctx
+		});
+
+		return block;
+	}
+
+	// (108:40) 
+	function create_if_block_2(ctx) {
+		let activebattles;
+		let current;
+		activebattles = new ActiveBattles({ $$inline: true });
+
+		const block = {
+			c: function create() {
+				create_component(activebattles.$$.fragment);
+			},
+			m: function mount(target, anchor) {
+				mount_component(activebattles, target, anchor);
+				current = true;
+			},
+			p: noop,
+			i: function intro(local) {
+				if (current) return;
+				transition_in(activebattles.$$.fragment, local);
+				current = true;
+			},
+			o: function outro(local) {
+				transition_out(activebattles.$$.fragment, local);
+				current = false;
+			},
+			d: function destroy(detaching) {
+				destroy_component(activebattles, detaching);
+			}
+		};
+
+		dispatch_dev("SvelteRegisterBlock", {
+			block,
+			id: create_if_block_2.name,
+			type: "if",
+			source: "(108:40) ",
+			ctx
+		});
+
+		return block;
+	}
+
+	// (93:4) {#if currentPage === "kills"}
+	function create_if_block_1(ctx) {
+		let div2;
+		let div0;
+		let settingsmanager;
+		let t0;
+		let div1;
+		let killmailviewer;
+		let t1;
+		let button;
+		let current;
+		let mounted;
+		let dispose;
+		let settingsmanager_props = { socket };
+
+		settingsmanager = new SettingsManager({
+				props: settingsmanager_props,
+				$$inline: true
+			});
+
+		/*settingsmanager_binding*/ ctx[13](settingsmanager);
+		killmailviewer = new KillmailViewer({ $$inline: true });
+
+		const block = {
+			c: function create() {
+				div2 = element("div");
+				div0 = element("div");
+				create_component(settingsmanager.$$.fragment);
+				t0 = space();
+				div1 = element("div");
+				create_component(killmailviewer.$$.fragment);
+				t1 = space();
+				button = element("button");
+				button.textContent = "Clear All Kills";
+				attr_dev(div0, "class", "settings-section svelte-d6m7ck");
+				add_location(div0, file, 94, 8, 2564);
+				add_location(button, file, 99, 10, 2769);
+				attr_dev(div1, "class", "killmail-section svelte-d6m7ck");
+				add_location(div1, file, 97, 8, 2697);
+				attr_dev(div2, "class", "dashboard svelte-d6m7ck");
+				add_location(div2, file, 93, 6, 2531);
+			},
+			m: function mount(target, anchor) {
+				insert_dev(target, div2, anchor);
+				append_dev(div2, div0);
+				mount_component(settingsmanager, div0, null);
+				append_dev(div2, t0);
+				append_dev(div2, div1);
+				mount_component(killmailviewer, div1, null);
+				append_dev(div1, t1);
+				append_dev(div1, button);
+				current = true;
+
+				if (!mounted) {
+					dispose = listen_dev(button, "click", /*click_handler_3*/ ctx[14], false, false, false, false);
+					mounted = true;
+				}
+			},
+			p: function update(ctx, dirty) {
+				const settingsmanager_changes = {};
+				settingsmanager.$set(settingsmanager_changes);
+			},
+			i: function intro(local) {
+				if (current) return;
+				transition_in(settingsmanager.$$.fragment, local);
+				transition_in(killmailviewer.$$.fragment, local);
+				current = true;
+			},
+			o: function outro(local) {
+				transition_out(settingsmanager.$$.fragment, local);
+				transition_out(killmailviewer.$$.fragment, local);
+				current = false;
+			},
+			d: function destroy(detaching) {
+				if (detaching) {
+					detach_dev(div2);
+				}
+
+				/*settingsmanager_binding*/ ctx[13](null);
+				destroy_component(settingsmanager);
+				destroy_component(killmailviewer);
+				mounted = false;
+				dispose();
+			}
+		};
+
+		dispatch_dev("SvelteRegisterBlock", {
+			block,
+			id: create_if_block_1.name,
+			type: "if",
+			source: "(93:4) {#if currentPage === \\\"kills\\\"}",
 			ctx
 		});
 
@@ -67139,8 +68483,8 @@ void main() {
 			c: function create() {
 				main = element("main");
 				if_block.c();
-				attr_dev(main, "class", "svelte-u90xat");
-				add_location(main, file, 63, 0, 1731);
+				attr_dev(main, "class", "svelte-d6m7ck");
+				add_location(main, file, 67, 0, 1892);
 			},
 			l: function claim(nodes) {
 				throw new Error("options.hydrate only works if the component was compiled with the `hydratable: true` option");
@@ -67216,18 +68560,19 @@ void main() {
 		let $killmails;
 		let $settings;
 		validate_store(profiles, 'profiles');
-		component_subscribe($$self, profiles, $$value => $$invalidate(5, $profiles = $$value));
+		component_subscribe($$self, profiles, $$value => $$invalidate(6, $profiles = $$value));
 		validate_store(filterLists, 'filterLists');
-		component_subscribe($$self, filterLists, $$value => $$invalidate(6, $filterLists = $$value));
+		component_subscribe($$self, filterLists, $$value => $$invalidate(7, $filterLists = $$value));
 		validate_store(killmails, 'killmails');
-		component_subscribe($$self, killmails, $$value => $$invalidate(7, $killmails = $$value));
+		component_subscribe($$self, killmails, $$value => $$invalidate(8, $killmails = $$value));
 		validate_store(settings, 'settings');
-		component_subscribe($$self, settings, $$value => $$invalidate(8, $settings = $$value));
+		component_subscribe($$self, settings, $$value => $$invalidate(9, $settings = $$value));
 		let { $$slots: slots = {}, $$scope } = $$props;
 		validate_slots('App', slots, []);
 		let loggedIn = false;
 		let username = "";
 		let settingsManagerComponent;
+		let currentPage = "kills";
 
 		function clearKills() {
 			killmails.set([]);
@@ -67278,6 +68623,10 @@ void main() {
 			if (!~writable_props.indexOf(key) && key.slice(0, 2) !== '$$' && key !== 'slot') console_1.warn(`<App> was created with unknown prop '${key}'`);
 		});
 
+		const click_handler = () => $$invalidate(3, currentPage = "kills");
+		const click_handler_1 = () => $$invalidate(3, currentPage = "battles");
+		const click_handler_2 = () => $$invalidate(3, currentPage = "camps");
+
 		function settingsmanager_binding($$value) {
 			binding_callbacks[$$value ? 'unshift' : 'push'](() => {
 				settingsManagerComponent = $$value;
@@ -67285,9 +68634,9 @@ void main() {
 			});
 		}
 
-		const click_handler = () => {
+		const click_handler_3 = () => {
 			socket.emit("clearKills");
-			clearKills(); // Call the store's clearKills function
+			clearKills();
 		};
 
 		$$self.$capture_state = () => ({
@@ -67300,9 +68649,12 @@ void main() {
 			filterLists,
 			profiles,
 			Login,
+			ActiveBattles,
+			ActiveCamps,
 			loggedIn,
 			username,
 			settingsManagerComponent,
+			currentPage,
 			clearKills,
 			handleLogin,
 			userProfiles,
@@ -67319,7 +68671,8 @@ void main() {
 			if ('loggedIn' in $$props) $$invalidate(1, loggedIn = $$props.loggedIn);
 			if ('username' in $$props) username = $$props.username;
 			if ('settingsManagerComponent' in $$props) $$invalidate(2, settingsManagerComponent = $$props.settingsManagerComponent);
-			if ('userProfiles' in $$props) $$invalidate(4, userProfiles = $$props.userProfiles);
+			if ('currentPage' in $$props) $$invalidate(3, currentPage = $$props.currentPage);
+			if ('userProfiles' in $$props) $$invalidate(5, userProfiles = $$props.userProfiles);
 			if ('userFilterLists' in $$props) userFilterLists = $$props.userFilterLists;
 			if ('kills' in $$props) kills = $$props.kills;
 			if ('userSettings' in $$props) userSettings = $$props.userSettings;
@@ -67330,24 +68683,24 @@ void main() {
 		}
 
 		$$self.$$.update = () => {
-			if ($$self.$$.dirty & /*$settings*/ 256) {
+			if ($$self.$$.dirty & /*$settings*/ 512) {
 				// Subscribe to stores
 				userSettings = $settings;
 			}
 
-			if ($$self.$$.dirty & /*$killmails*/ 128) {
+			if ($$self.$$.dirty & /*$killmails*/ 256) {
 				kills = $killmails;
 			}
 
-			if ($$self.$$.dirty & /*$filterLists*/ 64) {
+			if ($$self.$$.dirty & /*$filterLists*/ 128) {
 				userFilterLists = $filterLists;
 			}
 
-			if ($$self.$$.dirty & /*$profiles*/ 32) {
-				$$invalidate(4, userProfiles = $profiles);
+			if ($$self.$$.dirty & /*$profiles*/ 64) {
+				$$invalidate(5, userProfiles = $profiles);
 			}
 
-			if ($$self.$$.dirty & /*userProfiles*/ 16) {
+			if ($$self.$$.dirty & /*userProfiles*/ 32) {
 				{
 					console.log("App.svelte - userProfiles updated:", userProfiles);
 				}
@@ -67358,14 +68711,18 @@ void main() {
 			clearKills,
 			loggedIn,
 			settingsManagerComponent,
+			currentPage,
 			handleLogin,
 			userProfiles,
 			$profiles,
 			$filterLists,
 			$killmails,
 			$settings,
+			click_handler,
+			click_handler_1,
+			click_handler_2,
 			settingsmanager_binding,
-			click_handler
+			click_handler_3
 		];
 	}
 

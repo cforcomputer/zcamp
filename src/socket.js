@@ -2,6 +2,9 @@
 
 import { io } from "socket.io-client";
 import { get } from "svelte/store";
+import { addKillmailToBattles } from "./battleStore";
+import { addKillmailToCamps } from "./campStore";
+
 import {
   killmails,
   settings,
@@ -52,6 +55,11 @@ socket.on("newKillmail", (killmail) => {
         }
       }
     }, 0);
+
+    addKillmailToBattles(killmail);
+
+    // Check for gate camps
+    addKillmailToCamps(killmail);
 
     return updatedKillmails;
   });
