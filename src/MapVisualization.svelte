@@ -12,8 +12,7 @@
     throw new Error("kill prop must be an object");
   }
 
-  import gsap from "gsap";
-
+  let pinpointLines = null;
   let container;
   let scene, camera, renderer, controls;
   let compass;
@@ -111,7 +110,7 @@
         lines.add(createLine(points[i], points[j]));
       }
     }
-
+    pinpointLines = lines;
     return lines;
   }
 
@@ -399,6 +398,25 @@
     if (!lastCameraPosition.equals(camera.position)) {
       cameraTarget.position.copy(camera.position);
       lastCameraPosition.copy(camera.position);
+
+      // Get distance to kill point
+      const killObject = Array.from(objectsWithLabels.entries()).find(
+        ([_, data]) => data.type === "killmail"
+      );
+
+      if (killObject && pinpointLines) {
+        const distanceToKill = camera.position.distanceTo(
+          killObject[0].position
+        );
+        const DISTANCE_THRESHOLD = 0.01;
+
+        // Toggle line visibility based on distance
+        pinpointLines.traverse((child) => {
+          if (child instanceof THREE.Line) {
+            child.visible = distanceToKill > DISTANCE_THRESHOLD;
+          }
+        });
+      }
 
       scene.traverse((object) => {
         if (object.isSprite) {
