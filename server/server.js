@@ -8,6 +8,11 @@ const bcrypt = require("bcrypt");
 const app = express();
 const server = http.createServer(app);
 const io = socketIo(server);
+
+// webhook
+const fetch = (...args) =>
+  import("node-fetch").then(({ default: fetch }) => fetch(...args));
+
 app.use(express.static("public"));
 app.use(express.json());
 
@@ -1167,6 +1172,52 @@ async function processKillmail(killmail) {
     ...killmail,
     pinpoints: pinpointData,
   };
+}
+
+async function sendWebhookNotification(killmail, webhookUrl) {
+  try {
+    const zkillUrl = `https://zkillboard.com/kill/${killmail.killID}/`;
+
+    const embed = {
+      title: "New Kill Detected",
+      url: zkillUrl,
+      color: 16711680, // Red
+      fields: [
+        {
+          name: "Ship Type",
+          value: `ID: ${killmail.killmail.victim.ship_type_id}`,
+          inline: true,
+        },
+        {
+          name: "Total Value",
+          value: `${(killmail.zkb.totalValue / 1000000).toFixed(2)}M ISK`,
+          inline: true,
+        },
+        {
+          name: "System",
+          value: `ID: ${killmail.killmail.solar_system_id}`,
+          inline: true,
+        },
+      ],
+      timestamp: killmail.killmail.killmail_time,
+    };
+
+    const response = await fetch(webhookUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        embeds: [embed],
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+  } catch (error) {
+    console.error("Error sending webhook notification:", error);
+  }
 }
 
 // Function to poll for new killmails from RedisQ

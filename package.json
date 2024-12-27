@@ -30,6 +30,7 @@
     "sqlite3": "^5.1.7",
     "svelte-preprocess": "^6.0.2",
     "ws": "^8.18.0",
-    "xml2js": "^0.6.2"
+    "xml2js": "^0.6.2",
+    "node-fetch": "^3.3.0"
   }
 }

@@ -71,8 +71,11 @@
       </div>
       <div class="killmail-section">
         <KillmailViewer />
-        <button on:click={() => socket.emit("clearKills")}
-          >Clear All Kills</button
+        <button
+          on:click={() => {
+            socket.emit("clearKills");
+            clearKills(); // Call the store's clearKills function
+          }}>Clear All Kills</button
         >
       </div>
     </div>

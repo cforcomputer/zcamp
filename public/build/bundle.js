@@ -1629,6 +1629,15 @@ var app = (function () {
 	  return !! this.listeners(event).length;
 	};
 
+	const nextTick = (() => {
+	    const isPromiseAvailable = typeof Promise === "function" && typeof Promise.resolve === "function";
+	    if (isPromiseAvailable) {
+	        return (cb) => Promise.resolve().then(cb);
+	    }
+	    else {
+	        return (cb, setTimeoutFn) => setTimeoutFn(cb, 0);
+	    }
+	})();
 	const globalThisShim = (() => {
 	    if (typeof self !== "undefined") {
 	        return self;
@@ -1640,6 +1649,8 @@ var app = (function () {
 	        return Function("return this")();
 	    }
 	})();
+	const defaultBinaryType = "arraybuffer";
+	function createCookieJar() { }
 
 	function pick(obj, ...attr) {
 	    return attr.reduce((acc, k) => {
@@ -1692,6 +1703,13 @@ var app = (function () {
 	    }
 	    return length;
 	}
+	/**
+	 * Generates a random 8-characters string.
+	 */
+	function randomString() {
+	    return (Date.now().toString(36).substring(3) +
+	        Math.random().toString(36).substring(2, 5));
+	}
 
 	// imported from https://github.com/galkn/querystring
 	/**
@@ -1701,7 +1719,7 @@ var app = (function () {
 	 * @param {Object}
 	 * @api private
 	 */
-	function encode$1(obj) {
+	function encode(obj) {
 	    let str = '';
 	    for (let i in obj) {
 	        if (obj.hasOwnProperty(i)) {
@@ -1750,6 +1768,7 @@ var app = (function () {
 	        this.opts = opts;
 	        this.query = opts.query;
 	        this.socket = opts.socket;
+	        this.supportsBinary = !opts.forceBase64;
 	    }
 	    /**
 	     * Emits an error.
@@ -1858,115 +1877,15 @@ var app = (function () {
 	        }
 	    }
 	    _query(query) {
-	        const encodedQuery = encode$1(query);
+	        const encodedQuery = encode(query);
 	        return encodedQuery.length ? "?" + encodedQuery : "";
 	    }
 	}
 
-	// imported from https://github.com/unshiftio/yeast
-	const alphabet = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz-_'.split(''), length = 64, map = {};
-	let seed = 0, i = 0, prev;
-	/**
-	 * Return a string representing the specified number.
-	 *
-	 * @param {Number} num The number to convert.
-	 * @returns {String} The string representation of the number.
-	 * @api public
-	 */
-	function encode(num) {
-	    let encoded = '';
-	    do {
-	        encoded = alphabet[num % length] + encoded;
-	        num = Math.floor(num / length);
-	    } while (num > 0);
-	    return encoded;
-	}
-	/**
-	 * Yeast: A tiny growing id generator.
-	 *
-	 * @returns {String} A unique id.
-	 * @api public
-	 */
-	function yeast() {
-	    const now = encode(+new Date());
-	    if (now !== prev)
-	        return seed = 0, prev = now;
-	    return now + '.' + encode(seed++);
-	}
-	//
-	// Map each character to its index.
-	//
-	for (; i < length; i++)
-	    map[alphabet[i]] = i;
-
-	// imported from https://github.com/component/has-cors
-	let value = false;
-	try {
-	    value = typeof XMLHttpRequest !== 'undefined' &&
-	        'withCredentials' in new XMLHttpRequest();
-	}
-	catch (err) {
-	    // if XMLHttp support is disabled in IE then it will throw
-	    // when trying to create
-	}
-	const hasCORS = value;
-
-	// browser shim for xmlhttprequest module
-	function XHR(opts) {
-	    const xdomain = opts.xdomain;
-	    // XMLHttpRequest can be disabled on IE
-	    try {
-	        if ("undefined" !== typeof XMLHttpRequest && (!xdomain || hasCORS)) {
-	            return new XMLHttpRequest();
-	        }
-	    }
-	    catch (e) { }
-	    if (!xdomain) {
-	        try {
-	            return new globalThisShim[["Active"].concat("Object").join("X")]("Microsoft.XMLHTTP");
-	        }
-	        catch (e) { }
-	    }
-	}
-	function createCookieJar() { }
-
-	function empty() { }
-	const hasXHR2 = (function () {
-	    const xhr = new XHR({
-	        xdomain: false,
-	    });
-	    return null != xhr.responseType;
-	})();
 	class Polling extends Transport {
-	    /**
-	     * XHR Polling constructor.
-	     *
-	     * @param {Object} opts
-	     * @package
-	     */
-	    constructor(opts) {
-	        super(opts);
-	        this.polling = false;
-	        if (typeof location !== "undefined") {
-	            const isSSL = "https:" === location.protocol;
-	            let port = location.port;
-	            // some user agents have empty `location.port`
-	            if (!port) {
-	                port = isSSL ? "443" : "80";
-	            }
-	            this.xd =
-	                (typeof location !== "undefined" &&
-	                    opts.hostname !== location.hostname) ||
-	                    port !== opts.port;
-	        }
-	        /**
-	         * XHR supports binary
-	         */
-	        const forceBase64 = opts && opts.forceBase64;
-	        this.supportsBinary = hasXHR2 && !forceBase64;
-	        if (this.opts.withCredentials) {
-	            this.cookieJar = createCookieJar();
-	        }
+	    constructor() {
+	        super(...arguments);
+	        this._polling = false;
 	    }
 	    get name() {
 	        return "polling";
@@ -1978,7 +1897,7 @@ var app = (function () {
 	     * @protected
 	     */
 	    doOpen() {
-	        this.poll();
+	        this._poll();
 	    }
 	    /**
 	     * Pauses polling.
@@ -1992,9 +1911,9 @@ var app = (function () {
 	            this.readyState = "paused";
 	            onPause();
 	        };
-	        if (this.polling || !this.writable) {
+	        if (this._polling || !this.writable) {
 	            let total = 0;
-	            if (this.polling) {
+	            if (this._polling) {
 	                total++;
 	                this.once("pollComplete", function () {
 	                    --total || pause();
@@ -2016,8 +1935,8 @@ var app = (function () {
 	     *
 	     * @private
 	     */
-	    poll() {
-	        this.polling = true;
+	    _poll() {
+	        this._polling = true;
 	        this.doPoll();
 	        this.emitReserved("poll");
 	    }
@@ -2045,10 +1964,10 @@ var app = (function () {
 	        // if an event did not trigger closing
 	        if ("closed" !== this.readyState) {
 	            // if we got data we're not polling
-	            this.polling = false;
+	            this._polling = false;
 	            this.emitReserved("pollComplete");
 	            if ("open" === this.readyState) {
-	                this.poll();
+	                this._poll();
 	            }
 	        }
 	    }
@@ -2095,22 +2014,49 @@ var app = (function () {
 	        const query = this.query || {};
 	        // cache busting is forced
 	        if (false !== this.opts.timestampRequests) {
-	            query[this.opts.timestampParam] = yeast();
+	            query[this.opts.timestampParam] = randomString();
 	        }
 	        if (!this.supportsBinary && !query.sid) {
 	            query.b64 = 1;
 	        }
 	        return this.createUri(schema, query);
 	    }
+	}
+
+	// imported from https://github.com/component/has-cors
+	let value = false;
+	try {
+	    value = typeof XMLHttpRequest !== 'undefined' &&
+	        'withCredentials' in new XMLHttpRequest();
+	}
+	catch (err) {
+	    // if XMLHttp support is disabled in IE then it will throw
+	    // when trying to create
+	}
+	const hasCORS = value;
+
+	function empty() { }
+	class BaseXHR extends Polling {
 	    /**
-	     * Creates a request.
+	     * XHR Polling constructor.
 	     *
-	     * @param {String} method
-	     * @private
+	     * @param {Object} opts
+	     * @package
 	     */
-	    request(opts = {}) {
-	        Object.assign(opts, { xd: this.xd, cookieJar: this.cookieJar }, this.opts);
-	        return new Request$1(this.uri(), opts);
+	    constructor(opts) {
+	        super(opts);
+	        if (typeof location !== "undefined") {
+	            const isSSL = "https:" === location.protocol;
+	            let port = location.port;
+	            // some user agents have empty `location.port`
+	            if (!port) {
+	                port = isSSL ? "443" : "80";
+	            }
+	            this.xd =
+	                (typeof location !== "undefined" &&
+	                    opts.hostname !== location.hostname) ||
+	                    port !== opts.port;
+	        }
 	    }
 	    /**
 	     * Sends data.
@@ -2150,39 +2096,41 @@ var app = (function () {
 	     * @param {Object} options
 	     * @package
 	     */
-	    constructor(uri, opts) {
+	    constructor(createRequest, uri, opts) {
 	        super();
+	        this.createRequest = createRequest;
 	        installTimerFunctions(this, opts);
-	        this.opts = opts;
-	        this.method = opts.method || "GET";
-	        this.uri = uri;
-	        this.data = undefined !== opts.data ? opts.data : null;
-	        this.create();
+	        this._opts = opts;
+	        this._method = opts.method || "GET";
+	        this._uri = uri;
+	        this._data = undefined !== opts.data ? opts.data : null;
+	        this._create();
 	    }
 	    /**
 	     * Creates the XHR object and sends the request.
 	     *
 	     * @private
 	     */
-	    create() {
+	    _create() {
 	        var _a;
-	        const opts = pick(this.opts, "agent", "pfx", "key", "passphrase", "cert", "ca", "ciphers", "rejectUnauthorized", "autoUnref");
-	        opts.xdomain = !!this.opts.xd;
-	        const xhr = (this.xhr = new XHR(opts));
+	        const opts = pick(this._opts, "agent", "pfx", "key", "passphrase", "cert", "ca", "ciphers", "rejectUnauthorized", "autoUnref");
+	        opts.xdomain = !!this._opts.xd;
+	        const xhr = (this._xhr = this.createRequest(opts));
 	        try {
-	            xhr.open(this.method, this.uri, true);
+	            xhr.open(this._method, this._uri, true);
 	            try {
-	                if (this.opts.extraHeaders) {
+	                if (this._opts.extraHeaders) {
+	                    // @ts-ignore
 	                    xhr.setDisableHeaderCheck && xhr.setDisableHeaderCheck(true);
-	                    for (let i in this.opts.extraHeaders) {
-	                        if (this.opts.extraHeaders.hasOwnProperty(i)) {
-	                            xhr.setRequestHeader(i, this.opts.extraHeaders[i]);
+	                    for (let i in this._opts.extraHeaders) {
+	                        if (this._opts.extraHeaders.hasOwnProperty(i)) {
+	                            xhr.setRequestHeader(i, this._opts.extraHeaders[i]);
 	                        }
 	                    }
 	                }
 	            }
 	            catch (e) { }
-	            if ("POST" === this.method) {
+	            if ("POST" === this._method) {
 	                try {
 	                    xhr.setRequestHeader("Content-type", "text/plain;charset=UTF-8");
 	                }
@@ -2192,46 +2140,48 @@ var app = (function () {
 	                xhr.setRequestHeader("Accept", "*/*");
 	            }
 	            catch (e) { }
-	            (_a = this.opts.cookieJar) === null || _a === void 0 ? void 0 : _a.addCookies(xhr);
+	            (_a = this._opts.cookieJar) === null || _a === void 0 ? void 0 : _a.addCookies(xhr);
 	            // ie6 check
 	            if ("withCredentials" in xhr) {
-	                xhr.withCredentials = this.opts.withCredentials;
+	                xhr.withCredentials = this._opts.withCredentials;
 	            }
-	            if (this.opts.requestTimeout) {
-	                xhr.timeout = this.opts.requestTimeout;
+	            if (this._opts.requestTimeout) {
+	                xhr.timeout = this._opts.requestTimeout;
 	            }
 	            xhr.onreadystatechange = () => {
 	                var _a;
 	                if (xhr.readyState === 3) {
-	                    (_a = this.opts.cookieJar) === null || _a === void 0 ? void 0 : _a.parseCookies(xhr);
+	                    (_a = this._opts.cookieJar) === null || _a === void 0 ? void 0 : _a.parseCookies(
+	                    // @ts-ignore
+	                    xhr.getResponseHeader("set-cookie"));
 	                }
 	                if (4 !== xhr.readyState)
 	                    return;
 	                if (200 === xhr.status || 1223 === xhr.status) {
-	                    this.onLoad();
+	                    this._onLoad();
 	                }
 	                else {
 	                    // make sure the `error` event handler that's user-set
 	                    // does not throw in the same tick and gets caught here
 	                    this.setTimeoutFn(() => {
-	                        this.onError(typeof xhr.status === "number" ? xhr.status : 0);
+	                        this._onError(typeof xhr.status === "number" ? xhr.status : 0);
 	                    }, 0);
 	                }
 	            };
-	            xhr.send(this.data);
+	            xhr.send(this._data);
 	        }
 	        catch (e) {
 	            // Need to defer since .create() is called directly from the constructor
 	            // and thus the 'error' event can only be only bound *after* this exception
 	            // occurs.  Therefore, also, we cannot throw here at all.
 	            this.setTimeoutFn(() => {
-	                this.onError(e);
+	                this._onError(e);
 	            }, 0);
 	            return;
 	        }
 	        if (typeof document !== "undefined") {
-	            this.index = Request$1.requestsCount++;
-	            Request$1.requests[this.index] = this;
+	            this._index = Request$1.requestsCount++;
+	            Request$1.requests[this._index] = this;
 	        }
 	    }
 	    /**
@@ -2239,42 +2189,42 @@ var app = (function () {
 	     *
 	     * @private
 	     */
-	    onError(err) {
-	        this.emitReserved("error", err, this.xhr);
-	        this.cleanup(true);
+	    _onError(err) {
+	        this.emitReserved("error", err, this._xhr);
+	        this._cleanup(true);
 	    }
 	    /**
 	     * Cleans up house.
 	     *
 	     * @private
 	     */
-	    cleanup(fromError) {
-	        if ("undefined" === typeof this.xhr || null === this.xhr) {
+	    _cleanup(fromError) {
+	        if ("undefined" === typeof this._xhr || null === this._xhr) {
 	            return;
 	        }
-	        this.xhr.onreadystatechange = empty;
+	        this._xhr.onreadystatechange = empty;
 	        if (fromError) {
 	            try {
-	                this.xhr.abort();
+	                this._xhr.abort();
 	            }
 	            catch (e) { }
 	        }
 	        if (typeof document !== "undefined") {
-	            delete Request$1.requests[this.index];
+	            delete Request$1.requests[this._index];
 	        }
-	        this.xhr = null;
+	        this._xhr = null;
 	    }
 	    /**
 	     * Called upon load.
 	     *
 	     * @private
 	     */
-	    onLoad() {
-	        const data = this.xhr.responseText;
+	    _onLoad() {
+	        const data = this._xhr.responseText;
 	        if (data !== null) {
 	            this.emitReserved("data", data);
 	            this.emitReserved("success");
-	            this.cleanup();
+	            this._cleanup();
 	        }
 	    }
 	    /**
@@ -2283,7 +2233,7 @@ var app = (function () {
 	     * @package
 	     */
 	    abort() {
-	        this.cleanup();
+	        this._cleanup();
 	    }
 	}
 	Request$1.requestsCount = 0;
@@ -2311,43 +2261,56 @@ var app = (function () {
 	        }
 	    }
 	}
-
-	const nextTick = (() => {
-	    const isPromiseAvailable = typeof Promise === "function" && typeof Promise.resolve === "function";
-	    if (isPromiseAvailable) {
-	        return (cb) => Promise.resolve().then(cb);
-	    }
-	    else {
-	        return (cb, setTimeoutFn) => setTimeoutFn(cb, 0);
-	    }
+	const hasXHR2 = (function () {
+	    const xhr = newRequest({
+	        xdomain: false,
+	    });
+	    return xhr && xhr.responseType !== null;
 	})();
-	const WebSocket = globalThisShim.WebSocket || globalThisShim.MozWebSocket;
-	const usingBrowserWebSocket = true;
-	const defaultBinaryType = "arraybuffer";
+	/**
+	 * HTTP long-polling based on the built-in `XMLHttpRequest` object.
+	 *
+	 * Usage: browser
+	 *
+	 * @see https://developer.mozilla.org/en-US/docs/Web/API/XMLHttpRequest
+	 */
+	class XHR extends BaseXHR {
+	    constructor(opts) {
+	        super(opts);
+	        const forceBase64 = opts && opts.forceBase64;
+	        this.supportsBinary = hasXHR2 && !forceBase64;
+	    }
+	    request(opts = {}) {
+	        Object.assign(opts, { xd: this.xd }, this.opts);
+	        return new Request$1(newRequest, this.uri(), opts);
+	    }
+	}
+	function newRequest(opts) {
+	    const xdomain = opts.xdomain;
+	    // XMLHttpRequest can be disabled on IE
+	    try {
+	        if ("undefined" !== typeof XMLHttpRequest && (!xdomain || hasCORS)) {
+	            return new XMLHttpRequest();
+	        }
+	    }
+	    catch (e) { }
+	    if (!xdomain) {
+	        try {
+	            return new globalThisShim[["Active"].concat("Object").join("X")]("Microsoft.XMLHTTP");
+	        }
+	        catch (e) { }
+	    }
+	}
 
 	// detect ReactNative environment
 	const isReactNative = typeof navigator !== "undefined" &&
 	    typeof navigator.product === "string" &&
 	    navigator.product.toLowerCase() === "reactnative";
-	class WS extends Transport {
-	    /**
-	     * WebSocket transport constructor.
-	     *
-	     * @param {Object} opts - connection options
-	     * @protected
-	     */
-	    constructor(opts) {
-	        super(opts);
-	        this.supportsBinary = !opts.forceBase64;
-	    }
+	class BaseWS extends Transport {
 	    get name() {
 	        return "websocket";
 	    }
 	    doOpen() {
-	        if (!this.check()) {
-	            // let probe timeout
-	            return;
-	        }
 	        const uri = this.uri();
 	        const protocols = this.opts.protocols;
 	        // React Native only supports the 'headers' option, and will print a warning if anything else is passed
@@ -2358,12 +2321,7 @@ var app = (function () {
 	            opts.headers = this.opts.extraHeaders;
 	        }
 	        try {
-	            this.ws =
-	                usingBrowserWebSocket && !isReactNative
-	                    ? protocols
-	                        ? new WebSocket(uri, protocols)
-	                        : new WebSocket(uri)
-	                    : new WebSocket(uri, protocols, opts);
+	            this.ws = this.createSocket(uri, protocols, opts);
 	        }
 	        catch (err) {
 	            return this.emitReserved("error", err);
@@ -2398,16 +2356,11 @@ var app = (function () {
 	            const packet = packets[i];
 	            const lastPacket = i === packets.length - 1;
 	            encodePacket(packet, this.supportsBinary, (data) => {
-	                // always create a new object (GH-437)
-	                const opts = {};
 	                // Sometimes the websocket has already been closed but the browser didn't
 	                // have a chance of informing us about it yet, in that case send will
 	                // throw an error
 	                try {
-	                    if (usingBrowserWebSocket) {
-	                        // TypeError is thrown when passing the second argument on Safari
-	                        this.ws.send(data);
-	                    }
+	                    this.doWrite(packet, data);
 	                }
 	                catch (e) {
 	                }
@@ -2424,6 +2377,7 @@ var app = (function () {
 	    }
 	    doClose() {
 	        if (typeof this.ws !== "undefined") {
+	            this.ws.onerror = () => { };
 	            this.ws.close();
 	            this.ws = null;
 	        }
@@ -2438,7 +2392,7 @@ var app = (function () {
 	        const query = this.query || {};
 	        // append timestamp to URI
 	        if (this.opts.timestampRequests) {
-	            query[this.opts.timestampParam] = yeast();
+	            query[this.opts.timestampParam] = randomString();
 	        }
 	        // communicate binary support capabilities
 	        if (!this.supportsBinary) {
@@ -2446,29 +2400,51 @@ var app = (function () {
 	        }
 	        return this.createUri(schema, query);
 	    }
-	    /**
-	     * Feature detection for WebSocket.
-	     *
-	     * @return {Boolean} whether this transport is available.
-	     * @private
-	     */
-	    check() {
-	        return !!WebSocket;
+	}
+	const WebSocketCtor = globalThisShim.WebSocket || globalThisShim.MozWebSocket;
+	/**
+	 * WebSocket transport based on the built-in `WebSocket` object.
+	 *
+	 * Usage: browser, Node.js (since v21), Deno, Bun
+	 *
+	 * @see https://developer.mozilla.org/en-US/docs/Web/API/WebSocket
+	 * @see https://caniuse.com/mdn-api_websocket
+	 * @see https://nodejs.org/api/globals.html#websocket
+	 */
+	class WS extends BaseWS {
+	    createSocket(uri, protocols, opts) {
+	        return !isReactNative
+	            ? protocols
+	                ? new WebSocketCtor(uri, protocols)
+	                : new WebSocketCtor(uri)
+	            : new WebSocketCtor(uri, protocols, opts);
+	    }
+	    doWrite(_packet, data) {
+	        this.ws.send(data);
 	    }
 	}
 
+	/**
+	 * WebTransport transport based on the built-in `WebTransport` object.
+	 *
+	 * Usage: browser, Node.js (with the `@fails-components/webtransport` package)
+	 *
+	 * @see https://developer.mozilla.org/en-US/docs/Web/API/WebTransport
+	 * @see https://caniuse.com/webtransport
+	 */
 	class WT extends Transport {
 	    get name() {
 	        return "webtransport";
 	    }
 	    doOpen() {
-	        // @ts-ignore
-	        if (typeof WebTransport !== "function") {
-	            return;
+	        try {
+	            // @ts-ignore
+	            this._transport = new WebTransport(this.createUri("https"), this.opts.transportOptions[this.name]);
 	        }
-	        // @ts-ignore
-	        this.transport = new WebTransport(this.createUri("https"), this.opts.transportOptions[this.name]);
-	        this.transport.closed
+	        catch (err) {
+	            return this.emitReserved("error", err);
+	        }
+	        this._transport.closed
 	            .then(() => {
 	            this.onClose();
 	        })
@@ -2476,13 +2452,13 @@ var app = (function () {
 	            this.onError("webtransport error", err);
 	        });
 	        // note: we could have used async/await, but that would require some additional polyfills
-	        this.transport.ready.then(() => {
-	            this.transport.createBidirectionalStream().then((stream) => {
+	        this._transport.ready.then(() => {
+	            this._transport.createBidirectionalStream().then((stream) => {
 	                const decoderStream = createPacketDecoderStream(Number.MAX_SAFE_INTEGER, this.socket.binaryType);
 	                const reader = stream.readable.pipeThrough(decoderStream).getReader();
 	                const encoderStream = createPacketEncoderStream();
 	                encoderStream.readable.pipeTo(stream.writable);
-	                this.writer = encoderStream.writable.getWriter();
+	                this._writer = encoderStream.writable.getWriter();
 	                const read = () => {
 	                    reader
 	                        .read()
@@ -2501,7 +2477,7 @@ var app = (function () {
 	                if (this.query.sid) {
 	                    packet.data = `{"sid":"${this.query.sid}"}`;
 	                }
-	                this.writer.write(packet).then(() => this.onOpen());
+	                this._writer.write(packet).then(() => this.onOpen());
 	            });
 	        });
 	    }
@@ -2510,7 +2486,7 @@ var app = (function () {
 	        for (let i = 0; i < packets.length; i++) {
 	            const packet = packets[i];
 	            const lastPacket = i === packets.length - 1;
-	            this.writer.write(packet).then(() => {
+	            this._writer.write(packet).then(() => {
 	                if (lastPacket) {
 	                    nextTick(() => {
 	                        this.writable = true;
@@ -2522,14 +2498,14 @@ var app = (function () {
 	    }
 	    doClose() {
 	        var _a;
-	        (_a = this.transport) === null || _a === void 0 ? void 0 : _a.close();
+	        (_a = this._transport) === null || _a === void 0 ? void 0 : _a.close();
 	    }
 	}
 
 	const transports = {
 	    websocket: WS,
 	    webtransport: WT,
-	    polling: Polling,
+	    polling: XHR,
 	};
 
 	// imported from https://github.com/galkn/parseuri
@@ -2556,7 +2532,7 @@ var app = (function () {
 	    'source', 'protocol', 'authority', 'userInfo', 'user', 'password', 'host', 'port', 'relative', 'path', 'directory', 'file', 'query', 'anchor'
 	];
 	function parse(str) {
-	    if (str.length > 2000) {
+	    if (str.length > 8000) {
 	        throw "URI too long";
 	    }
 	    const src = str, b = str.indexOf('['), e = str.indexOf(']');
@@ -2597,28 +2573,71 @@ var app = (function () {
 	    return data;
 	}
 
-	class Socket$1 extends Emitter {
+	const withEventListeners = typeof addEventListener === "function" &&
+	    typeof removeEventListener === "function";
+	const OFFLINE_EVENT_LISTENERS = [];
+	if (withEventListeners) {
+	    // within a ServiceWorker, any event handler for the 'offline' event must be added on the initial evaluation of the
+	    // script, so we create one single event listener here which will forward the event to the socket instances
+	    addEventListener("offline", () => {
+	        OFFLINE_EVENT_LISTENERS.forEach((listener) => listener());
+	    }, false);
+	}
+	/**
+	 * This class provides a WebSocket-like interface to connect to an Engine.IO server. The connection will be established
+	 * with one of the available low-level transports, like HTTP long-polling, WebSocket or WebTransport.
+	 *
+	 * This class comes without upgrade mechanism, which means that it will keep the first low-level transport that
+	 * successfully establishes the connection.
+	 *
+	 * In order to allow tree-shaking, there are no transports included, that's why the `transports` option is mandatory.
+	 *
+	 * @example
+	 * import { SocketWithoutUpgrade, WebSocket } from "engine.io-client";
+	 *
+	 * const socket = new SocketWithoutUpgrade({
+	 *   transports: [WebSocket]
+	 * });
+	 *
+	 * socket.on("open", () => {
+	 *   socket.send("hello");
+	 * });
+	 *
+	 * @see SocketWithUpgrade
+	 * @see Socket
+	 */
+	class SocketWithoutUpgrade extends Emitter {
 	    /**
 	     * Socket constructor.
 	     *
 	     * @param {String|Object} uri - uri or options
 	     * @param {Object} opts - options
 	     */
-	    constructor(uri, opts = {}) {
+	    constructor(uri, opts) {
 	        super();
 	        this.binaryType = defaultBinaryType;
 	        this.writeBuffer = [];
+	        this._prevBufferLen = 0;
+	        this._pingInterval = -1;
+	        this._pingTimeout = -1;
+	        this._maxPayload = -1;
+	        /**
+	         * The expiration timestamp of the {@link _pingTimeoutTimer} object is tracked, in case the timer is throttled and the
+	         * callback is not fired on time. This can happen for example when a laptop is suspended or when a phone is locked.
+	         */
+	        this._pingTimeoutTime = Infinity;
 	        if (uri && "object" === typeof uri) {
 	            opts = uri;
 	            uri = null;
 	        }
 	        if (uri) {
-	            uri = parse(uri);
-	            opts.hostname = uri.host;
-	            opts.secure = uri.protocol === "https" || uri.protocol === "wss";
-	            opts.port = uri.port;
-	            if (uri.query)
-	                opts.query = uri.query;
+	            const parsedUri = parse(uri);
+	            opts.hostname = parsedUri.host;
+	            opts.secure =
+	                parsedUri.protocol === "https" || parsedUri.protocol === "wss";
+	            opts.port = parsedUri.port;
+	            if (parsedUri.query)
+	                opts.query = parsedUri.query;
 	        }
 	        else if (opts.host) {
 	            opts.hostname = parse(opts.host).host;
@@ -2642,13 +2661,13 @@ var app = (function () {
 	                    : this.secure
 	                        ? "443"
 	                        : "80");
-	        this.transports = opts.transports || [
-	            "polling",
-	            "websocket",
-	            "webtransport",
-	        ];
-	        this.writeBuffer = [];
-	        this.prevBufferLen = 0;
+	        this.transports = [];
+	        this._transportsByName = {};
+	        opts.transports.forEach((t) => {
+	            const transportName = t.prototype.name;
+	            this.transports.push(transportName);
+	            this._transportsByName[transportName] = t;
+	        });
 	        this.opts = Object.assign({
 	            path: "/engine.io",
 	            agent: false,
@@ -2670,37 +2689,33 @@ var app = (function () {
 	        if (typeof this.opts.query === "string") {
 	            this.opts.query = decode(this.opts.query);
 	        }
-	        // set on handshake
-	        this.id = null;
-	        this.upgrades = null;
-	        this.pingInterval = null;
-	        this.pingTimeout = null;
-	        // set on heartbeat
-	        this.pingTimeoutTimer = null;
-	        if (typeof addEventListener === "function") {
+	        if (withEventListeners) {
 	            if (this.opts.closeOnBeforeunload) {
 	                // Firefox closes the connection when the "beforeunload" event is emitted but not Chrome. This event listener
 	                // ensures every browser behaves the same (no "disconnect" event at the Socket.IO level when the page is
 	                // closed/reloaded)
-	                this.beforeunloadEventListener = () => {
+	                this._beforeunloadEventListener = () => {
 	                    if (this.transport) {
 	                        // silently close the transport
 	                        this.transport.removeAllListeners();
 	                        this.transport.close();
 	                    }
 	                };
-	                addEventListener("beforeunload", this.beforeunloadEventListener, false);
+	                addEventListener("beforeunload", this._beforeunloadEventListener, false);
 	            }
 	            if (this.hostname !== "localhost") {
-	                this.offlineEventListener = () => {
-	                    this.onClose("transport close", {
+	                this._offlineEventListener = () => {
+	                    this._onClose("transport close", {
 	                        description: "network connection lost",
 	                    });
 	                };
-	                addEventListener("offline", this.offlineEventListener, false);
+	                OFFLINE_EVENT_LISTENERS.push(this._offlineEventListener);
 	            }
 	        }
-	        this.open();
+	        if (this.opts.withCredentials) {
+	            this._cookieJar = createCookieJar();
+	        }
+	        this._open();
 	    }
 	    /**
 	     * Creates transport of the given type.
@@ -2725,40 +2740,28 @@ var app = (function () {
 	            secure: this.secure,
 	            port: this.port,
 	        }, this.opts.transportOptions[name]);
-	        return new transports[name](opts);
+	        return new this._transportsByName[name](opts);
 	    }
 	    /**
 	     * Initializes transport to use and starts probe.
 	     *
 	     * @private
 	     */
-	    open() {
-	        let transport;
-	        if (this.opts.rememberUpgrade &&
-	            Socket$1.priorWebsocketSuccess &&
-	            this.transports.indexOf("websocket") !== -1) {
-	            transport = "websocket";
-	        }
-	        else if (0 === this.transports.length) {
+	    _open() {
+	        if (this.transports.length === 0) {
 	            // Emit error on next tick so it can be listened to
 	            this.setTimeoutFn(() => {
 	                this.emitReserved("error", "No transports available");
 	            }, 0);
 	            return;
 	        }
-	        else {
-	            transport = this.transports[0];
-	        }
+	        const transportName = this.opts.rememberUpgrade &&
+	            SocketWithoutUpgrade.priorWebsocketSuccess &&
+	            this.transports.indexOf("websocket") !== -1
+	            ? "websocket"
+	            : this.transports[0];
 	        this.readyState = "opening";
-	        // Retry with the next transport if the transport is disabled (jsonp: false)
-	        try {
-	            transport = this.createTransport(transport);
-	        }
-	        catch (e) {
-	            this.transports.shift();
-	            this.open();
-	            return;
-	        }
+	        const transport = this.createTransport(transportName);
 	        transport.open();
 	        this.setTransport(transport);
 	    }
@@ -2775,10 +2778,366 @@ var app = (function () {
 	        this.transport = transport;
 	        // set up transport listeners
 	        transport
-	            .on("drain", this.onDrain.bind(this))
-	            .on("packet", this.onPacket.bind(this))
-	            .on("error", this.onError.bind(this))
-	            .on("close", (reason) => this.onClose("transport close", reason));
+	            .on("drain", this._onDrain.bind(this))
+	            .on("packet", this._onPacket.bind(this))
+	            .on("error", this._onError.bind(this))
+	            .on("close", (reason) => this._onClose("transport close", reason));
+	    }
+	    /**
+	     * Called when connection is deemed open.
+	     *
+	     * @private
+	     */
+	    onOpen() {
+	        this.readyState = "open";
+	        SocketWithoutUpgrade.priorWebsocketSuccess =
+	            "websocket" === this.transport.name;
+	        this.emitReserved("open");
+	        this.flush();
+	    }
+	    /**
+	     * Handles a packet.
+	     *
+	     * @private
+	     */
+	    _onPacket(packet) {
+	        if ("opening" === this.readyState ||
+	            "open" === this.readyState ||
+	            "closing" === this.readyState) {
+	            this.emitReserved("packet", packet);
+	            // Socket is live - any packet counts
+	            this.emitReserved("heartbeat");
+	            switch (packet.type) {
+	                case "open":
+	                    this.onHandshake(JSON.parse(packet.data));
+	                    break;
+	                case "ping":
+	                    this._sendPacket("pong");
+	                    this.emitReserved("ping");
+	                    this.emitReserved("pong");
+	                    this._resetPingTimeout();
+	                    break;
+	                case "error":
+	                    const err = new Error("server error");
+	                    // @ts-ignore
+	                    err.code = packet.data;
+	                    this._onError(err);
+	                    break;
+	                case "message":
+	                    this.emitReserved("data", packet.data);
+	                    this.emitReserved("message", packet.data);
+	                    break;
+	            }
+	        }
+	    }
+	    /**
+	     * Called upon handshake completion.
+	     *
+	     * @param {Object} data - handshake obj
+	     * @private
+	     */
+	    onHandshake(data) {
+	        this.emitReserved("handshake", data);
+	        this.id = data.sid;
+	        this.transport.query.sid = data.sid;
+	        this._pingInterval = data.pingInterval;
+	        this._pingTimeout = data.pingTimeout;
+	        this._maxPayload = data.maxPayload;
+	        this.onOpen();
+	        // In case open handler closes socket
+	        if ("closed" === this.readyState)
+	            return;
+	        this._resetPingTimeout();
+	    }
+	    /**
+	     * Sets and resets ping timeout timer based on server pings.
+	     *
+	     * @private
+	     */
+	    _resetPingTimeout() {
+	        this.clearTimeoutFn(this._pingTimeoutTimer);
+	        const delay = this._pingInterval + this._pingTimeout;
+	        this._pingTimeoutTime = Date.now() + delay;
+	        this._pingTimeoutTimer = this.setTimeoutFn(() => {
+	            this._onClose("ping timeout");
+	        }, delay);
+	        if (this.opts.autoUnref) {
+	            this._pingTimeoutTimer.unref();
+	        }
+	    }
+	    /**
+	     * Called on `drain` event
+	     *
+	     * @private
+	     */
+	    _onDrain() {
+	        this.writeBuffer.splice(0, this._prevBufferLen);
+	        // setting prevBufferLen = 0 is very important
+	        // for example, when upgrading, upgrade packet is sent over,
+	        // and a nonzero prevBufferLen could cause problems on `drain`
+	        this._prevBufferLen = 0;
+	        if (0 === this.writeBuffer.length) {
+	            this.emitReserved("drain");
+	        }
+	        else {
+	            this.flush();
+	        }
+	    }
+	    /**
+	     * Flush write buffers.
+	     *
+	     * @private
+	     */
+	    flush() {
+	        if ("closed" !== this.readyState &&
+	            this.transport.writable &&
+	            !this.upgrading &&
+	            this.writeBuffer.length) {
+	            const packets = this._getWritablePackets();
+	            this.transport.send(packets);
+	            // keep track of current length of writeBuffer
+	            // splice writeBuffer and callbackBuffer on `drain`
+	            this._prevBufferLen = packets.length;
+	            this.emitReserved("flush");
+	        }
+	    }
+	    /**
+	     * Ensure the encoded size of the writeBuffer is below the maxPayload value sent by the server (only for HTTP
+	     * long-polling)
+	     *
+	     * @private
+	     */
+	    _getWritablePackets() {
+	        const shouldCheckPayloadSize = this._maxPayload &&
+	            this.transport.name === "polling" &&
+	            this.writeBuffer.length > 1;
+	        if (!shouldCheckPayloadSize) {
+	            return this.writeBuffer;
+	        }
+	        let payloadSize = 1; // first packet type
+	        for (let i = 0; i < this.writeBuffer.length; i++) {
+	            const data = this.writeBuffer[i].data;
+	            if (data) {
+	                payloadSize += byteLength(data);
+	            }
+	            if (i > 0 && payloadSize > this._maxPayload) {
+	                return this.writeBuffer.slice(0, i);
+	            }
+	            payloadSize += 2; // separator + packet type
+	        }
+	        return this.writeBuffer;
+	    }
+	    /**
+	     * Checks whether the heartbeat timer has expired but the socket has not yet been notified.
+	     *
+	     * Note: this method is private for now because it does not really fit the WebSocket API, but if we put it in the
+	     * `write()` method then the message would not be buffered by the Socket.IO client.
+	     *
+	     * @return {boolean}
+	     * @private
+	     */
+	    /* private */ _hasPingExpired() {
+	        if (!this._pingTimeoutTime)
+	            return true;
+	        const hasExpired = Date.now() > this._pingTimeoutTime;
+	        if (hasExpired) {
+	            this._pingTimeoutTime = 0;
+	            nextTick(() => {
+	                this._onClose("ping timeout");
+	            }, this.setTimeoutFn);
+	        }
+	        return hasExpired;
+	    }
+	    /**
+	     * Sends a message.
+	     *
+	     * @param {String} msg - message.
+	     * @param {Object} options.
+	     * @param {Function} fn - callback function.
+	     * @return {Socket} for chaining.
+	     */
+	    write(msg, options, fn) {
+	        this._sendPacket("message", msg, options, fn);
+	        return this;
+	    }
+	    /**
+	     * Sends a message. Alias of {@link Socket#write}.
+	     *
+	     * @param {String} msg - message.
+	     * @param {Object} options.
+	     * @param {Function} fn - callback function.
+	     * @return {Socket} for chaining.
+	     */
+	    send(msg, options, fn) {
+	        this._sendPacket("message", msg, options, fn);
+	        return this;
+	    }
+	    /**
+	     * Sends a packet.
+	     *
+	     * @param {String} type: packet type.
+	     * @param {String} data.
+	     * @param {Object} options.
+	     * @param {Function} fn - callback function.
+	     * @private
+	     */
+	    _sendPacket(type, data, options, fn) {
+	        if ("function" === typeof data) {
+	            fn = data;
+	            data = undefined;
+	        }
+	        if ("function" === typeof options) {
+	            fn = options;
+	            options = null;
+	        }
+	        if ("closing" === this.readyState || "closed" === this.readyState) {
+	            return;
+	        }
+	        options = options || {};
+	        options.compress = false !== options.compress;
+	        const packet = {
+	            type: type,
+	            data: data,
+	            options: options,
+	        };
+	        this.emitReserved("packetCreate", packet);
+	        this.writeBuffer.push(packet);
+	        if (fn)
+	            this.once("flush", fn);
+	        this.flush();
+	    }
+	    /**
+	     * Closes the connection.
+	     */
+	    close() {
+	        const close = () => {
+	            this._onClose("forced close");
+	            this.transport.close();
+	        };
+	        const cleanupAndClose = () => {
+	            this.off("upgrade", cleanupAndClose);
+	            this.off("upgradeError", cleanupAndClose);
+	            close();
+	        };
+	        const waitForUpgrade = () => {
+	            // wait for upgrade to finish since we can't send packets while pausing a transport
+	            this.once("upgrade", cleanupAndClose);
+	            this.once("upgradeError", cleanupAndClose);
+	        };
+	        if ("opening" === this.readyState || "open" === this.readyState) {
+	            this.readyState = "closing";
+	            if (this.writeBuffer.length) {
+	                this.once("drain", () => {
+	                    if (this.upgrading) {
+	                        waitForUpgrade();
+	                    }
+	                    else {
+	                        close();
+	                    }
+	                });
+	            }
+	            else if (this.upgrading) {
+	                waitForUpgrade();
+	            }
+	            else {
+	                close();
+	            }
+	        }
+	        return this;
+	    }
+	    /**
+	     * Called upon transport error
+	     *
+	     * @private
+	     */
+	    _onError(err) {
+	        SocketWithoutUpgrade.priorWebsocketSuccess = false;
+	        if (this.opts.tryAllTransports &&
+	            this.transports.length > 1 &&
+	            this.readyState === "opening") {
+	            this.transports.shift();
+	            return this._open();
+	        }
+	        this.emitReserved("error", err);
+	        this._onClose("transport error", err);
+	    }
+	    /**
+	     * Called upon transport close.
+	     *
+	     * @private
+	     */
+	    _onClose(reason, description) {
+	        if ("opening" === this.readyState ||
+	            "open" === this.readyState ||
+	            "closing" === this.readyState) {
+	            // clear timers
+	            this.clearTimeoutFn(this._pingTimeoutTimer);
+	            // stop event from firing again for transport
+	            this.transport.removeAllListeners("close");
+	            // ensure transport won't stay open
+	            this.transport.close();
+	            // ignore further transport communication
+	            this.transport.removeAllListeners();
+	            if (withEventListeners) {
+	                if (this._beforeunloadEventListener) {
+	                    removeEventListener("beforeunload", this._beforeunloadEventListener, false);
+	                }
+	                if (this._offlineEventListener) {
+	                    const i = OFFLINE_EVENT_LISTENERS.indexOf(this._offlineEventListener);
+	                    if (i !== -1) {
+	                        OFFLINE_EVENT_LISTENERS.splice(i, 1);
+	                    }
+	                }
+	            }
+	            // set ready state
+	            this.readyState = "closed";
+	            // clear session id
+	            this.id = null;
+	            // emit close event
+	            this.emitReserved("close", reason, description);
+	            // clean buffers after, so users can still
+	            // grab the buffers on `close` event
+	            this.writeBuffer = [];
+	            this._prevBufferLen = 0;
+	        }
+	    }
+	}
+	SocketWithoutUpgrade.protocol = protocol$1;
+	/**
+	 * This class provides a WebSocket-like interface to connect to an Engine.IO server. The connection will be established
+	 * with one of the available low-level transports, like HTTP long-polling, WebSocket or WebTransport.
+	 *
+	 * This class comes with an upgrade mechanism, which means that once the connection is established with the first
+	 * low-level transport, it will try to upgrade to a better transport.
+	 *
+	 * In order to allow tree-shaking, there are no transports included, that's why the `transports` option is mandatory.
+	 *
+	 * @example
+	 * import { SocketWithUpgrade, WebSocket } from "engine.io-client";
+	 *
+	 * const socket = new SocketWithUpgrade({
+	 *   transports: [WebSocket]
+	 * });
+	 *
+	 * socket.on("open", () => {
+	 *   socket.send("hello");
+	 * });
+	 *
+	 * @see SocketWithoutUpgrade
+	 * @see Socket
+	 */
+	class SocketWithUpgrade extends SocketWithoutUpgrade {
+	    constructor() {
+	        super(...arguments);
+	        this._upgrades = [];
+	    }
+	    onOpen() {
+	        super.onOpen();
+	        if ("open" === this.readyState && this.opts.upgrade) {
+	            for (let i = 0; i < this._upgrades.length; i++) {
+	                this._probe(this._upgrades[i]);
+	            }
+	        }
 	    }
 	    /**
 	     * Probes a transport.
@@ -2786,10 +3145,10 @@ var app = (function () {
 	     * @param {String} name - transport name
 	     * @private
 	     */
-	    probe(name) {
+	    _probe(name) {
 	        let transport = this.createTransport(name);
 	        let failed = false;
-	        Socket$1.priorWebsocketSuccess = false;
+	        SocketWithoutUpgrade.priorWebsocketSuccess = false;
 	        const onTransportOpen = () => {
 	            if (failed)
 	                return;
@@ -2802,7 +3161,8 @@ var app = (function () {
 	                    this.emitReserved("upgrading", transport);
 	                    if (!transport)
 	                        return;
-	                    Socket$1.priorWebsocketSuccess = "websocket" === transport.name;
+	                    SocketWithoutUpgrade.priorWebsocketSuccess =
+	                        "websocket" === transport.name;
 	                    this.transport.pause(() => {
 	                        if (failed)
 	                            return;
@@ -2868,7 +3228,7 @@ var app = (function () {
 	        transport.once("close", onTransportClose);
 	        this.once("close", onclose);
 	        this.once("upgrading", onupgrade);
-	        if (this.upgrades.indexOf("webtransport") !== -1 &&
+	        if (this._upgrades.indexOf("webtransport") !== -1 &&
 	            name !== "webtransport") {
 	            // favor WebTransport
 	            this.setTimeoutFn(() => {
@@ -2881,288 +3241,9 @@ var app = (function () {
 	            transport.open();
 	        }
 	    }
-	    /**
-	     * Called when connection is deemed open.
-	     *
-	     * @private
-	     */
-	    onOpen() {
-	        this.readyState = "open";
-	        Socket$1.priorWebsocketSuccess = "websocket" === this.transport.name;
-	        this.emitReserved("open");
-	        this.flush();
-	        // we check for `readyState` in case an `open`
-	        // listener already closed the socket
-	        if ("open" === this.readyState && this.opts.upgrade) {
-	            let i = 0;
-	            const l = this.upgrades.length;
-	            for (; i < l; i++) {
-	                this.probe(this.upgrades[i]);
-	            }
-	        }
-	    }
-	    /**
-	     * Handles a packet.
-	     *
-	     * @private
-	     */
-	    onPacket(packet) {
-	        if ("opening" === this.readyState ||
-	            "open" === this.readyState ||
-	            "closing" === this.readyState) {
-	            this.emitReserved("packet", packet);
-	            // Socket is live - any packet counts
-	            this.emitReserved("heartbeat");
-	            this.resetPingTimeout();
-	            switch (packet.type) {
-	                case "open":
-	                    this.onHandshake(JSON.parse(packet.data));
-	                    break;
-	                case "ping":
-	                    this.sendPacket("pong");
-	                    this.emitReserved("ping");
-	                    this.emitReserved("pong");
-	                    break;
-	                case "error":
-	                    const err = new Error("server error");
-	                    // @ts-ignore
-	                    err.code = packet.data;
-	                    this.onError(err);
-	                    break;
-	                case "message":
-	                    this.emitReserved("data", packet.data);
-	                    this.emitReserved("message", packet.data);
-	                    break;
-	            }
-	        }
-	    }
-	    /**
-	     * Called upon handshake completion.
-	     *
-	     * @param {Object} data - handshake obj
-	     * @private
-	     */
 	    onHandshake(data) {
-	        this.emitReserved("handshake", data);
-	        this.id = data.sid;
-	        this.transport.query.sid = data.sid;
-	        this.upgrades = this.filterUpgrades(data.upgrades);
-	        this.pingInterval = data.pingInterval;
-	        this.pingTimeout = data.pingTimeout;
-	        this.maxPayload = data.maxPayload;
-	        this.onOpen();
-	        // In case open handler closes socket
-	        if ("closed" === this.readyState)
-	            return;
-	        this.resetPingTimeout();
-	    }
-	    /**
-	     * Sets and resets ping timeout timer based on server pings.
-	     *
-	     * @private
-	     */
-	    resetPingTimeout() {
-	        this.clearTimeoutFn(this.pingTimeoutTimer);
-	        this.pingTimeoutTimer = this.setTimeoutFn(() => {
-	            this.onClose("ping timeout");
-	        }, this.pingInterval + this.pingTimeout);
-	        if (this.opts.autoUnref) {
-	            this.pingTimeoutTimer.unref();
-	        }
-	    }
-	    /**
-	     * Called on `drain` event
-	     *
-	     * @private
-	     */
-	    onDrain() {
-	        this.writeBuffer.splice(0, this.prevBufferLen);
-	        // setting prevBufferLen = 0 is very important
-	        // for example, when upgrading, upgrade packet is sent over,
-	        // and a nonzero prevBufferLen could cause problems on `drain`
-	        this.prevBufferLen = 0;
-	        if (0 === this.writeBuffer.length) {
-	            this.emitReserved("drain");
-	        }
-	        else {
-	            this.flush();
-	        }
-	    }
-	    /**
-	     * Flush write buffers.
-	     *
-	     * @private
-	     */
-	    flush() {
-	        if ("closed" !== this.readyState &&
-	            this.transport.writable &&
-	            !this.upgrading &&
-	            this.writeBuffer.length) {
-	            const packets = this.getWritablePackets();
-	            this.transport.send(packets);
-	            // keep track of current length of writeBuffer
-	            // splice writeBuffer and callbackBuffer on `drain`
-	            this.prevBufferLen = packets.length;
-	            this.emitReserved("flush");
-	        }
-	    }
-	    /**
-	     * Ensure the encoded size of the writeBuffer is below the maxPayload value sent by the server (only for HTTP
-	     * long-polling)
-	     *
-	     * @private
-	     */
-	    getWritablePackets() {
-	        const shouldCheckPayloadSize = this.maxPayload &&
-	            this.transport.name === "polling" &&
-	            this.writeBuffer.length > 1;
-	        if (!shouldCheckPayloadSize) {
-	            return this.writeBuffer;
-	        }
-	        let payloadSize = 1; // first packet type
-	        for (let i = 0; i < this.writeBuffer.length; i++) {
-	            const data = this.writeBuffer[i].data;
-	            if (data) {
-	                payloadSize += byteLength(data);
-	            }
-	            if (i > 0 && payloadSize > this.maxPayload) {
-	                return this.writeBuffer.slice(0, i);
-	            }
-	            payloadSize += 2; // separator + packet type
-	        }
-	        return this.writeBuffer;
-	    }
-	    /**
-	     * Sends a message.
-	     *
-	     * @param {String} msg - message.
-	     * @param {Object} options.
-	     * @param {Function} callback function.
-	     * @return {Socket} for chaining.
-	     */
-	    write(msg, options, fn) {
-	        this.sendPacket("message", msg, options, fn);
-	        return this;
-	    }
-	    send(msg, options, fn) {
-	        this.sendPacket("message", msg, options, fn);
-	        return this;
-	    }
-	    /**
-	     * Sends a packet.
-	     *
-	     * @param {String} type: packet type.
-	     * @param {String} data.
-	     * @param {Object} options.
-	     * @param {Function} fn - callback function.
-	     * @private
-	     */
-	    sendPacket(type, data, options, fn) {
-	        if ("function" === typeof data) {
-	            fn = data;
-	            data = undefined;
-	        }
-	        if ("function" === typeof options) {
-	            fn = options;
-	            options = null;
-	        }
-	        if ("closing" === this.readyState || "closed" === this.readyState) {
-	            return;
-	        }
-	        options = options || {};
-	        options.compress = false !== options.compress;
-	        const packet = {
-	            type: type,
-	            data: data,
-	            options: options,
-	        };
-	        this.emitReserved("packetCreate", packet);
-	        this.writeBuffer.push(packet);
-	        if (fn)
-	            this.once("flush", fn);
-	        this.flush();
-	    }
-	    /**
-	     * Closes the connection.
-	     */
-	    close() {
-	        const close = () => {
-	            this.onClose("forced close");
-	            this.transport.close();
-	        };
-	        const cleanupAndClose = () => {
-	            this.off("upgrade", cleanupAndClose);
-	            this.off("upgradeError", cleanupAndClose);
-	            close();
-	        };
-	        const waitForUpgrade = () => {
-	            // wait for upgrade to finish since we can't send packets while pausing a transport
-	            this.once("upgrade", cleanupAndClose);
-	            this.once("upgradeError", cleanupAndClose);
-	        };
-	        if ("opening" === this.readyState || "open" === this.readyState) {
-	            this.readyState = "closing";
-	            if (this.writeBuffer.length) {
-	                this.once("drain", () => {
-	                    if (this.upgrading) {
-	                        waitForUpgrade();
-	                    }
-	                    else {
-	                        close();
-	                    }
-	                });
-	            }
-	            else if (this.upgrading) {
-	                waitForUpgrade();
-	            }
-	            else {
-	                close();
-	            }
-	        }
-	        return this;
-	    }
-	    /**
-	     * Called upon transport error
-	     *
-	     * @private
-	     */
-	    onError(err) {
-	        Socket$1.priorWebsocketSuccess = false;
-	        this.emitReserved("error", err);
-	        this.onClose("transport error", err);
-	    }
-	    /**
-	     * Called upon transport close.
-	     *
-	     * @private
-	     */
-	    onClose(reason, description) {
-	        if ("opening" === this.readyState ||
-	            "open" === this.readyState ||
-	            "closing" === this.readyState) {
-	            // clear timers
-	            this.clearTimeoutFn(this.pingTimeoutTimer);
-	            // stop event from firing again for transport
-	            this.transport.removeAllListeners("close");
-	            // ensure transport won't stay open
-	            this.transport.close();
-	            // ignore further transport communication
-	            this.transport.removeAllListeners();
-	            if (typeof removeEventListener === "function") {
-	                removeEventListener("beforeunload", this.beforeunloadEventListener, false);
-	                removeEventListener("offline", this.offlineEventListener, false);
-	            }
-	            // set ready state
-	            this.readyState = "closed";
-	            // clear session id
-	            this.id = null;
-	            // emit close event
-	            this.emitReserved("close", reason, description);
-	            // clean buffers after, so users can still
-	            // grab the buffers on `close` event
-	            this.writeBuffer = [];
-	            this.prevBufferLen = 0;
-	        }
+	        this._upgrades = this._filterUpgrades(data.upgrades);
+	        super.onHandshake(data);
 	    }
 	    /**
 	     * Filters upgrades, returning only those matching client transports.
@@ -3170,18 +3251,46 @@ var app = (function () {
 	     * @param {Array} upgrades - server upgrades
 	     * @private
 	     */
-	    filterUpgrades(upgrades) {
+	    _filterUpgrades(upgrades) {
 	        const filteredUpgrades = [];
-	        let i = 0;
-	        const j = upgrades.length;
-	        for (; i < j; i++) {
+	        for (let i = 0; i < upgrades.length; i++) {
 	            if (~this.transports.indexOf(upgrades[i]))
 	                filteredUpgrades.push(upgrades[i]);
 	        }
 	        return filteredUpgrades;
 	    }
 	}
-	Socket$1.protocol = protocol$1;
+	/**
+	 * This class provides a WebSocket-like interface to connect to an Engine.IO server. The connection will be established
+	 * with one of the available low-level transports, like HTTP long-polling, WebSocket or WebTransport.
+	 *
+	 * This class comes with an upgrade mechanism, which means that once the connection is established with the first
+	 * low-level transport, it will try to upgrade to a better transport.
+	 *
+	 * @example
+	 * import { Socket } from "engine.io-client";
+	 *
+	 * const socket = new Socket();
+	 *
+	 * socket.on("open", () => {
+	 *   socket.send("hello");
+	 * });
+	 *
+	 * @see SocketWithoutUpgrade
+	 * @see SocketWithUpgrade
+	 */
+	class Socket$1 extends SocketWithUpgrade {
+	    constructor(uri, opts = {}) {
+	        const o = typeof uri === "object" ? uri : opts;
+	        if (!o.transports ||
+	            (o.transports && typeof o.transports[0] === "string")) {
+	            o.transports = (o.transports || ["polling", "websocket", "webtransport"])
+	                .map((transportName) => transports[transportName])
+	                .filter((t) => !!t);
+	        }
+	        super(uri, o);
+	    }
+	}
 
 	/**
 	 * URL parser.
@@ -3935,6 +4044,7 @@ var app = (function () {
 	     * @return self
 	     */
 	    emit(ev, ...args) {
+	        var _a, _b, _c;
 	        if (RESERVED_EVENTS.hasOwnProperty(ev)) {
 	            throw new Error('"' + ev.toString() + '" is a reserved event name');
 	        }
@@ -3956,12 +4066,11 @@ var app = (function () {
 	            this._registerAckCallback(id, ack);
 	            packet.id = id;
 	        }
-	        const isTransportWritable = this.io.engine &&
-	            this.io.engine.transport &&
-	            this.io.engine.transport.writable;
-	        const discardPacket = this.flags.volatile && (!isTransportWritable || !this.connected);
+	        const isTransportWritable = (_b = (_a = this.io.engine) === null || _a === void 0 ? void 0 : _a.transport) === null || _b === void 0 ? void 0 : _b.writable;
+	        const isConnected = this.connected && !((_c = this.io.engine) === null || _c === void 0 ? void 0 : _c._hasPingExpired());
+	        const discardPacket = this.flags.volatile && !isTransportWritable;
 	        if (discardPacket) ;
-	        else if (this.connected) {
+	        else if (isConnected) {
 	            this.notifyOutgoingListeners(packet);
 	            this.packet(packet);
 	        }
@@ -4684,6 +4793,9 @@ var app = (function () {
 	        if (!arguments.length)
 	            return this._reconnection;
 	        this._reconnection = !!v;
+	        if (!v) {
+	            this.skipReconnect = true;
+	        }
 	        return this;
 	    }
 	    reconnectionAttempts(v) {
@@ -4812,7 +4924,9 @@ var app = (function () {
 	        this.emitReserved("open");
 	        // add new subs
 	        const socket = this.engine;
-	        this.subs.push(on(socket, "ping", this.onping.bind(this)), on(socket, "data", this.ondata.bind(this)), on(socket, "error", this.onerror.bind(this)), on(socket, "close", this.onclose.bind(this)), on(this.decoder, "decoded", this.ondecoded.bind(this)));
+	        this.subs.push(on(socket, "ping", this.onping.bind(this)), on(socket, "data", this.ondata.bind(this)), on(socket, "error", this.onerror.bind(this)), on(socket, "close", this.onclose.bind(this)), 
+	        // @ts-ignore
+	        on(this.decoder, "decoded", this.ondecoded.bind(this)));
 	    }
 	    /**
 	     * Called upon a ping.
@@ -4918,8 +5032,6 @@ var app = (function () {
 	        this.skipReconnect = true;
 	        this._reconnecting = false;
 	        this.onclose("forced close");
-	        if (this.engine)
-	            this.engine.close();
 	    }
 	    /**
 	     * Alias for close()
@@ -4930,12 +5042,18 @@ var app = (function () {
 	        return this._close();
 	    }
 	    /**
-	     * Called upon engine close.
+	     * Called when:
+	     *
+	     * - the low-level engine is closed
+	     * - the parser encountered a badly formatted packet
+	     * - all sockets are disconnected
 	     *
 	     * @private
 	     */
 	    onclose(reason, description) {
+	        var _a;
 	        this.cleanup();
+	        (_a = this.engine) === null || _a === void 0 ? void 0 : _a.close();
 	        this.backoff.reset();
 	        this._readyState = "closed";
 	        this.emitReserved("close", reason, description);
@@ -5240,6 +5358,8 @@ var app = (function () {
 	  item_type_filter_enabled: false,
 	  triangulation_filter_enabled: false,
 	  triangulation_filter_exclude: false,
+	  webhook_enabled: false,
+	  webhook_url: "",
 	});
 
 	const filteredKillmails = derived(
@@ -5511,6 +5631,11 @@ var app = (function () {
 	  });
 	});
 
+	socket.on("killmailsCleared", () => {
+	  killmails.set([]);
+	  filteredKillmails.set([]); // Make sure filtered killmails are also cleared
+	});
+
 	function playSound() {
 	  audio.play().catch((err) => {
 	    console.error("Error playing audio:", err);
@@ -5519,7 +5644,7 @@ var app = (function () {
 
 	/* src\FilterListManager.svelte generated by Svelte v4.2.19 */
 
-	const { console: console_1$4 } = globals;
+	const { console: console_1$5 } = globals;
 	const file$6 = "src\\FilterListManager.svelte";
 
 	function get_each_context$2(ctx, list, i) {
@@ -5891,7 +6016,7 @@ var app = (function () {
 		const writable_props = [];
 
 		Object.keys($$props).forEach(key => {
-			if (!~writable_props.indexOf(key) && key.slice(0, 2) !== '$$' && key !== 'slot') console_1$4.warn(`<FilterListManager> was created with unknown prop '${key}'`);
+			if (!~writable_props.indexOf(key) && key.slice(0, 2) !== '$$' && key !== 'slot') console_1$5.warn(`<FilterListManager> was created with unknown prop '${key}'`);
 		});
 
 		const change_handler = list => toggleFilterList(list.id);
@@ -5959,7 +6084,7 @@ var app = (function () {
 
 	/* src\ProfileListManager.svelte generated by Svelte v4.2.19 */
 
-	const { console: console_1$3 } = globals;
+	const { console: console_1$4 } = globals;
 	const file$5 = "src\\ProfileListManager.svelte";
 
 	function get_each_context$1(ctx, list, i) {
@@ -6222,7 +6347,7 @@ var app = (function () {
 		const writable_props = ['profiles', 'selectedProfile'];
 
 		Object.keys($$props).forEach(key => {
-			if (!~writable_props.indexOf(key) && key.slice(0, 2) !== '$$' && key !== 'slot') console_1$3.warn(`<ProfileListManager> was created with unknown prop '${key}'`);
+			if (!~writable_props.indexOf(key) && key.slice(0, 2) !== '$$' && key !== 'slot') console_1$4.warn(`<ProfileListManager> was created with unknown prop '${key}'`);
 		});
 
 		function select_change_handler() {
@@ -6318,11 +6443,11 @@ var app = (function () {
 
 	/* src\SettingsManager.svelte generated by Svelte v4.2.19 */
 
-	const { console: console_1$2 } = globals;
+	const { console: console_1$3 } = globals;
 	const file$4 = "src\\SettingsManager.svelte";
 
 	// (192:2) {#if localSettings}
-	function create_if_block$4(ctx) {
+	function create_if_block_1$2(ctx) {
 		let label0;
 		let input0;
 		let t0;
@@ -6455,7 +6580,7 @@ var app = (function () {
 		let input30;
 		let mounted;
 		let dispose;
-		let if_block = /*localSettings*/ ctx[6].triangulation_filter_enabled && create_if_block_1$2(ctx);
+		let if_block = /*localSettings*/ ctx[6].triangulation_filter_enabled && create_if_block_2$1(ctx);
 
 		const block = {
 			c: function create() {
@@ -6991,7 +7116,7 @@ var app = (function () {
 					if (if_block) {
 						if_block.p(ctx, dirty);
 					} else {
-						if_block = create_if_block_1$2(ctx);
+						if_block = create_if_block_2$1(ctx);
 						if_block.c();
 						if_block.m(t8.parentNode, t8);
 					}
@@ -7188,7 +7313,7 @@ var app = (function () {
 
 		dispatch_dev("SvelteRegisterBlock", {
 			block,
-			id: create_if_block$4.name,
+			id: create_if_block_1$2.name,
 			type: "if",
 			source: "(192:2) {#if localSettings}",
 			ctx
@@ -7198,7 +7323,7 @@ var app = (function () {
 	}
 
 	// (241:4) {#if localSettings.triangulation_filter_enabled}
-	function create_if_block_1$2(ctx) {
+	function create_if_block_2$1(ctx) {
 		let label;
 		let input;
 		let t;
@@ -7247,9 +7372,71 @@ var app = (function () {
 
 		dispatch_dev("SvelteRegisterBlock", {
 			block,
-			id: create_if_block_1$2.name,
+			id: create_if_block_2$1.name,
 			type: "if",
 			source: "(241:4) {#if localSettings.triangulation_filter_enabled}",
+			ctx
+		});
+
+		return block;
+	}
+
+	// (576:2) {#if localSettings.webhook_enabled}
+	function create_if_block$4(ctx) {
+		let label;
+		let t;
+		let input;
+		let mounted;
+		let dispose;
+
+		const block = {
+			c: function create() {
+				label = element("label");
+				t = text("Webhook URL:\r\n      ");
+				input = element("input");
+				attr_dev(input, "type", "text");
+				attr_dev(input, "placeholder", "https://discord.com/api/webhooks/...");
+				set_style(input, "width", "100%");
+				set_style(input, "max-width", "500px");
+				add_location(input, file$4, 578, 6, 15714);
+				attr_dev(label, "class", "svelte-gu7nlb");
+				add_location(label, file$4, 576, 4, 15679);
+			},
+			m: function mount(target, anchor) {
+				insert_dev(target, label, anchor);
+				append_dev(label, t);
+				append_dev(label, input);
+				set_input_value(input, /*localSettings*/ ctx[6].webhook_url);
+
+				if (!mounted) {
+					dispose = [
+						listen_dev(input, "input", /*input_input_handler*/ ctx[85]),
+						listen_dev(input, "input", /*input_handler_13*/ ctx[86], false, false, false, false)
+					];
+
+					mounted = true;
+				}
+			},
+			p: function update(ctx, dirty) {
+				if (dirty[0] & /*localSettings*/ 64 && input.value !== /*localSettings*/ ctx[6].webhook_url) {
+					set_input_value(input, /*localSettings*/ ctx[6].webhook_url);
+				}
+			},
+			d: function destroy(detaching) {
+				if (detaching) {
+					detach_dev(label);
+				}
+
+				mounted = false;
+				run_all(dispose);
+			}
+		};
+
+		dispatch_dev("SvelteRegisterBlock", {
+			block,
+			id: create_if_block$4.name,
+			type: "if",
+			source: "(576:2) {#if localSettings.webhook_enabled}",
 			ctx
 		});
 
@@ -7262,17 +7449,24 @@ var app = (function () {
 		let updating_selectedProfile;
 		let t0;
 		let t1;
-		let h3;
+		let h30;
 		let t3;
-		let div0;
+		let label0;
 		let input0;
 		let t4;
-		let input1;
 		let t5;
-		let label;
-		let input2;
 		let t6;
-		let t7;
+		let h31;
+		let t8;
+		let div0;
+		let input1;
+		let t9;
+		let input2;
+		let t10;
+		let label1;
+		let input3;
+		let t11;
+		let t12;
 		let select;
 		let option0;
 		let option1;
@@ -7282,9 +7476,9 @@ var app = (function () {
 		let option5;
 		let option6;
 		let option7;
-		let t16;
+		let t21;
 		let button;
-		let t18;
+		let t23;
 		let filterlistmanager;
 		let current;
 		let mounted;
@@ -7310,7 +7504,8 @@ var app = (function () {
 		profilelistmanager.$on("loadProfile", /*loadProfile*/ ctx[11]);
 		profilelistmanager.$on("fetchProfiles", /*fetchProfiles*/ ctx[13]);
 		profilelistmanager.$on("deleteProfile", /*deleteProfile*/ ctx[12]);
-		let if_block = /*localSettings*/ ctx[6] && create_if_block$4(ctx);
+		let if_block0 = /*localSettings*/ ctx[6] && create_if_block_1$2(ctx);
+		let if_block1 = /*localSettings*/ ctx[6].webhook_enabled && create_if_block$4(ctx);
 		filterlistmanager = new FilterListManager({ $$inline: true });
 		filterlistmanager.$on("updateFilterLists", /*handleFilterListsUpdate*/ ctx[9]);
 
@@ -7319,20 +7514,29 @@ var app = (function () {
 				div1 = element("div");
 				create_component(profilelistmanager.$$.fragment);
 				t0 = space();
-				if (if_block) if_block.c();
+				if (if_block0) if_block0.c();
 				t1 = space();
-				h3 = element("h3");
-				h3.textContent = "Create New Filter List";
+				h30 = element("h3");
+				h30.textContent = "Discord Webhook";
 				t3 = space();
-				div0 = element("div");
+				label0 = element("label");
 				input0 = element("input");
-				t4 = space();
-				input1 = element("input");
+				t4 = text("\r\n    Enable Discord Webhook Alerts");
 				t5 = space();
-				label = element("label");
+				if (if_block1) if_block1.c();
+				t6 = space();
+				h31 = element("h3");
+				h31.textContent = "Create New Filter List";
+				t8 = space();
+				div0 = element("div");
+				input1 = element("input");
+				t9 = space();
 				input2 = element("input");
-				t6 = text("\r\n      Exclude");
-				t7 = space();
+				t10 = space();
+				label1 = element("label");
+				input3 = element("input");
+				t11 = text("\r\n      Exclude");
+				t12 = space();
 				select = element("select");
 				option0 = element("option");
 				option0.textContent = "Select filter type";
@@ -7350,51 +7554,57 @@ var app = (function () {
 				option6.textContent = "Ship Type";
 				option7 = element("option");
 				option7.textContent = "Solar System";
-				t16 = space();
+				t21 = space();
 				button = element("button");
 				button.textContent = "Create New List";
-				t18 = space();
+				t23 = space();
 				create_component(filterlistmanager.$$.fragment);
-				attr_dev(h3, "class", "svelte-gu7nlb");
-				add_location(h3, file$4, 564, 2, 15357);
-				attr_dev(input0, "placeholder", "New list name");
-				add_location(input0, file$4, 566, 4, 15403);
-				attr_dev(input1, "placeholder", "Comma-separated IDs");
-				add_location(input1, file$4, 567, 4, 15471);
-				attr_dev(input2, "type", "checkbox");
-				add_location(input2, file$4, 569, 6, 15559);
-				attr_dev(label, "class", "svelte-gu7nlb");
-				add_location(label, file$4, 568, 4, 15544);
+				attr_dev(h30, "class", "svelte-gu7nlb");
+				add_location(h30, file$4, 564, 2, 15357);
+				attr_dev(input0, "type", "checkbox");
+				add_location(input0, file$4, 566, 4, 15398);
+				attr_dev(label0, "class", "svelte-gu7nlb");
+				add_location(label0, file$4, 565, 2, 15385);
+				attr_dev(h31, "class", "svelte-gu7nlb");
+				add_location(h31, file$4, 588, 2, 16018);
+				attr_dev(input1, "placeholder", "New list name");
+				add_location(input1, file$4, 590, 4, 16064);
+				attr_dev(input2, "placeholder", "Comma-separated IDs");
+				add_location(input2, file$4, 591, 4, 16132);
+				attr_dev(input3, "type", "checkbox");
+				add_location(input3, file$4, 593, 6, 16220);
+				attr_dev(label1, "class", "svelte-gu7nlb");
+				add_location(label1, file$4, 592, 4, 16205);
 				option0.__value = "";
 				set_input_value(option0, option0.__value);
-				add_location(option0, file$4, 573, 6, 15698);
+				add_location(option0, file$4, 597, 6, 16359);
 				option1.__value = "attacker_alliance";
 				set_input_value(option1, option1.__value);
-				add_location(option1, file$4, 574, 6, 15750);
+				add_location(option1, file$4, 598, 6, 16411);
 				option2.__value = "attacker_corporation";
 				set_input_value(option2, option2.__value);
-				add_location(option2, file$4, 575, 6, 15818);
+				add_location(option2, file$4, 599, 6, 16479);
 				option3.__value = "attacker_ship_type";
 				set_input_value(option3, option3.__value);
-				add_location(option3, file$4, 576, 6, 15892);
+				add_location(option3, file$4, 600, 6, 16553);
 				option4.__value = "victim_alliance";
 				set_input_value(option4, option4.__value);
-				add_location(option4, file$4, 577, 6, 15962);
+				add_location(option4, file$4, 601, 6, 16623);
 				option5.__value = "victim_corporation";
 				set_input_value(option5, option5.__value);
-				add_location(option5, file$4, 578, 6, 16026);
+				add_location(option5, file$4, 602, 6, 16687);
 				option6.__value = "ship_type";
 				set_input_value(option6, option6.__value);
-				add_location(option6, file$4, 579, 6, 16096);
+				add_location(option6, file$4, 603, 6, 16757);
 				option7.__value = "solar_system";
 				set_input_value(option7, option7.__value);
-				add_location(option7, file$4, 580, 6, 16148);
+				add_location(option7, file$4, 604, 6, 16809);
 				attr_dev(select, "class", "svelte-gu7nlb");
-				if (/*newListFilterType*/ ctx[4] === void 0) add_render_callback(() => /*select_change_handler*/ ctx[86].call(select));
-				add_location(select, file$4, 572, 4, 15651);
+				if (/*newListFilterType*/ ctx[4] === void 0) add_render_callback(() => /*select_change_handler*/ ctx[90].call(select));
+				add_location(select, file$4, 596, 4, 16312);
 				attr_dev(button, "class", "svelte-gu7nlb");
-				add_location(button, file$4, 582, 4, 16219);
-				add_location(div0, file$4, 565, 2, 15392);
+				add_location(button, file$4, 606, 4, 16880);
+				add_location(div0, file$4, 589, 2, 16053);
 				attr_dev(div1, "class", "settings-manager svelte-gu7nlb");
 				add_location(div1, file$4, 181, 0, 5210);
 			},
@@ -7405,22 +7615,31 @@ var app = (function () {
 				insert_dev(target, div1, anchor);
 				mount_component(profilelistmanager, div1, null);
 				append_dev(div1, t0);
-				if (if_block) if_block.m(div1, null);
+				if (if_block0) if_block0.m(div1, null);
 				append_dev(div1, t1);
-				append_dev(div1, h3);
+				append_dev(div1, h30);
 				append_dev(div1, t3);
+				append_dev(div1, label0);
+				append_dev(label0, input0);
+				input0.checked = /*localSettings*/ ctx[6].webhook_enabled;
+				append_dev(label0, t4);
+				append_dev(div1, t5);
+				if (if_block1) if_block1.m(div1, null);
+				append_dev(div1, t6);
+				append_dev(div1, h31);
+				append_dev(div1, t8);
 				append_dev(div1, div0);
-				append_dev(div0, input0);
-				set_input_value(input0, /*newListName*/ ctx[1]);
-				append_dev(div0, t4);
 				append_dev(div0, input1);
-				set_input_value(input1, /*newListIds*/ ctx[2]);
-				append_dev(div0, t5);
-				append_dev(div0, label);
-				append_dev(label, input2);
-				input2.checked = /*newListIsExclude*/ ctx[3];
-				append_dev(label, t6);
-				append_dev(div0, t7);
+				set_input_value(input1, /*newListName*/ ctx[1]);
+				append_dev(div0, t9);
+				append_dev(div0, input2);
+				set_input_value(input2, /*newListIds*/ ctx[2]);
+				append_dev(div0, t10);
+				append_dev(div0, label1);
+				append_dev(label1, input3);
+				input3.checked = /*newListIsExclude*/ ctx[3];
+				append_dev(label1, t11);
+				append_dev(div0, t12);
 				append_dev(div0, select);
 				append_dev(select, option0);
 				append_dev(select, option1);
@@ -7431,18 +7650,20 @@ var app = (function () {
 				append_dev(select, option6);
 				append_dev(select, option7);
 				select_option(select, /*newListFilterType*/ ctx[4], true);
-				append_dev(div0, t16);
+				append_dev(div0, t21);
 				append_dev(div0, button);
-				append_dev(div1, t18);
+				append_dev(div1, t23);
 				mount_component(filterlistmanager, div1, null);
 				current = true;
 
 				if (!mounted) {
 					dispose = [
-						listen_dev(input0, "input", /*input0_input_handler*/ ctx[83]),
-						listen_dev(input1, "input", /*input1_input_handler_1*/ ctx[84]),
-						listen_dev(input2, "change", /*input2_change_handler_1*/ ctx[85]),
-						listen_dev(select, "change", /*select_change_handler*/ ctx[86]),
+						listen_dev(input0, "change", /*input0_change_handler_1*/ ctx[83]),
+						listen_dev(input0, "change", /*change_handler_19*/ ctx[84], false, false, false, false),
+						listen_dev(input1, "input", /*input1_input_handler_1*/ ctx[87]),
+						listen_dev(input2, "input", /*input2_input_handler*/ ctx[88]),
+						listen_dev(input3, "change", /*input3_change_handler_1*/ ctx[89]),
+						listen_dev(select, "change", /*select_change_handler*/ ctx[90]),
 						listen_dev(button, "click", /*createFilterList*/ ctx[8], false, false, false, false)
 					];
 
@@ -7462,28 +7683,45 @@ var app = (function () {
 				profilelistmanager.$set(profilelistmanager_changes);
 
 				if (/*localSettings*/ ctx[6]) {
-					if (if_block) {
-						if_block.p(ctx, dirty);
+					if (if_block0) {
+						if_block0.p(ctx, dirty);
 					} else {
-						if_block = create_if_block$4(ctx);
-						if_block.c();
-						if_block.m(div1, t1);
+						if_block0 = create_if_block_1$2(ctx);
+						if_block0.c();
+						if_block0.m(div1, t1);
 					}
-				} else if (if_block) {
-					if_block.d(1);
-					if_block = null;
+				} else if (if_block0) {
+					if_block0.d(1);
+					if_block0 = null;
 				}
 
-				if (dirty[0] & /*newListName*/ 2 && input0.value !== /*newListName*/ ctx[1]) {
-					set_input_value(input0, /*newListName*/ ctx[1]);
+				if (dirty[0] & /*localSettings*/ 64) {
+					input0.checked = /*localSettings*/ ctx[6].webhook_enabled;
 				}
 
-				if (dirty[0] & /*newListIds*/ 4 && input1.value !== /*newListIds*/ ctx[2]) {
-					set_input_value(input1, /*newListIds*/ ctx[2]);
+				if (/*localSettings*/ ctx[6].webhook_enabled) {
+					if (if_block1) {
+						if_block1.p(ctx, dirty);
+					} else {
+						if_block1 = create_if_block$4(ctx);
+						if_block1.c();
+						if_block1.m(div1, t6);
+					}
+				} else if (if_block1) {
+					if_block1.d(1);
+					if_block1 = null;
+				}
+
+				if (dirty[0] & /*newListName*/ 2 && input1.value !== /*newListName*/ ctx[1]) {
+					set_input_value(input1, /*newListName*/ ctx[1]);
+				}
+
+				if (dirty[0] & /*newListIds*/ 4 && input2.value !== /*newListIds*/ ctx[2]) {
+					set_input_value(input2, /*newListIds*/ ctx[2]);
 				}
 
 				if (dirty[0] & /*newListIsExclude*/ 8) {
-					input2.checked = /*newListIsExclude*/ ctx[3];
+					input3.checked = /*newListIsExclude*/ ctx[3];
 				}
 
 				if (dirty[0] & /*newListFilterType*/ 16) {
@@ -7507,7 +7745,8 @@ var app = (function () {
 				}
 
 				destroy_component(profilelistmanager);
-				if (if_block) if_block.d();
+				if (if_block0) if_block0.d();
+				if (if_block1) if_block1.d();
 				destroy_component(filterlistmanager);
 				mounted = false;
 				run_all(dispose);
@@ -7710,14 +7949,14 @@ var app = (function () {
 
 		$$self.$$.on_mount.push(function () {
 			if (socket === undefined && !('socket' in $$props || $$self.$$.bound[$$self.$$.props['socket']])) {
-				console_1$2.warn("<SettingsManager> was created without expected prop 'socket'");
+				console_1$3.warn("<SettingsManager> was created without expected prop 'socket'");
 			}
 		});
 
 		const writable_props = ['socket'];
 
 		Object.keys($$props).forEach(key => {
-			if (!~writable_props.indexOf(key) && key.slice(0, 2) !== '$$' && key !== 'slot') console_1$2.warn(`<SettingsManager> was created with unknown prop '${key}'`);
+			if (!~writable_props.indexOf(key) && key.slice(0, 2) !== '$$' && key !== 'slot') console_1$3.warn(`<SettingsManager> was created with unknown prop '${key}'`);
 		});
 
 		function profilelistmanager_selectedProfile_binding(value) {
@@ -7949,17 +8188,31 @@ var app = (function () {
 
 		const input_handler_12 = () => updateSetting("solar_system_filter", localSettings.solar_system_filter);
 
-		function input0_input_handler() {
+		function input0_change_handler_1() {
+			localSettings.webhook_enabled = this.checked;
+			($$invalidate(6, localSettings), $$invalidate(16, $settings));
+		}
+
+		const change_handler_19 = () => updateSetting("webhook_enabled", localSettings.webhook_enabled);
+
+		function input_input_handler() {
+			localSettings.webhook_url = this.value;
+			($$invalidate(6, localSettings), $$invalidate(16, $settings));
+		}
+
+		const input_handler_13 = () => updateSetting("webhook_url", localSettings.webhook_url);
+
+		function input1_input_handler_1() {
 			newListName = this.value;
 			$$invalidate(1, newListName);
 		}
 
-		function input1_input_handler_1() {
+		function input2_input_handler() {
 			newListIds = this.value;
 			$$invalidate(2, newListIds);
 		}
 
-		function input2_change_handler_1() {
+		function input3_change_handler_1() {
 			newListIsExclude = this.checked;
 			$$invalidate(3, newListIsExclude);
 		}
@@ -8123,9 +8376,13 @@ var app = (function () {
 			change_handler_18,
 			input30_input_handler,
 			input_handler_12,
-			input0_input_handler,
+			input0_change_handler_1,
+			change_handler_19,
+			input_input_handler,
+			input_handler_13,
 			input1_input_handler_1,
-			input2_change_handler_1,
+			input2_input_handler,
+			input3_change_handler_1,
 			select_change_handler
 		];
 	}
@@ -70062,7 +70319,7 @@ void main() {
 
 	/* src\MapVisualization.svelte generated by Svelte v4.2.19 */
 
-	const { Error: Error_1, Object: Object_1, console: console_1$1 } = globals;
+	const { Error: Error_1, Object: Object_1, console: console_1$2 } = globals;
 	const file$3 = "src\\MapVisualization.svelte";
 
 	// (1077:20) 
@@ -71627,18 +71884,18 @@ void main() {
 
 		$$self.$$.on_mount.push(function () {
 			if (killmailId === undefined && !('killmailId' in $$props || $$self.$$.bound[$$self.$$.props['killmailId']])) {
-				console_1$1.warn("<MapVisualization> was created without expected prop 'killmailId'");
+				console_1$2.warn("<MapVisualization> was created without expected prop 'killmailId'");
 			}
 
 			if (kill === undefined && !('kill' in $$props || $$self.$$.bound[$$self.$$.props['kill']])) {
-				console_1$1.warn("<MapVisualization> was created without expected prop 'kill'");
+				console_1$2.warn("<MapVisualization> was created without expected prop 'kill'");
 			}
 		});
 
 		const writable_props = ['killmailId', 'kill'];
 
 		Object_1.keys($$props).forEach(key => {
-			if (!~writable_props.indexOf(key) && key.slice(0, 2) !== '$$' && key !== 'slot') console_1$1.warn(`<MapVisualization> was created with unknown prop '${key}'`);
+			if (!~writable_props.indexOf(key) && key.slice(0, 2) !== '$$' && key !== 'slot') console_1$2.warn(`<MapVisualization> was created with unknown prop '${key}'`);
 		});
 
 		function div1_binding($$value) {
@@ -71800,23 +72057,25 @@ void main() {
 	}
 
 	/* src\KillmailViewer.svelte generated by Svelte v4.2.19 */
+
+	const { console: console_1$1 } = globals;
 	const file$2 = "src\\KillmailViewer.svelte";
 
 	function get_each_context(ctx, list, i) {
 		const child_ctx = ctx.slice();
-		child_ctx[15] = list[i];
+		child_ctx[17] = list[i];
 		return child_ctx;
 	}
 
-	// (110:6) {#each sortedKillmails as killmail (killmail.killID)}
+	// (141:6) {#each sortedKillmails as killmail (killmail.killID)}
 	function create_each_block(key_1, ctx) {
 		let tr;
 		let td0;
-		let t0_value = formatDroppedValue(/*killmail*/ ctx[15].zkb.droppedValue) + "";
+		let t0_value = formatDroppedValue(/*killmail*/ ctx[17].zkb.droppedValue) + "";
 		let t0;
 		let t1;
 		let td1;
-		let t2_value = calculateTimeDifference(/*killmail*/ ctx[15].killmail.killmail_time) + "";
+		let t2_value = calculateTimeDifference(/*killmail*/ ctx[17].killmail.killmail_time) + "";
 		let t2;
 		let t3;
 		let td2;
@@ -71829,7 +72088,7 @@ void main() {
 		let t7;
 		let span;
 
-		let t8_value = ((/*killmail*/ ctx[15]?.pinpoints?.triangulationPossible)
+		let t8_value = ((/*killmail*/ ctx[17]?.pinpoints?.triangulationPossible)
 		? "✅"
 		: "❌") + "";
 
@@ -71840,7 +72099,7 @@ void main() {
 		let dispose;
 
 		function click_handler() {
-			return /*click_handler*/ ctx[11](/*killmail*/ ctx[15]);
+			return /*click_handler*/ ctx[13](/*killmail*/ ctx[17]);
 		}
 
 		const block = {
@@ -71866,24 +72125,24 @@ void main() {
 				t8 = text(t8_value);
 				t9 = space();
 				attr_dev(td0, "class", "svelte-7atykn");
-				add_location(td0, file$2, 111, 10, 3234);
+				add_location(td0, file$2, 142, 10, 4136);
 				attr_dev(td1, "class", "svelte-7atykn");
-				add_location(td1, file$2, 112, 10, 3302);
-				attr_dev(a, "href", a_href_value = `https://zkillboard.com/kill/${/*killmail*/ ctx[15].killID}/`);
+				add_location(td1, file$2, 143, 10, 4204);
+				attr_dev(a, "href", a_href_value = `https://zkillboard.com/kill/${/*killmail*/ ctx[17].killID}/`);
 				attr_dev(a, "target", "_blank");
-				add_location(a, file$2, 114, 12, 3399);
+				add_location(a, file$2, 145, 12, 4301);
 				attr_dev(td2, "class", "svelte-7atykn");
-				add_location(td2, file$2, 113, 10, 3381);
+				add_location(td2, file$2, 144, 10, 4283);
 				attr_dev(button, "class", "svelte-7atykn");
-				add_location(button, file$2, 122, 12, 3620);
+				add_location(button, file$2, 153, 12, 4522);
 				attr_dev(span, "class", "triangulate-indicator svelte-7atykn");
-				attr_dev(span, "title", span_title_value = getTriangulationStatus(/*killmail*/ ctx[15]));
-				toggle_class(span, "can-triangulate", /*killmail*/ ctx[15]?.pinpoints?.triangulationPossible);
-				add_location(span, file$2, 123, 12, 3689);
+				attr_dev(span, "title", span_title_value = getTriangulationStatus(/*killmail*/ ctx[17]));
+				toggle_class(span, "can-triangulate", /*killmail*/ ctx[17]?.pinpoints?.triangulationPossible);
+				add_location(span, file$2, 154, 12, 4591);
 				attr_dev(td3, "class", "actions svelte-7atykn");
-				add_location(td3, file$2, 121, 10, 3586);
+				add_location(td3, file$2, 152, 10, 4488);
 				attr_dev(tr, "class", "svelte-7atykn");
-				add_location(tr, file$2, 110, 8, 3218);
+				add_location(tr, file$2, 141, 8, 4120);
 				this.first = tr;
 			},
 			m: function mount(target, anchor) {
@@ -71912,23 +72171,23 @@ void main() {
 			},
 			p: function update(new_ctx, dirty) {
 				ctx = new_ctx;
-				if (dirty & /*sortedKillmails*/ 1 && t0_value !== (t0_value = formatDroppedValue(/*killmail*/ ctx[15].zkb.droppedValue) + "")) set_data_dev(t0, t0_value);
-				if (dirty & /*sortedKillmails*/ 1 && t2_value !== (t2_value = calculateTimeDifference(/*killmail*/ ctx[15].killmail.killmail_time) + "")) set_data_dev(t2, t2_value);
+				if (dirty & /*sortedKillmails*/ 1 && t0_value !== (t0_value = formatDroppedValue(/*killmail*/ ctx[17].zkb.droppedValue) + "")) set_data_dev(t0, t0_value);
+				if (dirty & /*sortedKillmails*/ 1 && t2_value !== (t2_value = calculateTimeDifference(/*killmail*/ ctx[17].killmail.killmail_time) + "")) set_data_dev(t2, t2_value);
 
-				if (dirty & /*sortedKillmails*/ 1 && a_href_value !== (a_href_value = `https://zkillboard.com/kill/${/*killmail*/ ctx[15].killID}/`)) {
+				if (dirty & /*sortedKillmails*/ 1 && a_href_value !== (a_href_value = `https://zkillboard.com/kill/${/*killmail*/ ctx[17].killID}/`)) {
 					attr_dev(a, "href", a_href_value);
 				}
 
-				if (dirty & /*sortedKillmails*/ 1 && t8_value !== (t8_value = ((/*killmail*/ ctx[15]?.pinpoints?.triangulationPossible)
+				if (dirty & /*sortedKillmails*/ 1 && t8_value !== (t8_value = ((/*killmail*/ ctx[17]?.pinpoints?.triangulationPossible)
 				? "✅"
 				: "❌") + "")) set_data_dev(t8, t8_value);
 
-				if (dirty & /*sortedKillmails*/ 1 && span_title_value !== (span_title_value = getTriangulationStatus(/*killmail*/ ctx[15]))) {
+				if (dirty & /*sortedKillmails*/ 1 && span_title_value !== (span_title_value = getTriangulationStatus(/*killmail*/ ctx[17]))) {
 					attr_dev(span, "title", span_title_value);
 				}
 
 				if (dirty & /*sortedKillmails*/ 1) {
-					toggle_class(span, "can-triangulate", /*killmail*/ ctx[15]?.pinpoints?.triangulationPossible);
+					toggle_class(span, "can-triangulate", /*killmail*/ ctx[17]?.pinpoints?.triangulationPossible);
 				}
 			},
 			d: function destroy(detaching) {
@@ -71945,14 +72204,14 @@ void main() {
 			block,
 			id: create_each_block.name,
 			type: "each",
-			source: "(110:6) {#each sortedKillmails as killmail (killmail.killID)}",
+			source: "(141:6) {#each sortedKillmails as killmail (killmail.killID)}",
 			ctx
 		});
 
 		return block;
 	}
 
-	// (137:2) {#if showMap && selectedKillmailId}
+	// (168:2) {#if showMap && selectedKillmailId}
 	function create_if_block$2(ctx) {
 		let div1;
 		let div0;
@@ -71980,11 +72239,11 @@ void main() {
 				button = element("button");
 				button.textContent = "Close Map";
 				attr_dev(button, "class", "close-map svelte-7atykn");
-				add_location(button, file$2, 143, 8, 4292);
+				add_location(button, file$2, 174, 8, 5194);
 				attr_dev(div0, "class", "map-container svelte-7atykn");
-				add_location(div0, file$2, 138, 6, 4138);
+				add_location(div0, file$2, 169, 6, 5040);
 				attr_dev(div1, "class", "map-overlay svelte-7atykn");
-				add_location(div1, file$2, 137, 4, 4105);
+				add_location(div1, file$2, 168, 4, 5007);
 			},
 			m: function mount(target, anchor) {
 				insert_dev(target, div1, anchor);
@@ -71995,7 +72254,7 @@ void main() {
 				current = true;
 
 				if (!mounted) {
-					dispose = listen_dev(button, "click", /*click_handler_1*/ ctx[12], false, false, false, false);
+					dispose = listen_dev(button, "click", /*click_handler_1*/ ctx[14], false, false, false, false);
 					mounted = true;
 				}
 			},
@@ -72029,7 +72288,7 @@ void main() {
 			block,
 			id: create_if_block$2.name,
 			type: "if",
-			source: "(137:2) {#if showMap && selectedKillmailId}",
+			source: "(168:2) {#if showMap && selectedKillmailId}",
 			ctx
 		});
 
@@ -72058,7 +72317,7 @@ void main() {
 		let mounted;
 		let dispose;
 		let each_value = ensure_array_like_dev(/*sortedKillmails*/ ctx[0]);
-		const get_key = ctx => /*killmail*/ ctx[15].killID;
+		const get_key = ctx => /*killmail*/ ctx[17].killID;
 		validate_each_keys(ctx, each_value, get_each_context, get_key);
 
 		for (let i = 0; i < each_value.length; i += 1) {
@@ -72097,24 +72356,24 @@ void main() {
 				t8 = space();
 				if (if_block) if_block.c();
 				attr_dev(th0, "class", "svelte-7atykn");
-				add_location(th0, file$2, 99, 6, 2920);
+				add_location(th0, file$2, 130, 6, 3822);
 				attr_dev(th1, "class", "svelte-7atykn");
-				add_location(th1, file$2, 100, 6, 2950);
+				add_location(th1, file$2, 131, 6, 3852);
 				attr_dev(th2, "class", "svelte-7atykn");
-				add_location(th2, file$2, 101, 6, 2975);
+				add_location(th2, file$2, 132, 6, 3877);
 				attr_dev(th3, "class", "svelte-7atykn");
-				add_location(th3, file$2, 102, 6, 2995);
+				add_location(th3, file$2, 133, 6, 3897);
 				attr_dev(tr, "class", "svelte-7atykn");
-				add_location(tr, file$2, 98, 4, 2908);
+				add_location(tr, file$2, 129, 4, 3810);
 				attr_dev(thead, "class", "svelte-7atykn");
-				add_location(thead, file$2, 97, 2, 2895);
+				add_location(thead, file$2, 128, 2, 3797);
 				attr_dev(table0, "class", "svelte-7atykn");
-				add_location(table0, file$2, 96, 0, 2884);
-				add_location(tbody, file$2, 108, 4, 3140);
+				add_location(table0, file$2, 127, 0, 3786);
+				add_location(tbody, file$2, 139, 4, 4042);
 				attr_dev(table1, "class", "svelte-7atykn");
-				add_location(table1, file$2, 107, 2, 3127);
+				add_location(table1, file$2, 138, 2, 4029);
 				attr_dev(div, "class", "scroll-box svelte-7atykn");
-				add_location(div, file$2, 106, 0, 3046);
+				add_location(div, file$2, 137, 0, 3948);
 			},
 			l: function claim(nodes) {
 				throw new Error("options.hydrate only works if the component was compiled with the `hydratable: true` option");
@@ -72143,7 +72402,7 @@ void main() {
 
 				append_dev(div, t8);
 				if (if_block) if_block.m(div, null);
-				/*div_binding*/ ctx[13](div);
+				/*div_binding*/ ctx[15](div);
 				current = true;
 
 				if (!mounted) {
@@ -72202,7 +72461,7 @@ void main() {
 				}
 
 				if (if_block) if_block.d();
-				/*div_binding*/ ctx[13](null);
+				/*div_binding*/ ctx[15](null);
 				mounted = false;
 				dispose();
 			}
@@ -72258,11 +72517,15 @@ void main() {
 	function instance$2($$self, $$props, $$invalidate) {
 		let killmailsToDisplay;
 		let sortedKillmails;
+		let $settings;
 		let $filteredKillmails;
+		validate_store(settings, 'settings');
+		component_subscribe($$self, settings, $$value => $$invalidate(11, $settings = $$value));
 		validate_store(filteredKillmails, 'filteredKillmails');
-		component_subscribe($$self, filteredKillmails, $$value => $$invalidate(10, $filteredKillmails = $$value));
+		component_subscribe($$self, filteredKillmails, $$value => $$invalidate(12, $filteredKillmails = $$value));
 		let { $$slots: slots = {}, $$scope } = $$props;
 		validate_slots('KillmailViewer', slots, []);
+		let previousKillmailIds = new Set();
 		let selectedKillmailId = null;
 		let selectedKillmail = null;
 		let scrollContainer;
@@ -72278,12 +72541,12 @@ void main() {
 
 		function handleScroll() {
 			if (!isUserScrolling) {
-				$$invalidate(7, isUserScrolling = true);
-				setTimeout(() => $$invalidate(7, isUserScrolling = false), 150);
+				$$invalidate(8, isUserScrolling = true);
+				setTimeout(() => $$invalidate(8, isUserScrolling = false), 150);
 			}
 
 			const { scrollTop, scrollHeight, clientHeight } = scrollContainer;
-			$$invalidate(8, shouldAutoScroll = scrollTop + clientHeight >= scrollHeight - 5);
+			$$invalidate(9, shouldAutoScroll = scrollTop + clientHeight >= scrollHeight - 5);
 		}
 
 		function scrollToBottom() {
@@ -72299,7 +72562,7 @@ void main() {
 		const writable_props = [];
 
 		Object.keys($$props).forEach(key => {
-			if (!~writable_props.indexOf(key) && key.slice(0, 2) !== '$$' && key !== 'slot') console.warn(`<KillmailViewer> was created with unknown prop '${key}'`);
+			if (!~writable_props.indexOf(key) && key.slice(0, 2) !== '$$' && key !== 'slot') console_1$1.warn(`<KillmailViewer> was created with unknown prop '${key}'`);
 		});
 
 		const click_handler = killmail => viewMap(killmail);
@@ -72314,8 +72577,10 @@ void main() {
 
 		$$self.$capture_state = () => ({
 			filteredKillmails,
+			settings,
 			MapVisualization,
 			onMount,
+			previousKillmailIds,
 			selectedKillmailId,
 			selectedKillmail,
 			scrollContainer,
@@ -72330,18 +72595,20 @@ void main() {
 			scrollToBottom,
 			sortedKillmails,
 			killmailsToDisplay,
+			$settings,
 			$filteredKillmails
 		});
 
 		$$self.$inject_state = $$props => {
+			if ('previousKillmailIds' in $$props) $$invalidate(7, previousKillmailIds = $$props.previousKillmailIds);
 			if ('selectedKillmailId' in $$props) $$invalidate(1, selectedKillmailId = $$props.selectedKillmailId);
 			if ('selectedKillmail' in $$props) $$invalidate(2, selectedKillmail = $$props.selectedKillmail);
 			if ('scrollContainer' in $$props) $$invalidate(3, scrollContainer = $$props.scrollContainer);
-			if ('isUserScrolling' in $$props) $$invalidate(7, isUserScrolling = $$props.isUserScrolling);
-			if ('shouldAutoScroll' in $$props) $$invalidate(8, shouldAutoScroll = $$props.shouldAutoScroll);
+			if ('isUserScrolling' in $$props) $$invalidate(8, isUserScrolling = $$props.isUserScrolling);
+			if ('shouldAutoScroll' in $$props) $$invalidate(9, shouldAutoScroll = $$props.shouldAutoScroll);
 			if ('showMap' in $$props) $$invalidate(4, showMap = $$props.showMap);
 			if ('sortedKillmails' in $$props) $$invalidate(0, sortedKillmails = $$props.sortedKillmails);
-			if ('killmailsToDisplay' in $$props) $$invalidate(9, killmailsToDisplay = $$props.killmailsToDisplay);
+			if ('killmailsToDisplay' in $$props) $$invalidate(10, killmailsToDisplay = $$props.killmailsToDisplay);
 		};
 
 		if ($$props && "$$inject" in $$props) {
@@ -72349,11 +72616,11 @@ void main() {
 		}
 
 		$$self.$$.update = () => {
-			if ($$self.$$.dirty & /*$filteredKillmails*/ 1024) {
-				$$invalidate(9, killmailsToDisplay = $filteredKillmails);
+			if ($$self.$$.dirty & /*$filteredKillmails*/ 4096) {
+				$$invalidate(10, killmailsToDisplay = $filteredKillmails);
 			}
 
-			if ($$self.$$.dirty & /*killmailsToDisplay*/ 512) {
+			if ($$self.$$.dirty & /*killmailsToDisplay*/ 1024) {
 				// Sort killmails by time, most recent first
 				$$invalidate(0, sortedKillmails = Array.isArray(killmailsToDisplay)
 				? [...killmailsToDisplay].sort((a, b) => {
@@ -72362,7 +72629,29 @@ void main() {
 				: []);
 			}
 
-			if ($$self.$$.dirty & /*sortedKillmails, isUserScrolling, shouldAutoScroll*/ 385) {
+			if ($$self.$$.dirty & /*$filteredKillmails, $settings, previousKillmailIds*/ 6272) {
+				// Subscribe to filtered killmails
+				if ($filteredKillmails && $settings.webhook_enabled && $settings.webhook_url) {
+					const currentKillmailIds = new Set($filteredKillmails.map(km => km.killID));
+
+					$filteredKillmails.forEach(killmail => {
+						if (!previousKillmailIds.has(killmail.killID)) {
+							const webhookUrl = $settings.webhook_url;
+							const zkillUrl = `https://zkillboard.com/kill/${killmail.killID}/`;
+
+							fetch(webhookUrl, {
+								method: "POST",
+								headers: { "Content-Type": "application/json" },
+								body: JSON.stringify({ content: zkillUrl })
+							}).catch(error => console.error("Error sending webhook:", error));
+						}
+					});
+
+					$$invalidate(7, previousKillmailIds = currentKillmailIds);
+				}
+			}
+
+			if ($$self.$$.dirty & /*sortedKillmails, isUserScrolling, shouldAutoScroll*/ 769) {
 				{
 					if (sortedKillmails.length && !isUserScrolling && shouldAutoScroll) {
 						setTimeout(scrollToBottom, 0);
@@ -72379,9 +72668,11 @@ void main() {
 			showMap,
 			viewMap,
 			handleScroll,
+			previousKillmailIds,
 			isUserScrolling,
 			shouldAutoScroll,
 			killmailsToDisplay,
+			$settings,
 			$filteredKillmails,
 			click_handler,
 			click_handler_1,
@@ -72851,7 +73142,7 @@ void main() {
 		let login;
 		let current;
 		login = new Login({ $$inline: true });
-		login.$on("login", /*handleLogin*/ ctx[2]);
+		login.$on("login", /*handleLogin*/ ctx[3]);
 
 		const block = {
 			c: function create() {
@@ -72896,7 +73187,7 @@ void main() {
 		const if_blocks = [];
 
 		function select_block_type(ctx, dirty) {
-			if (!/*loggedIn*/ ctx[0]) return 0;
+			if (!/*loggedIn*/ ctx[1]) return 0;
 			return 1;
 		}
 
@@ -73004,7 +73295,7 @@ void main() {
 		// Handle login event from Login.svelte
 		function handleLogin(event) {
 			username = event.detail.username;
-			$$invalidate(0, loggedIn = true);
+			$$invalidate(1, loggedIn = true);
 
 			socket.emit("login", {
 				username,
@@ -73049,11 +73340,14 @@ void main() {
 		function settingsmanager_binding($$value) {
 			binding_callbacks[$$value ? 'unshift' : 'push'](() => {
 				settingsManagerComponent = $$value;
-				$$invalidate(1, settingsManagerComponent);
+				$$invalidate(2, settingsManagerComponent);
 			});
 		}
 
-		const click_handler = () => socket.emit("clearKills");
+		const click_handler = () => {
+			socket.emit("clearKills");
+			clearKills(); // Call the store's clearKills function
+		};
 
 		$$self.$capture_state = () => ({
 			onMount,
@@ -73081,9 +73375,9 @@ void main() {
 		});
 
 		$$self.$inject_state = $$props => {
-			if ('loggedIn' in $$props) $$invalidate(0, loggedIn = $$props.loggedIn);
+			if ('loggedIn' in $$props) $$invalidate(1, loggedIn = $$props.loggedIn);
 			if ('username' in $$props) username = $$props.username;
-			if ('settingsManagerComponent' in $$props) $$invalidate(1, settingsManagerComponent = $$props.settingsManagerComponent);
+			if ('settingsManagerComponent' in $$props) $$invalidate(2, settingsManagerComponent = $$props.settingsManagerComponent);
 			if ('userProfiles' in $$props) $$invalidate(4, userProfiles = $$props.userProfiles);
 			if ('userFilterLists' in $$props) userFilterLists = $$props.userFilterLists;
 			if ('kills' in $$props) kills = $$props.kills;
@@ -73120,10 +73414,10 @@ void main() {
 		};
 
 		return [
+			clearKills,
 			loggedIn,
 			settingsManagerComponent,
 			handleLogin,
-			clearKills,
 			userProfiles,
 			$profiles,
 			$filterLists,
@@ -73137,7 +73431,7 @@ void main() {
 	class App extends SvelteComponentDev {
 		constructor(options) {
 			super(options);
-			init(this, options, instance, create_fragment, safe_not_equal, { clearKills: 3 });
+			init(this, options, instance, create_fragment, safe_not_equal, { clearKills: 0 });
 
 			dispatch_dev("SvelteRegisterComponent", {
 				component: this,
@@ -73148,7 +73442,7 @@ void main() {
 		}
 
 		get clearKills() {
-			return this.$$.ctx[3];
+			return this.$$.ctx[0];
 		}
 
 		set clearKills(value) {

@@ -562,6 +562,30 @@
     </label>
   {/if}
 
+  <h3>Discord Webhook</h3>
+  <label>
+    <input
+      type="checkbox"
+      bind:checked={localSettings.webhook_enabled}
+      on:change={() =>
+        updateSetting("webhook_enabled", localSettings.webhook_enabled)}
+    />
+    Enable Discord Webhook Alerts
+  </label>
+
+  {#if localSettings.webhook_enabled}
+    <label>
+      Webhook URL:
+      <input
+        type="text"
+        bind:value={localSettings.webhook_url}
+        on:input={() => updateSetting("webhook_url", localSettings.webhook_url)}
+        placeholder="https://discord.com/api/webhooks/..."
+        style="width: 100%; max-width: 500px;"
+      />
+    </label>
+  {/if}
+
   <h3>Create New Filter List</h3>
   <div>
     <input bind:value={newListName} placeholder="New list name" />

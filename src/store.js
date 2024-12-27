@@ -23,6 +23,8 @@ export const settings = writable({
   item_type_filter_enabled: false,
   triangulation_filter_enabled: false,
   triangulation_filter_exclude: false,
+  webhook_enabled: false,
+  webhook_url: "",
 });
 
 export const filteredKillmails = derived(

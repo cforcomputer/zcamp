@@ -1,8 +1,9 @@
 <script>
-  import { filteredKillmails } from "./store";
+  import { filteredKillmails, settings } from "./store";
   import MapVisualization from "./MapVisualization.svelte";
   import { onMount } from "svelte";
 
+  let previousKillmailIds = new Set();
   let selectedKillmailId = null;
   let selectedKillmail = null;
   let scrollContainer;
@@ -21,6 +22,36 @@
         );
       })
     : [];
+
+  // Subscribe to filtered killmails
+  $: if (
+    $filteredKillmails &&
+    $settings.webhook_enabled &&
+    $settings.webhook_url
+  ) {
+    const currentKillmailIds = new Set(
+      $filteredKillmails.map((km) => km.killID)
+    );
+
+    $filteredKillmails.forEach((killmail) => {
+      if (!previousKillmailIds.has(killmail.killID)) {
+        const webhookUrl = $settings.webhook_url;
+        const zkillUrl = `https://zkillboard.com/kill/${killmail.killID}/`;
+
+        fetch(webhookUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            content: zkillUrl,
+          }),
+        }).catch((error) => console.error("Error sending webhook:", error));
+      }
+    });
+
+    previousKillmailIds = currentKillmailIds;
+  }
 
   function getTriangulationStatus(killmail) {
     if (!killmail?.pinpoints) return "No triangulation data";

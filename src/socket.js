@@ -57,6 +57,11 @@ socket.on("newKillmail", (killmail) => {
   });
 });
 
+socket.on("killmailsCleared", () => {
+  killmails.set([]);
+  filteredKillmails.set([]); // Make sure filtered killmails are also cleared
+});
+
 function playSound() {
   audio.play().catch((err) => {
     console.error("Error playing audio:", err);
