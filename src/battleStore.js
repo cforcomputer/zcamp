@@ -54,6 +54,18 @@ export function addKillmailToBattles(killmail) {
     const now = new Date().getTime();
     const killTime = new Date(killmail.killmail.killmail_time).getTime();
 
+    // Check if kill is too old to be included
+    if (now - killTime > MAX_BATTLE_AGE) {
+      console.log(
+        "Kill is too old to be included in battles:",
+        killmail.killmail_id
+      );
+      return battles;
+    }
+
+    console.log("Processing killmail:", killmail.killmail_id);
+    console.log("Current battles:", battles);
+
     // Remove old battles
     battles = battles.filter((battle) => {
       const age = now - new Date(battle.lastKill).getTime();
@@ -103,7 +115,7 @@ export function addKillmailToBattles(killmail) {
       const newBattle = {
         systemId,
         kills: [killmail],
-        totalValue: killmail.zkb.totalValue,
+        totalValue: killmail.zkb.totalValue || 0, // Add default value of 0
         lastKill: killmail.killmail.killmail_time,
         involvedCharacters: new Set(),
         involvedCorporations: new Set(),
@@ -131,6 +143,14 @@ export function addKillmailToBattles(killmail) {
       if (killmail.killmail.victim.alliance_id) {
         newBattle.involvedAlliances.add(killmail.killmail.victim.alliance_id);
       }
+
+      console.log("Created new battle:", {
+        systemId,
+        killCount: 1,
+        involvedCharacters: newBattle.involvedCharacters.size,
+        involvedCorporations: newBattle.involvedCorporations.size,
+        involvedAlliances: newBattle.involvedAlliances.size,
+      });
 
       battles.push(newBattle);
     }
@@ -189,14 +209,26 @@ function mergeBattles(battles) {
 
 export const filteredBattles = derived(
   [activeBattles],
-  ([$activeBattles], set, minInvolved = 2) => {
+  ([$activeBattles], set) => {
+    const minInvolved = 2; // Set this directly in the function
     const now = new Date().getTime();
     const filtered = $activeBattles
       .filter((battle) => {
         const age = now - new Date(battle.lastKill).getTime();
-        return (
-          age < MAX_BATTLE_AGE && battle.involvedCharacters.size >= minInvolved
-        );
+        const meetsAgeRequirement = age < MAX_BATTLE_AGE;
+        const meetsInvolvedRequirement =
+          battle.involvedCharacters.size >= minInvolved;
+
+        console.log("Battle filtering:", {
+          battleId: battle.kills[0]?.killmail_id,
+          age: age / 1000,
+          maxAge: MAX_BATTLE_AGE / 1000,
+          involvedCount: battle.involvedCharacters.size,
+          minInvolved,
+          included: meetsAgeRequirement && meetsInvolvedRequirement,
+        });
+
+        return meetsAgeRequirement && meetsInvolvedRequirement;
       })
       .map((battle) => ({
         ...battle,
@@ -204,6 +236,8 @@ export const filteredBattles = derived(
         corporationCount: battle.involvedCorporations.size,
         allianceCount: battle.involvedAlliances.size,
       }));
+
+    console.log("Filtered battles:", filtered.length);
     set(filtered);
   }
 );

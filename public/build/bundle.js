@@ -5396,7 +5396,19 @@ var app = (function () {
 	function addKillmailToBattles(killmail) {
 	  activeBattles.update((battles) => {
 	    const now = new Date().getTime();
-	    new Date(killmail.killmail.killmail_time).getTime();
+	    const killTime = new Date(killmail.killmail.killmail_time).getTime();
+
+	    // Check if kill is too old to be included
+	    if (now - killTime > MAX_BATTLE_AGE) {
+	      console.log(
+	        "Kill is too old to be included in battles:",
+	        killmail.killmail_id
+	      );
+	      return battles;
+	    }
+
+	    console.log("Processing killmail:", killmail.killmail_id);
+	    console.log("Current battles:", battles);
 
 	    // Remove old battles
 	    battles = battles.filter((battle) => {
@@ -5447,7 +5459,7 @@ var app = (function () {
 	      const newBattle = {
 	        systemId,
 	        kills: [killmail],
-	        totalValue: killmail.zkb.totalValue,
+	        totalValue: killmail.zkb.totalValue || 0, // Add default value of 0
 	        lastKill: killmail.killmail.killmail_time,
 	        involvedCharacters: new Set(),
 	        involvedCorporations: new Set(),
@@ -5475,6 +5487,14 @@ var app = (function () {
 	      if (killmail.killmail.victim.alliance_id) {
 	        newBattle.involvedAlliances.add(killmail.killmail.victim.alliance_id);
 	      }
+
+	      console.log("Created new battle:", {
+	        systemId,
+	        killCount: 1,
+	        involvedCharacters: newBattle.involvedCharacters.size,
+	        involvedCorporations: newBattle.involvedCorporations.size,
+	        involvedAlliances: newBattle.involvedAlliances.size,
+	      });
 
 	      battles.push(newBattle);
 	    }
@@ -5533,14 +5553,26 @@ var app = (function () {
 
 	const filteredBattles = derived(
 	  [activeBattles],
-	  ([$activeBattles], set, minInvolved = 2) => {
+	  ([$activeBattles], set) => {
+	    const minInvolved = 2; // Set this directly in the function
 	    const now = new Date().getTime();
 	    const filtered = $activeBattles
 	      .filter((battle) => {
 	        const age = now - new Date(battle.lastKill).getTime();
-	        return (
-	          age < MAX_BATTLE_AGE && battle.involvedCharacters.size >= minInvolved
-	        );
+	        const meetsAgeRequirement = age < MAX_BATTLE_AGE;
+	        const meetsInvolvedRequirement =
+	          battle.involvedCharacters.size >= minInvolved;
+
+	        console.log("Battle filtering:", {
+	          battleId: battle.kills[0]?.killmail_id,
+	          age: age / 1000,
+	          maxAge: MAX_BATTLE_AGE / 1000,
+	          involvedCount: battle.involvedCharacters.size,
+	          minInvolved,
+	          included: meetsAgeRequirement && meetsInvolvedRequirement,
+	        });
+
+	        return meetsAgeRequirement && meetsInvolvedRequirement;
 	      })
 	      .map((battle) => ({
 	        ...battle,
@@ -5548,6 +5580,8 @@ var app = (function () {
 	        corporationCount: battle.involvedCorporations.size,
 	        allianceCount: battle.involvedAlliances.size,
 	      }));
+
+	    console.log("Filtered battles:", filtered.length);
 	    set(filtered);
 	  }
 	);
@@ -5976,7 +6010,7 @@ var app = (function () {
 	const { console: console_1$5 } = globals;
 	const file$8 = "src\\FilterListManager.svelte";
 
-	function get_each_context$4(ctx, list, i) {
+	function get_each_context$3(ctx, list, i) {
 		const child_ctx = ctx.slice();
 		child_ctx[10] = list[i];
 		return child_ctx;
@@ -5989,12 +6023,12 @@ var app = (function () {
 		let each_1_anchor;
 		let each_value = ensure_array_like_dev(/*localFilterLists*/ ctx[0]);
 		const get_key = ctx => /*list*/ ctx[10].id;
-		validate_each_keys(ctx, each_value, get_each_context$4, get_key);
+		validate_each_keys(ctx, each_value, get_each_context$3, get_key);
 
 		for (let i = 0; i < each_value.length; i += 1) {
-			let child_ctx = get_each_context$4(ctx, each_value, i);
+			let child_ctx = get_each_context$3(ctx, each_value, i);
 			let key = get_key(child_ctx);
-			each_1_lookup.set(key, each_blocks[i] = create_each_block$4(key, child_ctx));
+			each_1_lookup.set(key, each_blocks[i] = create_each_block$3(key, child_ctx));
 		}
 
 		const block = {
@@ -6017,8 +6051,8 @@ var app = (function () {
 			p: function update(ctx, dirty) {
 				if (dirty & /*deleteFilterList, localFilterLists, toggleExclude, toggleFilterList*/ 15) {
 					each_value = ensure_array_like_dev(/*localFilterLists*/ ctx[0]);
-					validate_each_keys(ctx, each_value, get_each_context$4, get_key);
-					each_blocks = update_keyed_each(each_blocks, dirty, get_key, 1, ctx, each_value, each_1_lookup, each_1_anchor.parentNode, destroy_block, create_each_block$4, each_1_anchor, get_each_context$4);
+					validate_each_keys(ctx, each_value, get_each_context$3, get_key);
+					each_blocks = update_keyed_each(each_blocks, dirty, get_key, 1, ctx, each_value, each_1_lookup, each_1_anchor.parentNode, destroy_block, create_each_block$3, each_1_anchor, get_each_context$3);
 				}
 			},
 			d: function destroy(detaching) {
@@ -6076,7 +6110,7 @@ var app = (function () {
 	}
 
 	// (60:4) {#each localFilterLists as list (list.id)}
-	function create_each_block$4(key_1, ctx) {
+	function create_each_block$3(key_1, ctx) {
 		let div;
 		let input;
 		let input_id_value;
@@ -6218,7 +6252,7 @@ var app = (function () {
 
 		dispatch_dev("SvelteRegisterBlock", {
 			block,
-			id: create_each_block$4.name,
+			id: create_each_block$3.name,
 			type: "each",
 			source: "(60:4) {#each localFilterLists as list (list.id)}",
 			ctx
@@ -6416,14 +6450,14 @@ var app = (function () {
 	const { console: console_1$4 } = globals;
 	const file$7 = "src\\ProfileListManager.svelte";
 
-	function get_each_context$3(ctx, list, i) {
+	function get_each_context$2(ctx, list, i) {
 		const child_ctx = ctx.slice();
 		child_ctx[10] = list[i];
 		return child_ctx;
 	}
 
 	// (55:6) {#each profiles || [] as profile (profile.id)}
-	function create_each_block$3(key_1, ctx) {
+	function create_each_block$2(key_1, ctx) {
 		let option;
 		let t_value = /*profile*/ ctx[10].name + "";
 		let t;
@@ -6462,7 +6496,7 @@ var app = (function () {
 
 		dispatch_dev("SvelteRegisterBlock", {
 			block,
-			id: create_each_block$3.name,
+			id: create_each_block$2.name,
 			type: "each",
 			source: "(55:6) {#each profiles || [] as profile (profile.id)}",
 			ctx
@@ -6493,12 +6527,12 @@ var app = (function () {
 		let dispose;
 		let each_value = ensure_array_like_dev(/*profiles*/ ctx[1] || []);
 		const get_key = ctx => /*profile*/ ctx[10].id;
-		validate_each_keys(ctx, each_value, get_each_context$3, get_key);
+		validate_each_keys(ctx, each_value, get_each_context$2, get_key);
 
 		for (let i = 0; i < each_value.length; i += 1) {
-			let child_ctx = get_each_context$3(ctx, each_value, i);
+			let child_ctx = get_each_context$2(ctx, each_value, i);
 			let key = get_key(child_ctx);
-			each_1_lookup.set(key, each_blocks[i] = create_each_block$3(key, child_ctx));
+			each_1_lookup.set(key, each_blocks[i] = create_each_block$2(key, child_ctx));
 		}
 
 		const block = {
@@ -6593,8 +6627,8 @@ var app = (function () {
 			p: function update(ctx, [dirty]) {
 				if (dirty & /*profiles*/ 2) {
 					each_value = ensure_array_like_dev(/*profiles*/ ctx[1] || []);
-					validate_each_keys(ctx, each_value, get_each_context$3, get_key);
-					each_blocks = update_keyed_each(each_blocks, dirty, get_key, 1, ctx, each_value, each_1_lookup, select, destroy_block, create_each_block$3, null, get_each_context$3);
+					validate_each_keys(ctx, each_value, get_each_context$2, get_key);
+					each_blocks = update_keyed_each(each_blocks, dirty, get_key, 1, ctx, each_value, each_1_lookup, select, destroy_block, create_each_block$2, null, get_each_context$2);
 				}
 
 				if (dirty & /*selectedProfile, profiles*/ 3) {
@@ -66331,14 +66365,14 @@ void main() {
 	const { console: console_1$1 } = globals;
 	const file$4 = "src\\KillmailViewer.svelte";
 
-	function get_each_context$2(ctx, list, i) {
+	function get_each_context$1(ctx, list, i) {
 		const child_ctx = ctx.slice();
 		child_ctx[17] = list[i];
 		return child_ctx;
 	}
 
 	// (141:6) {#each sortedKillmails as killmail (killmail.killID)}
-	function create_each_block$2(key_1, ctx) {
+	function create_each_block$1(key_1, ctx) {
 		let tr;
 		let td0;
 		let t0_value = formatDroppedValue(/*killmail*/ ctx[17].zkb.droppedValue) + "";
@@ -66472,7 +66506,7 @@ void main() {
 
 		dispatch_dev("SvelteRegisterBlock", {
 			block,
-			id: create_each_block$2.name,
+			id: create_each_block$1.name,
 			type: "each",
 			source: "(141:6) {#each sortedKillmails as killmail (killmail.killID)}",
 			ctx
@@ -66588,12 +66622,12 @@ void main() {
 		let dispose;
 		let each_value = ensure_array_like_dev(/*sortedKillmails*/ ctx[0]);
 		const get_key = ctx => /*killmail*/ ctx[17].killID;
-		validate_each_keys(ctx, each_value, get_each_context$2, get_key);
+		validate_each_keys(ctx, each_value, get_each_context$1, get_key);
 
 		for (let i = 0; i < each_value.length; i += 1) {
-			let child_ctx = get_each_context$2(ctx, each_value, i);
+			let child_ctx = get_each_context$1(ctx, each_value, i);
 			let key = get_key(child_ctx);
-			each_1_lookup.set(key, each_blocks[i] = create_each_block$2(key, child_ctx));
+			each_1_lookup.set(key, each_blocks[i] = create_each_block$1(key, child_ctx));
 		}
 
 		let if_block = /*showMap*/ ctx[4] && /*selectedKillmailId*/ ctx[1] && create_if_block$3(ctx);
@@ -66683,8 +66717,8 @@ void main() {
 			p: function update(ctx, [dirty]) {
 				if (dirty & /*getTriangulationStatus, sortedKillmails, viewMap, calculateTimeDifference, formatDroppedValue*/ 33) {
 					each_value = ensure_array_like_dev(/*sortedKillmails*/ ctx[0]);
-					validate_each_keys(ctx, each_value, get_each_context$2, get_key);
-					each_blocks = update_keyed_each(each_blocks, dirty, get_key, 1, ctx, each_value, each_1_lookup, tbody, destroy_block, create_each_block$2, null, get_each_context$2);
+					validate_each_keys(ctx, each_value, get_each_context$1, get_key);
+					each_blocks = update_keyed_each(each_blocks, dirty, get_key, 1, ctx, each_value, each_1_lookup, tbody, destroy_block, create_each_block$1, null, get_each_context$1);
 				}
 
 				if (/*showMap*/ ctx[4] && /*selectedKillmailId*/ ctx[1]) {
@@ -67308,132 +67342,8 @@ void main() {
 	/* src\ActiveBattles.svelte generated by Svelte v4.2.19 */
 	const file$2 = "src\\ActiveBattles.svelte";
 
-	function get_each_context$1(ctx, list, i) {
-		const child_ctx = ctx.slice();
-		child_ctx[4] = list[i];
-		return child_ctx;
-	}
-
-	// (31:4) {#each battles as battle}
-	function create_each_block$1(ctx) {
-		let div1;
-		let h3;
-		let t0_value = /*battle*/ ctx[4].systemId + "";
-		let t0;
-		let t1;
-		let div0;
-		let p0;
-		let t2;
-		let t3_value = formatValue$1(/*battle*/ ctx[4].totalValue) + "";
-		let t3;
-		let t4;
-		let t5;
-		let p1;
-		let t6;
-		let t7_value = /*battle*/ ctx[4].kills.length + "";
-		let t7;
-		let t8;
-		let p2;
-		let t9;
-		let t10_value = /*battle*/ ctx[4].involvedCount + "";
-		let t10;
-		let t11;
-		let p3;
-		let t12;
-		let t13_value = new Date(/*battle*/ ctx[4].lastKill).toLocaleTimeString() + "";
-		let t13;
-		let t14;
-
-		const block = {
-			c: function create() {
-				div1 = element("div");
-				h3 = element("h3");
-				t0 = text(t0_value);
-				t1 = space();
-				div0 = element("div");
-				p0 = element("p");
-				t2 = text("Value Lost: ");
-				t3 = text(t3_value);
-				t4 = text(" ISK");
-				t5 = space();
-				p1 = element("p");
-				t6 = text("Ships Lost: ");
-				t7 = text(t7_value);
-				t8 = space();
-				p2 = element("p");
-				t9 = text("Pilots Involved: ");
-				t10 = text(t10_value);
-				t11 = space();
-				p3 = element("p");
-				t12 = text("Last Activity: ");
-				t13 = text(t13_value);
-				t14 = space();
-				add_location(h3, file$2, 35, 8, 894);
-				add_location(p0, file$2, 37, 10, 961);
-				add_location(p1, file$2, 38, 10, 1028);
-				add_location(p2, file$2, 39, 10, 1080);
-				add_location(p3, file$2, 40, 10, 1138);
-				attr_dev(div0, "class", "stats svelte-17bzvk");
-				add_location(div0, file$2, 36, 8, 930);
-				attr_dev(div1, "class", "battle-bubble svelte-17bzvk");
-				set_style(div1, "--size", Math.log(/*battle*/ ctx[4].totalValue) * 0.1 + "em");
-				add_location(div1, file$2, 31, 6, 777);
-			},
-			m: function mount(target, anchor) {
-				insert_dev(target, div1, anchor);
-				append_dev(div1, h3);
-				append_dev(h3, t0);
-				append_dev(div1, t1);
-				append_dev(div1, div0);
-				append_dev(div0, p0);
-				append_dev(p0, t2);
-				append_dev(p0, t3);
-				append_dev(p0, t4);
-				append_dev(div0, t5);
-				append_dev(div0, p1);
-				append_dev(p1, t6);
-				append_dev(p1, t7);
-				append_dev(div0, t8);
-				append_dev(div0, p2);
-				append_dev(p2, t9);
-				append_dev(p2, t10);
-				append_dev(div0, t11);
-				append_dev(div0, p3);
-				append_dev(p3, t12);
-				append_dev(p3, t13);
-				append_dev(div1, t14);
-			},
-			p: function update(ctx, dirty) {
-				if (dirty & /*battles*/ 2 && t0_value !== (t0_value = /*battle*/ ctx[4].systemId + "")) set_data_dev(t0, t0_value);
-				if (dirty & /*battles*/ 2 && t3_value !== (t3_value = formatValue$1(/*battle*/ ctx[4].totalValue) + "")) set_data_dev(t3, t3_value);
-				if (dirty & /*battles*/ 2 && t7_value !== (t7_value = /*battle*/ ctx[4].kills.length + "")) set_data_dev(t7, t7_value);
-				if (dirty & /*battles*/ 2 && t10_value !== (t10_value = /*battle*/ ctx[4].involvedCount + "")) set_data_dev(t10, t10_value);
-				if (dirty & /*battles*/ 2 && t13_value !== (t13_value = new Date(/*battle*/ ctx[4].lastKill).toLocaleTimeString() + "")) set_data_dev(t13, t13_value);
-
-				if (dirty & /*battles*/ 2) {
-					set_style(div1, "--size", Math.log(/*battle*/ ctx[4].totalValue) * 0.1 + "em");
-				}
-			},
-			d: function destroy(detaching) {
-				if (detaching) {
-					detach_dev(div1);
-				}
-			}
-		};
-
-		dispatch_dev("SvelteRegisterBlock", {
-			block,
-			id: create_each_block$1.name,
-			type: "each",
-			source: "(31:4) {#each battles as battle}",
-			ctx
-		});
-
-		return block;
-	}
-
 	function create_fragment$2(ctx) {
-		let div2;
+		let div1;
 		let div0;
 		let label;
 		let t0;
@@ -67441,71 +67351,57 @@ void main() {
 		let t2;
 		let input;
 		let t3;
-		let div1;
+		let canvas_1;
 		let mounted;
 		let dispose;
-		let each_value = ensure_array_like_dev(/*battles*/ ctx[1]);
-		let each_blocks = [];
-
-		for (let i = 0; i < each_value.length; i += 1) {
-			each_blocks[i] = create_each_block$1(get_each_context$1(ctx, each_value, i));
-		}
 
 		const block = {
 			c: function create() {
-				div2 = element("div");
+				div1 = element("div");
 				div0 = element("div");
 				label = element("label");
-				t0 = text("Minimum Involved: ");
+				t0 = text("Minimum Pilots Involved: ");
 				t1 = text(/*minInvolved*/ ctx[0]);
 				t2 = space();
 				input = element("input");
 				t3 = space();
-				div1 = element("div");
-
-				for (let i = 0; i < each_blocks.length; i += 1) {
-					each_blocks[i].c();
-				}
-
+				canvas_1 = element("canvas");
 				attr_dev(input, "type", "range");
 				attr_dev(input, "min", "2");
 				attr_dev(input, "max", "20");
 				attr_dev(input, "step", "1");
-				attr_dev(input, "class", "svelte-17bzvk");
-				add_location(input, file$2, 25, 6, 610);
-				add_location(label, file$2, 23, 4, 556);
-				attr_dev(div0, "class", "controls svelte-17bzvk");
-				add_location(div0, file$2, 22, 2, 528);
-				attr_dev(div1, "class", "battle-grid svelte-17bzvk");
-				add_location(div1, file$2, 29, 2, 713);
-				attr_dev(div2, "class", "active-battles svelte-17bzvk");
-				add_location(div2, file$2, 21, 0, 496);
+				attr_dev(input, "class", "svelte-187rxrq");
+				add_location(input, file$2, 235, 6, 7203);
+				attr_dev(label, "class", "svelte-187rxrq");
+				add_location(label, file$2, 233, 4, 7142);
+				attr_dev(div0, "class", "controls svelte-187rxrq");
+				add_location(div0, file$2, 232, 2, 7114);
+				attr_dev(canvas_1, "class", "svelte-187rxrq");
+				add_location(canvas_1, file$2, 239, 2, 7306);
+				attr_dev(div1, "class", "active-battles svelte-187rxrq");
+				add_location(div1, file$2, 231, 0, 7082);
 			},
 			l: function claim(nodes) {
 				throw new Error("options.hydrate only works if the component was compiled with the `hydratable: true` option");
 			},
 			m: function mount(target, anchor) {
-				insert_dev(target, div2, anchor);
-				append_dev(div2, div0);
+				insert_dev(target, div1, anchor);
+				append_dev(div1, div0);
 				append_dev(div0, label);
 				append_dev(label, t0);
 				append_dev(label, t1);
 				append_dev(label, t2);
 				append_dev(label, input);
 				set_input_value(input, /*minInvolved*/ ctx[0]);
-				append_dev(div2, t3);
-				append_dev(div2, div1);
-
-				for (let i = 0; i < each_blocks.length; i += 1) {
-					if (each_blocks[i]) {
-						each_blocks[i].m(div1, null);
-					}
-				}
+				append_dev(div1, t3);
+				append_dev(div1, canvas_1);
+				/*canvas_1_binding*/ ctx[6](canvas_1);
 
 				if (!mounted) {
 					dispose = [
-						listen_dev(input, "change", /*input_change_input_handler*/ ctx[3]),
-						listen_dev(input, "input", /*input_change_input_handler*/ ctx[3])
+						listen_dev(input, "change", /*input_change_input_handler*/ ctx[5]),
+						listen_dev(input, "input", /*input_change_input_handler*/ ctx[5]),
+						listen_dev(canvas_1, "click", /*handleClick*/ ctx[2], false, false, false, false)
 					];
 
 					mounted = true;
@@ -67517,38 +67413,15 @@ void main() {
 				if (dirty & /*minInvolved*/ 1) {
 					set_input_value(input, /*minInvolved*/ ctx[0]);
 				}
-
-				if (dirty & /*Math, battles, Date, formatValue*/ 2) {
-					each_value = ensure_array_like_dev(/*battles*/ ctx[1]);
-					let i;
-
-					for (i = 0; i < each_value.length; i += 1) {
-						const child_ctx = get_each_context$1(ctx, each_value, i);
-
-						if (each_blocks[i]) {
-							each_blocks[i].p(child_ctx, dirty);
-						} else {
-							each_blocks[i] = create_each_block$1(child_ctx);
-							each_blocks[i].c();
-							each_blocks[i].m(div1, null);
-						}
-					}
-
-					for (; i < each_blocks.length; i += 1) {
-						each_blocks[i].d(1);
-					}
-
-					each_blocks.length = each_value.length;
-				}
 			},
 			i: noop,
 			o: noop,
 			d: function destroy(detaching) {
 				if (detaching) {
-					detach_dev(div2);
+					detach_dev(div1);
 				}
 
-				destroy_each(each_blocks, detaching);
+				/*canvas_1_binding*/ ctx[6](null);
 				mounted = false;
 				run_all(dispose);
 			}
@@ -67565,6 +67438,10 @@ void main() {
 		return block;
 	}
 
+	const FRICTION = 0.99;
+	const REPULSION = 0.2;
+	const FLASH_DURATION = 1000;
+
 	function formatValue$1(value) {
 		if (value >= 1000000000) {
 			return (value / 1000000000).toFixed(2) + "B";
@@ -67580,11 +67457,192 @@ void main() {
 	function instance$2($$self, $$props, $$invalidate) {
 		let $filteredBattles;
 		validate_store(filteredBattles, 'filteredBattles');
-		component_subscribe($$self, filteredBattles, $$value => $$invalidate(2, $filteredBattles = $$value));
+		component_subscribe($$self, filteredBattles, $$value => $$invalidate(4, $filteredBattles = $$value));
 		let { $$slots: slots = {}, $$scope } = $$props;
 		validate_slots('ActiveBattles', slots, []);
 		let minInvolved = 2;
-		let battles = [];
+		let canvas;
+		let ctx;
+		let bubbles = new Map();
+		let animationFrame;
+
+		class Bubble {
+			constructor(battle) {
+				this.battle = battle;
+				this.id = battle.kills[0]?.killmail_id;
+				this.x = this.x || Math.random() * window.innerWidth;
+				this.y = this.y || Math.random() * window.innerHeight;
+				this.vx = this.vx || Math.random() - 0.5;
+				this.vy = this.vy || Math.random() - 0.5;
+				this.lastValue = this.currentValue || battle.totalValue;
+				this.currentValue = battle.totalValue;
+				this.targetSize = this.calculateSize();
+				this.currentSize = this.currentSize || 0;
+				this.flashTime = this.currentValue > this.lastValue ? Date.now() : 0;
+			}
+
+			calculateSize() {
+				return Math.max(30, Math.log10(this.battle.totalValue + 1) * 10);
+			}
+
+			update(bubbles) {
+				// Smooth size transition
+				this.currentSize += (this.targetSize - this.currentSize) * 0.1;
+
+				// Physics updates
+				this.x += this.vx;
+
+				this.y += this.vy;
+				this.vx *= FRICTION;
+				this.vy *= FRICTION;
+
+				// Boundary checks with size
+				const padding = this.currentSize * 1.2; // Extra padding for text
+
+				if (this.x < padding) {
+					this.x = padding;
+					this.vx *= -0.5;
+				}
+
+				if (this.x > canvas.width - padding) {
+					this.x = canvas.width - padding;
+					this.vx *= -0.5;
+				}
+
+				if (this.y < padding) {
+					this.y = padding;
+					this.vy *= -0.5;
+				}
+
+				if (this.y > canvas.height - padding) {
+					this.y = canvas.height - padding;
+					this.vy *= -0.5;
+				}
+
+				// Bubble collision and repulsion
+				bubbles.forEach(other => {
+					if (other === this) return;
+					const dx = other.x - this.x;
+					const dy = other.y - this.y;
+					const distance = Math.sqrt(dx * dx + dy * dy);
+					const minDist = this.currentSize + other.currentSize;
+
+					if (distance < minDist) {
+						const angle = Math.atan2(dy, dx);
+						const force = (minDist - distance) * REPULSION;
+						const fx = Math.cos(angle) * force;
+						const fy = Math.sin(angle) * force;
+						this.vx -= fx;
+						this.vy -= fy;
+						other.vx += fx;
+						other.vy += fy;
+					}
+				});
+			}
+
+			draw(ctx) {
+				const flashProgress = this.flashTime
+				? (Date.now() - this.flashTime) / FLASH_DURATION
+				: 1;
+
+				const flash = Math.max(0, 1 - flashProgress);
+
+				// Draw bubble with flash effect
+				ctx.beginPath();
+
+				ctx.arc(this.x, this.y, this.currentSize, 0, Math.PI * 2);
+				ctx.fillStyle = `rgba(${255 * flash}, ${50}, ${50}, ${0.2 + this.battle.involvedCount / 50})`;
+				ctx.strokeStyle = `rgba(255, ${100 * flash}, ${100 * flash}, 0.5)`;
+				ctx.lineWidth = 2;
+				ctx.fill();
+				ctx.stroke();
+
+				// Draw text with background
+				const systemName = this.battle.kills[0]?.pinpoints?.nearestCelestial?.name?.split(" ")[0] || this.battle.systemId;
+
+				const pilotText = `${this.battle.involvedCount} pilots`;
+				const valueText = `${formatValue$1(this.battle.totalValue)} ISK`;
+				ctx.font = `${Math.max(14, this.currentSize / 5)}px Arial`;
+				ctx.textAlign = "center";
+				ctx.textBaseline = "middle";
+
+				// Text background
+				const padding = 4;
+
+				const lineHeight = Math.max(16, this.currentSize / 5) * 1.2;
+				ctx.fillStyle = "rgba(0, 0, 0, 0.7)";
+				ctx.fillRect(this.x - ctx.measureText(systemName).width / 2 - padding, this.y - lineHeight * 1.5 - padding, ctx.measureText(systemName).width + padding * 2, lineHeight * 3 + padding * 2);
+
+				// Text
+				ctx.fillStyle = "white";
+
+				ctx.fillText(systemName, this.x, this.y - lineHeight);
+				ctx.fillText(pilotText, this.x, this.y);
+				ctx.fillText(valueText, this.x, this.y + lineHeight);
+			}
+
+			containsPoint(x, y) {
+				const dx = this.x - x;
+				const dy = this.y - y;
+				return Math.sqrt(dx * dx + dy * dy) <= this.currentSize;
+			}
+		}
+
+		function handleClick(event) {
+			const rect = canvas.getBoundingClientRect();
+			const x = event.clientX - rect.left;
+			const y = event.clientY - rect.top;
+
+			// Convert position to canvas coordinates
+			const scaleX = canvas.width / rect.width;
+
+			const scaleY = canvas.height / rect.height;
+			const canvasX = x * scaleX;
+			const canvasY = y * scaleY;
+
+			// Find clicked bubble
+			for (let bubble of bubbles.values()) {
+				if (bubble.containsPoint(canvasX, canvasY)) {
+					const latestKill = bubble.battle.kills[bubble.battle.kills.length - 1];
+					window.open(`https://zkillboard.com/kill/${latestKill.killmail_id}/`, "_blank");
+					break;
+				}
+			}
+		}
+
+		function animate() {
+			ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+			bubbles.forEach(bubble => {
+				bubble.update(bubbles);
+				bubble.draw(ctx);
+			});
+
+			animationFrame = requestAnimationFrame(animate);
+		}
+
+		function handleResize() {
+			if (canvas) {
+				$$invalidate(1, canvas.width = window.innerWidth, canvas);
+				$$invalidate(1, canvas.height = window.innerHeight - 100, canvas); // Account for controls
+			}
+		}
+
+		onMount(() => {
+			ctx = canvas.getContext("2d");
+			handleResize();
+			window.addEventListener("resize", handleResize);
+			animate();
+		});
+
+		onDestroy(() => {
+			window.removeEventListener("resize", handleResize);
+
+			if (animationFrame) {
+				cancelAnimationFrame(animationFrame);
+			}
+		});
+
 		const writable_props = [];
 
 		Object.keys($$props).forEach(key => {
@@ -67596,18 +67654,39 @@ void main() {
 			$$invalidate(0, minInvolved);
 		}
 
+		function canvas_1_binding($$value) {
+			binding_callbacks[$$value ? 'unshift' : 'push'](() => {
+				canvas = $$value;
+				$$invalidate(1, canvas);
+			});
+		}
+
 		$$self.$capture_state = () => ({
 			filteredBattles,
 			onMount,
+			onDestroy,
 			minInvolved,
-			battles,
+			canvas,
+			ctx,
+			bubbles,
+			animationFrame,
+			FRICTION,
+			REPULSION,
+			FLASH_DURATION,
+			Bubble,
 			formatValue: formatValue$1,
+			handleClick,
+			animate,
+			handleResize,
 			$filteredBattles
 		});
 
 		$$self.$inject_state = $$props => {
 			if ('minInvolved' in $$props) $$invalidate(0, minInvolved = $$props.minInvolved);
-			if ('battles' in $$props) $$invalidate(1, battles = $$props.battles);
+			if ('canvas' in $$props) $$invalidate(1, canvas = $$props.canvas);
+			if ('ctx' in $$props) ctx = $$props.ctx;
+			if ('bubbles' in $$props) $$invalidate(3, bubbles = $$props.bubbles);
+			if ('animationFrame' in $$props) animationFrame = $$props.animationFrame;
 		};
 
 		if ($$props && "$$inject" in $$props) {
@@ -67615,12 +67694,48 @@ void main() {
 		}
 
 		$$self.$$.update = () => {
-			if ($$self.$$.dirty & /*$filteredBattles*/ 4) {
-				$$invalidate(1, battles = $filteredBattles);
+			if ($$self.$$.dirty & /*$filteredBattles, minInvolved, bubbles*/ 25) {
+				{
+					// Filter battles by minimum involved
+					const battles = $filteredBattles.filter(battle => battle.involvedCount >= minInvolved);
+
+					// Update bubbles map
+					const newBubbles = new Map();
+
+					battles.forEach(battle => {
+						const id = battle.kills[0]?.killmail_id;
+						const existingBubble = bubbles.get(id);
+
+						if (existingBubble) {
+							existingBubble.battle = battle;
+							existingBubble.targetSize = existingBubble.calculateSize();
+
+							if (battle.totalValue > existingBubble.lastValue) {
+								existingBubble.flashTime = Date.now();
+							}
+
+							existingBubble.lastValue = existingBubble.currentValue;
+							existingBubble.currentValue = battle.totalValue;
+							newBubbles.set(id, existingBubble);
+						} else {
+							newBubbles.set(id, new Bubble(battle));
+						}
+					});
+
+					$$invalidate(3, bubbles = newBubbles);
+				}
 			}
 		};
 
-		return [minInvolved, battles, $filteredBattles, input_change_input_handler];
+		return [
+			minInvolved,
+			canvas,
+			handleClick,
+			bubbles,
+			$filteredBattles,
+			input_change_input_handler,
+			canvas_1_binding
+		];
 	}
 
 	class ActiveBattles extends SvelteComponentDev {
