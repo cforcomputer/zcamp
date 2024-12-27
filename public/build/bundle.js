@@ -5346,87 +5346,88 @@ var app = (function () {
 	// src/battleStore.js
 
 	const activeBattles = writable([]);
-
-	const BATTLE_TIMEOUT = 10 * 60 * 1000; // 10 minutes in milliseconds
 	const MAX_BATTLE_AGE = 5 * 60 * 1000; // 5 minutes in milliseconds
 
+	// In battleStore.js
 	function areKillsRelated(kill1, kill2) {
-	  // Helper function to extract all relevant IDs from a killmail
-	  function extractIds(killmail) {
-	    const ids = {
-	      characters: new Set(),
-	      corporations: new Set(),
-	      alliances: new Set(),
-	    };
-
-	    // Add victim IDs
-	    if (killmail.killmail.victim.character_id) {
-	      ids.characters.add(killmail.killmail.victim.character_id);
-	    }
-	    if (killmail.killmail.victim.corporation_id) {
-	      ids.corporations.add(killmail.killmail.victim.corporation_id);
-	    }
-	    if (killmail.killmail.victim.alliance_id) {
-	      ids.alliances.add(killmail.killmail.victim.alliance_id);
-	    }
-
-	    // Add attacker IDs
-	    killmail.killmail.attackers.forEach((attacker) => {
-	      if (attacker.character_id) ids.characters.add(attacker.character_id);
-	      if (attacker.corporation_id)
-	        ids.corporations.add(attacker.corporation_id);
-	      if (attacker.alliance_id) ids.alliances.add(attacker.alliance_id);
-	    });
-
-	    return ids;
+	  // Must be in same system
+	  if (kill1.killmail.solar_system_id !== kill2.killmail.solar_system_id) {
+	    return false;
 	  }
 
-	  const ids1 = extractIds(kill1);
-	  const ids2 = extractIds(kill2);
+	  // Must be within 3 minutes
+	  const timeDiff = Math.abs(
+	    new Date(kill1.killmail.killmail_time) -
+	      new Date(kill2.killmail.killmail_time)
+	  );
+	  if (timeDiff > 180000) {
+	    // 3 minutes
+	    return false;
+	  }
 
-	  // Check for any overlapping IDs
-	  const hasOverlap =
-	    [...ids1.characters].some((id) => ids2.characters.has(id)) ||
-	    [...ids1.corporations].some((id) => ids2.corporations.has(id)) ||
-	    [...ids1.alliances].some((id) => ids2.alliances.has(id));
+	  // Get involved entities from both kills
+	  const ents1 = new Set([
+	    ...kill1.killmail.attackers.map(
+	      (a) => `${a.corporation_id}-${a.alliance_id}`
+	    ),
+	    `${kill1.killmail.victim.corporation_id}-${kill1.killmail.victim.alliance_id}`,
+	  ]);
 
-	  return hasOverlap;
+	  const ents2 = new Set([
+	    ...kill2.killmail.attackers.map(
+	      (a) => `${a.corporation_id}-${a.alliance_id}`
+	    ),
+	    `${kill2.killmail.victim.corporation_id}-${kill2.killmail.victim.alliance_id}`,
+	  ]);
+
+	  // Check for shared entities
+	  let overlap = 0;
+	  ents1.forEach((ent) => {
+	    if (ents2.has(ent)) overlap++;
+	  });
+
+	  return overlap >= 1; // Require at least one shared entity
 	}
 
+	// In battleStore.js
+	// In battleStore.js
 	function addKillmailToBattles(killmail) {
 	  activeBattles.update((battles) => {
 	    const now = new Date().getTime();
 	    const killTime = new Date(killmail.killmail.killmail_time).getTime();
 
-	    // Check if kill is too old to be included
+	    // Don't process kills older than MAX_BATTLE_AGE
 	    if (now - killTime > MAX_BATTLE_AGE) {
-	      console.log(
-	        "Kill is too old to be included in battles:",
-	        killmail.killmail_id
-	      );
 	      return battles;
 	    }
 
-	    console.log("Processing killmail:", killmail.killmail_id);
-	    console.log("Current battles:", battles);
+	    // Create unique battle ID combining system and time window
+	    const timeWindow = Math.floor(killTime / (3 * 60 * 1000)); // 3 minute windows
+	    const battleId = `${killmail.killmail.solar_system_id}-${timeWindow}`;
 
-	    // Remove old battles
-	    battles = battles.filter((battle) => {
-	      const age = now - new Date(battle.lastKill).getTime();
-	      return age < BATTLE_TIMEOUT;
+	    // Look for existing battle with same ID
+	    let foundBattle = battles.find((battle) => {
+	      const firstKillTime = new Date(
+	        battle.kills[0].killmail.killmail_time
+	      ).getTime();
+	      const battleTimeWindow = Math.floor(firstKillTime / (3 * 60 * 1000));
+	      return (
+	        battle.systemId === killmail.killmail.solar_system_id &&
+	        battleTimeWindow === timeWindow &&
+	        areKillsRelated(battle.kills[0], killmail)
+	      );
 	    });
 
-	    const systemId = killmail.killmail.solar_system_id;
-
-	    // First, look for related battles in the same system
-	    let foundBattle = battles.find(
-	      (battle) =>
-	        battle.systemId === systemId &&
-	        battle.kills.some((kill) => areKillsRelated(kill, killmail))
-	    );
+	    console.log("Processing killmail:", {
+	      id: killmail.killID,
+	      system: killmail.killmail.solar_system_id,
+	      time: killmail.killmail.killmail_time,
+	      attackers: killmail.killmail.attackers.length,
+	      value: killmail.zkb.totalValue,
+	    });
 
 	    if (foundBattle) {
-	      // Add kill to existing battle
+	      // Update existing battle
 	      foundBattle.kills.push(killmail);
 	      foundBattle.totalValue += killmail.zkb.totalValue;
 	      foundBattle.lastKill = killmail.killmail.killmail_time;
@@ -5446,63 +5447,56 @@ var app = (function () {
 	          killmail.killmail.victim.character_id
 	        );
 	      }
-	      if (killmail.killmail.victim.corporation_id) {
-	        foundBattle.involvedCorporations.add(
-	          killmail.killmail.victim.corporation_id
-	        );
-	      }
-	      if (killmail.killmail.victim.alliance_id) {
-	        foundBattle.involvedAlliances.add(killmail.killmail.victim.alliance_id);
-	      }
 	    } else {
 	      // Create new battle
 	      const newBattle = {
-	        systemId,
+	        systemId: killmail.killmail.solar_system_id,
+	        battleId: battleId, // Add the battleId to the battle object
 	        kills: [killmail],
-	        totalValue: killmail.zkb.totalValue || 0, // Add default value of 0
+	        totalValue: killmail.zkb.totalValue,
 	        lastKill: killmail.killmail.killmail_time,
-	        involvedCharacters: new Set(),
-	        involvedCorporations: new Set(),
-	        involvedAlliances: new Set(),
+	        involvedCharacters: new Set([
+	          killmail.killmail.victim.character_id,
+	          ...killmail.killmail.attackers
+	            .map((a) => a.character_id)
+	            .filter(Boolean),
+	        ]),
+	        involvedCorporations: new Set([
+	          killmail.killmail.victim.corporation_id,
+	          ...killmail.killmail.attackers
+	            .map((a) => a.corporation_id)
+	            .filter(Boolean),
+	        ]),
+	        involvedAlliances: new Set([
+	          killmail.killmail.victim.alliance_id,
+	          ...killmail.killmail.attackers
+	            .map((a) => a.alliance_id)
+	            .filter(Boolean),
+	        ]),
 	      };
-
-	      // Add initial involved entities
-	      killmail.killmail.attackers.forEach((attacker) => {
-	        if (attacker.character_id)
-	          newBattle.involvedCharacters.add(attacker.character_id);
-	        if (attacker.corporation_id)
-	          newBattle.involvedCorporations.add(attacker.corporation_id);
-	        if (attacker.alliance_id)
-	          newBattle.involvedAlliances.add(attacker.alliance_id);
-	      });
-
-	      if (killmail.killmail.victim.character_id) {
-	        newBattle.involvedCharacters.add(killmail.killmail.victim.character_id);
-	      }
-	      if (killmail.killmail.victim.corporation_id) {
-	        newBattle.involvedCorporations.add(
-	          killmail.killmail.victim.corporation_id
-	        );
-	      }
-	      if (killmail.killmail.victim.alliance_id) {
-	        newBattle.involvedAlliances.add(killmail.killmail.victim.alliance_id);
-	      }
-
-	      console.log("Created new battle:", {
-	        systemId,
-	        killCount: 1,
-	        involvedCharacters: newBattle.involvedCharacters.size,
-	        involvedCorporations: newBattle.involvedCorporations.size,
-	        involvedAlliances: newBattle.involvedAlliances.size,
-	      });
-
 	      battles.push(newBattle);
 	    }
 
-	    // Check for battle merging
+	    // After processing
+	    console.log("Current battles:", {
+	      count: battles.length,
+	      battles: battles.map((b) => ({
+	        system: b.systemId,
+	        battleId: b.battleId,
+	        kills: b.kills.length,
+	        involved: b.involvedCharacters.size,
+	        value: b.totalValue,
+	      })),
+	    });
+
+	    // Merge related battles
 	    battles = mergeBattles(battles);
 
-	    return battles;
+	    // Clean up old battles
+	    return battles.filter((battle) => {
+	      const battleAge = now - new Date(battle.lastKill).getTime();
+	      return battleAge < MAX_BATTLE_AGE;
+	    });
 	  });
 	}
 
@@ -5826,7 +5820,8 @@ var app = (function () {
 	      if (
 	        $settings.location_filter_enabled &&
 	        $settings.location_filter &&
-	        killmail.zkb.locationID !== parseInt($settings.location_filter)
+	        killmail.killmail.solar_system_id !==
+	          parseInt($settings.location_filter)
 	      ) {
 	        return false;
 	      }
@@ -6007,7 +6002,7 @@ var app = (function () {
 
 	/* src\FilterListManager.svelte generated by Svelte v4.2.19 */
 
-	const { console: console_1$5 } = globals;
+	const { console: console_1$6 } = globals;
 	const file$8 = "src\\FilterListManager.svelte";
 
 	function get_each_context$3(ctx, list, i) {
@@ -6379,7 +6374,7 @@ var app = (function () {
 		const writable_props = [];
 
 		Object.keys($$props).forEach(key => {
-			if (!~writable_props.indexOf(key) && key.slice(0, 2) !== '$$' && key !== 'slot') console_1$5.warn(`<FilterListManager> was created with unknown prop '${key}'`);
+			if (!~writable_props.indexOf(key) && key.slice(0, 2) !== '$$' && key !== 'slot') console_1$6.warn(`<FilterListManager> was created with unknown prop '${key}'`);
 		});
 
 		const change_handler = list => toggleFilterList(list.id);
@@ -6447,7 +6442,7 @@ var app = (function () {
 
 	/* src\ProfileListManager.svelte generated by Svelte v4.2.19 */
 
-	const { console: console_1$4 } = globals;
+	const { console: console_1$5 } = globals;
 	const file$7 = "src\\ProfileListManager.svelte";
 
 	function get_each_context$2(ctx, list, i) {
@@ -6710,7 +6705,7 @@ var app = (function () {
 		const writable_props = ['profiles', 'selectedProfile'];
 
 		Object.keys($$props).forEach(key => {
-			if (!~writable_props.indexOf(key) && key.slice(0, 2) !== '$$' && key !== 'slot') console_1$4.warn(`<ProfileListManager> was created with unknown prop '${key}'`);
+			if (!~writable_props.indexOf(key) && key.slice(0, 2) !== '$$' && key !== 'slot') console_1$5.warn(`<ProfileListManager> was created with unknown prop '${key}'`);
 		});
 
 		function select_change_handler() {
@@ -6806,7 +6801,7 @@ var app = (function () {
 
 	/* src\SettingsManager.svelte generated by Svelte v4.2.19 */
 
-	const { console: console_1$3 } = globals;
+	const { console: console_1$4 } = globals;
 	const file$6 = "src\\SettingsManager.svelte";
 
 	// (192:2) {#if localSettings}
@@ -8312,14 +8307,14 @@ var app = (function () {
 
 		$$self.$$.on_mount.push(function () {
 			if (socket === undefined && !('socket' in $$props || $$self.$$.bound[$$self.$$.props['socket']])) {
-				console_1$3.warn("<SettingsManager> was created without expected prop 'socket'");
+				console_1$4.warn("<SettingsManager> was created without expected prop 'socket'");
 			}
 		});
 
 		const writable_props = ['socket'];
 
 		Object.keys($$props).forEach(key => {
-			if (!~writable_props.indexOf(key) && key.slice(0, 2) !== '$$' && key !== 'slot') console_1$3.warn(`<SettingsManager> was created with unknown prop '${key}'`);
+			if (!~writable_props.indexOf(key) && key.slice(0, 2) !== '$$' && key !== 'slot') console_1$4.warn(`<SettingsManager> was created with unknown prop '${key}'`);
 		});
 
 		function profilelistmanager_selectedProfile_binding(value) {
@@ -64622,7 +64617,7 @@ void main() {
 
 	/* src\MapVisualization.svelte generated by Svelte v4.2.19 */
 
-	const { Error: Error_1, Object: Object_1, console: console_1$2 } = globals;
+	const { Error: Error_1, Object: Object_1, console: console_1$3 } = globals;
 	const file$5 = "src\\MapVisualization.svelte";
 
 	// (1109:20) 
@@ -66176,18 +66171,18 @@ void main() {
 
 		$$self.$$.on_mount.push(function () {
 			if (killmailId === undefined && !('killmailId' in $$props || $$self.$$.bound[$$self.$$.props['killmailId']])) {
-				console_1$2.warn("<MapVisualization> was created without expected prop 'killmailId'");
+				console_1$3.warn("<MapVisualization> was created without expected prop 'killmailId'");
 			}
 
 			if (kill === undefined && !('kill' in $$props || $$self.$$.bound[$$self.$$.props['kill']])) {
-				console_1$2.warn("<MapVisualization> was created without expected prop 'kill'");
+				console_1$3.warn("<MapVisualization> was created without expected prop 'kill'");
 			}
 		});
 
 		const writable_props = ['killmailId', 'kill'];
 
 		Object_1.keys($$props).forEach(key => {
-			if (!~writable_props.indexOf(key) && key.slice(0, 2) !== '$$' && key !== 'slot') console_1$2.warn(`<MapVisualization> was created with unknown prop '${key}'`);
+			if (!~writable_props.indexOf(key) && key.slice(0, 2) !== '$$' && key !== 'slot') console_1$3.warn(`<MapVisualization> was created with unknown prop '${key}'`);
 		});
 
 		const click_handler = () => {
@@ -66362,7 +66357,7 @@ void main() {
 
 	/* src\KillmailViewer.svelte generated by Svelte v4.2.19 */
 
-	const { console: console_1$1 } = globals;
+	const { console: console_1$2 } = globals;
 	const file$4 = "src\\KillmailViewer.svelte";
 
 	function get_each_context$1(ctx, list, i) {
@@ -66866,7 +66861,7 @@ void main() {
 		const writable_props = [];
 
 		Object.keys($$props).forEach(key => {
-			if (!~writable_props.indexOf(key) && key.slice(0, 2) !== '$$' && key !== 'slot') console_1$1.warn(`<KillmailViewer> was created with unknown prop '${key}'`);
+			if (!~writable_props.indexOf(key) && key.slice(0, 2) !== '$$' && key !== 'slot') console_1$2.warn(`<KillmailViewer> was created with unknown prop '${key}'`);
 		});
 
 		const click_handler = killmail => viewMap(killmail);
@@ -67340,6 +67335,8 @@ void main() {
 	}
 
 	/* src\ActiveBattles.svelte generated by Svelte v4.2.19 */
+
+	const { console: console_1$1 } = globals;
 	const file$2 = "src\\ActiveBattles.svelte";
 
 	function create_fragment$2(ctx) {
@@ -67370,16 +67367,16 @@ void main() {
 				attr_dev(input, "min", "2");
 				attr_dev(input, "max", "20");
 				attr_dev(input, "step", "1");
-				attr_dev(input, "class", "svelte-187rxrq");
-				add_location(input, file$2, 235, 6, 7203);
-				attr_dev(label, "class", "svelte-187rxrq");
-				add_location(label, file$2, 233, 4, 7142);
-				attr_dev(div0, "class", "controls svelte-187rxrq");
-				add_location(div0, file$2, 232, 2, 7114);
-				attr_dev(canvas_1, "class", "svelte-187rxrq");
-				add_location(canvas_1, file$2, 239, 2, 7306);
-				attr_dev(div1, "class", "active-battles svelte-187rxrq");
-				add_location(div1, file$2, 231, 0, 7082);
+				attr_dev(input, "class", "svelte-a4u9nx");
+				add_location(input, file$2, 313, 6, 9062);
+				attr_dev(label, "class", "svelte-a4u9nx");
+				add_location(label, file$2, 311, 4, 9001);
+				attr_dev(div0, "class", "controls svelte-a4u9nx");
+				add_location(div0, file$2, 310, 2, 8973);
+				attr_dev(canvas_1, "class", "svelte-a4u9nx");
+				add_location(canvas_1, file$2, 317, 2, 9165);
+				attr_dev(div1, "class", "active-battles svelte-a4u9nx");
+				add_location(div1, file$2, 309, 0, 8941);
 			},
 			l: function claim(nodes) {
 				throw new Error("options.hydrate only works if the component was compiled with the `hydratable: true` option");
@@ -67395,12 +67392,12 @@ void main() {
 				set_input_value(input, /*minInvolved*/ ctx[0]);
 				append_dev(div1, t3);
 				append_dev(div1, canvas_1);
-				/*canvas_1_binding*/ ctx[6](canvas_1);
+				/*canvas_1_binding*/ ctx[5](canvas_1);
 
 				if (!mounted) {
 					dispose = [
-						listen_dev(input, "change", /*input_change_input_handler*/ ctx[5]),
-						listen_dev(input, "input", /*input_change_input_handler*/ ctx[5]),
+						listen_dev(input, "change", /*input_change_input_handler*/ ctx[4]),
+						listen_dev(input, "input", /*input_change_input_handler*/ ctx[4]),
 						listen_dev(canvas_1, "click", /*handleClick*/ ctx[2], false, false, false, false)
 					];
 
@@ -67421,7 +67418,7 @@ void main() {
 					detach_dev(div1);
 				}
 
-				/*canvas_1_binding*/ ctx[6](null);
+				/*canvas_1_binding*/ ctx[5](null);
 				mounted = false;
 				run_all(dispose);
 			}
@@ -67439,7 +67436,7 @@ void main() {
 	}
 
 	const FRICTION = 0.99;
-	const REPULSION = 0.2;
+	const REPULSION = 0.5;
 	const FLASH_DURATION = 1000;
 
 	function formatValue$1(value) {
@@ -67457,7 +67454,7 @@ void main() {
 	function instance$2($$self, $$props, $$invalidate) {
 		let $filteredBattles;
 		validate_store(filteredBattles, 'filteredBattles');
-		component_subscribe($$self, filteredBattles, $$value => $$invalidate(4, $filteredBattles = $$value));
+		component_subscribe($$self, filteredBattles, $$value => $$invalidate(3, $filteredBattles = $$value));
 		let { $$slots: slots = {}, $$scope } = $$props;
 		validate_slots('ActiveBattles', slots, []);
 		let minInvolved = 2;
@@ -67465,71 +67462,64 @@ void main() {
 		let ctx;
 		let bubbles = new Map();
 		let animationFrame;
+		let defaultSize = 40; // Default size when canvas isn't ready
 
 		class Bubble {
 			constructor(battle) {
 				this.battle = battle;
-				this.id = battle.kills[0]?.killmail_id;
-				this.x = this.x || Math.random() * window.innerWidth;
-				this.y = this.y || Math.random() * window.innerHeight;
-				this.vx = this.vx || Math.random() - 0.5;
-				this.vy = this.vy || Math.random() - 0.5;
+				this.id = battle.battleId || `${battle.systemId}-${battle.kills[0]?.killmail_id}`;
+
+				// Use default center position if canvas isn't ready
+				this.x = (canvas?.width) ? canvas.width / 2 : 0;
+
+				this.y = (canvas?.height) ? canvas.height / 2 : 0;
+				this.vx = (Math.random() - 0.5) * 0.1;
+				this.vy = (Math.random() - 0.5) * 0.1;
 				this.lastValue = this.currentValue || battle.totalValue;
 				this.currentValue = battle.totalValue;
 				this.targetSize = this.calculateSize();
-				this.currentSize = this.currentSize || 0;
-				this.flashTime = this.currentValue > this.lastValue ? Date.now() : 0;
+				this.currentSize = 0;
+				this.flashTime = Date.now();
+
+				// Flag to indicate bubble needs positioning
+				this.needsPositioning = true;
 			}
 
 			calculateSize() {
-				return Math.max(30, Math.log10(this.battle.totalValue + 1) * 10);
+				const participantFactor = Math.log10(this.battle.involvedCount + 1) * 20;
+				const valueFactor = Math.log10(this.battle.totalValue + 1) * 3;
+				return Math.max(40, participantFactor + valueFactor);
 			}
 
 			update(bubbles) {
-				// Smooth size transition
 				this.currentSize += (this.targetSize - this.currentSize) * 0.1;
 
-				// Physics updates
+				// Strong center gravity
+				const dx = canvas.width / 2 - this.x;
+
+				const dy = canvas.height / 2 - this.y;
+				const centerForce = 0.02;
+				this.vx += dx * centerForce;
+				this.vy += dy * centerForce;
+
+				// Update position
 				this.x += this.vx;
 
 				this.y += this.vy;
-				this.vx *= FRICTION;
-				this.vy *= FRICTION;
+				this.vx *= 0.95;
+				this.vy *= 0.95;
 
-				// Boundary checks with size
-				const padding = this.currentSize * 1.2; // Extra padding for text
-
-				if (this.x < padding) {
-					this.x = padding;
-					this.vx *= -0.5;
-				}
-
-				if (this.x > canvas.width - padding) {
-					this.x = canvas.width - padding;
-					this.vx *= -0.5;
-				}
-
-				if (this.y < padding) {
-					this.y = padding;
-					this.vy *= -0.5;
-				}
-
-				if (this.y > canvas.height - padding) {
-					this.y = canvas.height - padding;
-					this.vy *= -0.5;
-				}
-
-				// Bubble collision and repulsion
+				// Strong repulsion between bubbles
 				bubbles.forEach(other => {
 					if (other === this) return;
 					const dx = other.x - this.x;
 					const dy = other.y - this.y;
 					const distance = Math.sqrt(dx * dx + dy * dy);
-					const minDist = this.currentSize + other.currentSize;
+					const minDist = (this.currentSize + other.currentSize) * 1.1;
 
 					if (distance < minDist) {
 						const angle = Math.atan2(dy, dx);
-						const force = (minDist - distance) * REPULSION;
+						const force = (minDist - distance) * 0.1;
 						const fx = Math.cos(angle) * force;
 						const fy = Math.sin(angle) * force;
 						this.vx -= fx;
@@ -67541,44 +67531,31 @@ void main() {
 			}
 
 			draw(ctx) {
+				const gradient = ctx.createRadialGradient(this.x - this.currentSize * 0.3, this.y - this.currentSize * 0.3, 0, this.x, this.y, this.currentSize);
+
 				const flashProgress = this.flashTime
 				? (Date.now() - this.flashTime) / FLASH_DURATION
 				: 1;
 
 				const flash = Math.max(0, 1 - flashProgress);
-
-				// Draw bubble with flash effect
+				gradient.addColorStop(0, `rgba(255, ${50 + 150 * flash}, ${50 + 150 * flash}, 0.9)`);
+				gradient.addColorStop(1, `rgba(200, ${20 + 100 * flash}, ${20 + 100 * flash}, 0.7)`);
 				ctx.beginPath();
-
 				ctx.arc(this.x, this.y, this.currentSize, 0, Math.PI * 2);
-				ctx.fillStyle = `rgba(${255 * flash}, ${50}, ${50}, ${0.2 + this.battle.involvedCount / 50})`;
-				ctx.strokeStyle = `rgba(255, ${100 * flash}, ${100 * flash}, 0.5)`;
-				ctx.lineWidth = 2;
+				ctx.fillStyle = gradient;
 				ctx.fill();
-				ctx.stroke();
 
-				// Draw text with background
-				const systemName = this.battle.kills[0]?.pinpoints?.nearestCelestial?.name?.split(" ")[0] || this.battle.systemId;
-
-				const pilotText = `${this.battle.involvedCount} pilots`;
-				const valueText = `${formatValue$1(this.battle.totalValue)} ISK`;
+				// Simple white text directly on sphere
 				ctx.font = `${Math.max(14, this.currentSize / 5)}px Arial`;
+
+				ctx.fillStyle = "white";
 				ctx.textAlign = "center";
 				ctx.textBaseline = "middle";
-
-				// Text background
-				const padding = 4;
-
-				const lineHeight = Math.max(16, this.currentSize / 5) * 1.2;
-				ctx.fillStyle = "rgba(0, 0, 0, 0.7)";
-				ctx.fillRect(this.x - ctx.measureText(systemName).width / 2 - padding, this.y - lineHeight * 1.5 - padding, ctx.measureText(systemName).width + padding * 2, lineHeight * 3 + padding * 2);
-
-				// Text
-				ctx.fillStyle = "white";
-
+				const lineHeight = this.currentSize / 3;
+				const systemName = this.battle.kills[0]?.pinpoints?.nearestCelestial?.name?.split(" ")[0] || this.battle.systemId;
 				ctx.fillText(systemName, this.x, this.y - lineHeight);
-				ctx.fillText(pilotText, this.x, this.y);
-				ctx.fillText(valueText, this.x, this.y + lineHeight);
+				ctx.fillText(`${this.battle.involvedCount} pilots`, this.x, this.y);
+				ctx.fillText(`${formatValue$1(this.battle.totalValue)} ISK`, this.x, this.y + lineHeight);
 			}
 
 			containsPoint(x, y) {
@@ -67589,6 +67566,7 @@ void main() {
 		}
 
 		function handleClick(event) {
+			if (!canvas) return;
 			const rect = canvas.getBoundingClientRect();
 			const x = event.clientX - rect.left;
 			const y = event.clientY - rect.top;
@@ -67603,17 +67581,35 @@ void main() {
 			// Find clicked bubble
 			for (let bubble of bubbles.values()) {
 				if (bubble.containsPoint(canvasX, canvasY)) {
-					const latestKill = bubble.battle.kills[bubble.battle.kills.length - 1];
-					window.open(`https://zkillboard.com/kill/${latestKill.killmail_id}/`, "_blank");
+					// Get the most recent kill from the battle
+					const latestKill = bubble.battle.kills.sort((a, b) => new Date(b.killmail.killmail_time) - new Date(a.killmail.killmail_time))[0];
+
+					if (latestKill?.killID) {
+						window.open(`https://zkillboard.com/kill/${latestKill.killID}/`, "_blank");
+					}
+
 					break;
 				}
 			}
 		}
 
+		// In animate function
 		function animate() {
+			if (!canvas || !ctx) {
+				console.log("Canvas or context not available");
+				return;
+			}
+
 			ctx.clearRect(0, 0, canvas.width, canvas.height);
+			console.log("Drawing bubbles:", bubbles.size);
 
 			bubbles.forEach(bubble => {
+				if (bubble.needsPositioning && canvas) {
+					bubble.x = canvas.width / 2;
+					bubble.y = canvas.height / 2;
+					bubble.needsPositioning = false;
+				}
+
 				bubble.update(bubbles);
 				bubble.draw(ctx);
 			});
@@ -67622,17 +67618,44 @@ void main() {
 		}
 
 		function handleResize() {
-			if (canvas) {
-				$$invalidate(1, canvas.width = window.innerWidth, canvas);
-				$$invalidate(1, canvas.height = window.innerHeight - 100, canvas); // Account for controls
-			}
+			if (!canvas) return;
+
+			// Use actual pixel dimensions
+			$$invalidate(1, canvas.width = canvas.clientWidth, canvas);
+
+			$$invalidate(1, canvas.height = canvas.clientHeight, canvas);
+
+			// Reset all bubbles to center when resizing
+			bubbles.forEach(bubble => {
+				bubble.x = canvas.width / 2;
+				bubble.y = canvas.height / 2;
+			});
+		}
+
+		function initializeCanvas() {
+			if (!canvas) return;
+			ctx = canvas.getContext("2d");
+
+			// Set canvas dimensions to match display size
+			$$invalidate(1, canvas.width = canvas.clientWidth, canvas);
+
+			$$invalidate(1, canvas.height = canvas.clientHeight, canvas);
+
+			// Position all bubbles initially
+			bubbles.forEach(bubble => {
+				bubble.x = canvas.width / 2;
+				bubble.y = canvas.height / 2;
+				bubble.needsPositioning = false;
+			});
+
+			// Start animation loop
+			animate();
 		}
 
 		onMount(() => {
-			ctx = canvas.getContext("2d");
-			handleResize();
+			initializeCanvas();
 			window.addEventListener("resize", handleResize);
-			animate();
+			animationFrame = requestAnimationFrame(animate); // Store the animation frame
 		});
 
 		onDestroy(() => {
@@ -67646,7 +67669,7 @@ void main() {
 		const writable_props = [];
 
 		Object.keys($$props).forEach(key => {
-			if (!~writable_props.indexOf(key) && key.slice(0, 2) !== '$$' && key !== 'slot') console.warn(`<ActiveBattles> was created with unknown prop '${key}'`);
+			if (!~writable_props.indexOf(key) && key.slice(0, 2) !== '$$' && key !== 'slot') console_1$1.warn(`<ActiveBattles> was created with unknown prop '${key}'`);
 		});
 
 		function input_change_input_handler() {
@@ -67670,6 +67693,7 @@ void main() {
 			ctx,
 			bubbles,
 			animationFrame,
+			defaultSize,
 			FRICTION,
 			REPULSION,
 			FLASH_DURATION,
@@ -67678,6 +67702,7 @@ void main() {
 			handleClick,
 			animate,
 			handleResize,
+			initializeCanvas,
 			$filteredBattles
 		});
 
@@ -67685,8 +67710,9 @@ void main() {
 			if ('minInvolved' in $$props) $$invalidate(0, minInvolved = $$props.minInvolved);
 			if ('canvas' in $$props) $$invalidate(1, canvas = $$props.canvas);
 			if ('ctx' in $$props) ctx = $$props.ctx;
-			if ('bubbles' in $$props) $$invalidate(3, bubbles = $$props.bubbles);
+			if ('bubbles' in $$props) $$invalidate(8, bubbles = $$props.bubbles);
 			if ('animationFrame' in $$props) animationFrame = $$props.animationFrame;
+			if ('defaultSize' in $$props) defaultSize = $$props.defaultSize;
 		};
 
 		if ($$props && "$$inject" in $$props) {
@@ -67694,35 +67720,58 @@ void main() {
 		}
 
 		$$self.$$.update = () => {
-			if ($$self.$$.dirty & /*$filteredBattles, minInvolved, bubbles*/ 25) {
+			if ($$self.$$.dirty & /*$filteredBattles, minInvolved, canvas*/ 11) {
 				{
 					// Filter battles by minimum involved
 					const battles = $filteredBattles.filter(battle => battle.involvedCount >= minInvolved);
 
-					// Update bubbles map
-					const newBubbles = new Map();
-
-					battles.forEach(battle => {
-						const id = battle.kills[0]?.killmail_id;
-						const existingBubble = bubbles.get(id);
-
-						if (existingBubble) {
-							existingBubble.battle = battle;
-							existingBubble.targetSize = existingBubble.calculateSize();
-
-							if (battle.totalValue > existingBubble.lastValue) {
-								existingBubble.flashTime = Date.now();
+					if (canvas) {
+						// Position any bubbles that need it
+						bubbles.forEach(bubble => {
+							if (bubble.needsPositioning) {
+								bubble.x = canvas.width / 2;
+								bubble.y = canvas.height / 2;
+								bubble.needsPositioning = false;
 							}
+						});
+					}
 
-							existingBubble.lastValue = existingBubble.currentValue;
-							existingBubble.currentValue = battle.totalValue;
-							newBubbles.set(id, existingBubble);
-						} else {
-							newBubbles.set(id, new Bubble(battle));
+					console.log("Processing filtered battles:", battles.length);
+
+					// Generate unique IDs based on system and first kill if battleId not present
+					battles.forEach(battle => {
+						if (!battle.id) {
+							battle.id = `${battle.systemId}-${battle.kills[0].killmail_id}`;
 						}
 					});
 
-					$$invalidate(3, bubbles = newBubbles);
+					// Clear any bubbles for battles that no longer exist
+					bubbles.forEach((bubble, id) => {
+						if (!battles.find(b => b.id === id)) {
+							bubbles.delete(id);
+						}
+					});
+
+					// Create new bubbles for battles that don't have them
+					battles.forEach(battle => {
+						if (!bubbles.has(battle.id)) {
+							console.log("Creating new bubble for battle:", battle.id);
+							bubbles.set(battle.id, new Bubble(battle));
+						} else {
+							// Update existing bubble with new battle data
+							const bubble = bubbles.get(battle.id);
+
+							bubble.battle = battle;
+							bubble.targetSize = bubble.calculateSize();
+
+							if (battle.totalValue > bubble.lastValue) {
+								bubble.flashTime = Date.now();
+							}
+
+							bubble.lastValue = bubble.currentValue;
+							bubble.currentValue = battle.totalValue;
+						}
+					});
 				}
 			}
 		};
@@ -67731,7 +67780,6 @@ void main() {
 			minInvolved,
 			canvas,
 			handleClick,
-			bubbles,
 			$filteredBattles,
 			input_change_input_handler,
 			canvas_1_binding

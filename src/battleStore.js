@@ -6,83 +6,86 @@ export const activeBattles = writable([]);
 const BATTLE_TIMEOUT = 10 * 60 * 1000; // 10 minutes in milliseconds
 const MAX_BATTLE_AGE = 5 * 60 * 1000; // 5 minutes in milliseconds
 
+// In battleStore.js
 function areKillsRelated(kill1, kill2) {
-  // Helper function to extract all relevant IDs from a killmail
-  function extractIds(killmail) {
-    const ids = {
-      characters: new Set(),
-      corporations: new Set(),
-      alliances: new Set(),
-    };
-
-    // Add victim IDs
-    if (killmail.killmail.victim.character_id) {
-      ids.characters.add(killmail.killmail.victim.character_id);
-    }
-    if (killmail.killmail.victim.corporation_id) {
-      ids.corporations.add(killmail.killmail.victim.corporation_id);
-    }
-    if (killmail.killmail.victim.alliance_id) {
-      ids.alliances.add(killmail.killmail.victim.alliance_id);
-    }
-
-    // Add attacker IDs
-    killmail.killmail.attackers.forEach((attacker) => {
-      if (attacker.character_id) ids.characters.add(attacker.character_id);
-      if (attacker.corporation_id)
-        ids.corporations.add(attacker.corporation_id);
-      if (attacker.alliance_id) ids.alliances.add(attacker.alliance_id);
-    });
-
-    return ids;
+  // Must be in same system
+  if (kill1.killmail.solar_system_id !== kill2.killmail.solar_system_id) {
+    return false;
   }
 
-  const ids1 = extractIds(kill1);
-  const ids2 = extractIds(kill2);
+  // Must be within 3 minutes
+  const timeDiff = Math.abs(
+    new Date(kill1.killmail.killmail_time) -
+      new Date(kill2.killmail.killmail_time)
+  );
+  if (timeDiff > 180000) {
+    // 3 minutes
+    return false;
+  }
 
-  // Check for any overlapping IDs
-  const hasOverlap =
-    [...ids1.characters].some((id) => ids2.characters.has(id)) ||
-    [...ids1.corporations].some((id) => ids2.corporations.has(id)) ||
-    [...ids1.alliances].some((id) => ids2.alliances.has(id));
+  // Get involved entities from both kills
+  const ents1 = new Set([
+    ...kill1.killmail.attackers.map(
+      (a) => `${a.corporation_id}-${a.alliance_id}`
+    ),
+    `${kill1.killmail.victim.corporation_id}-${kill1.killmail.victim.alliance_id}`,
+  ]);
 
-  return hasOverlap;
+  const ents2 = new Set([
+    ...kill2.killmail.attackers.map(
+      (a) => `${a.corporation_id}-${a.alliance_id}`
+    ),
+    `${kill2.killmail.victim.corporation_id}-${kill2.killmail.victim.alliance_id}`,
+  ]);
+
+  // Check for shared entities
+  let overlap = 0;
+  ents1.forEach((ent) => {
+    if (ents2.has(ent)) overlap++;
+  });
+
+  return overlap >= 1; // Require at least one shared entity
 }
 
+// In battleStore.js
+// In battleStore.js
 export function addKillmailToBattles(killmail) {
   activeBattles.update((battles) => {
     const now = new Date().getTime();
     const killTime = new Date(killmail.killmail.killmail_time).getTime();
 
-    // Check if kill is too old to be included
+    // Don't process kills older than MAX_BATTLE_AGE
     if (now - killTime > MAX_BATTLE_AGE) {
-      console.log(
-        "Kill is too old to be included in battles:",
-        killmail.killmail_id
-      );
       return battles;
     }
 
-    console.log("Processing killmail:", killmail.killmail_id);
-    console.log("Current battles:", battles);
+    // Create unique battle ID combining system and time window
+    const timeWindow = Math.floor(killTime / (3 * 60 * 1000)); // 3 minute windows
+    const battleId = `${killmail.killmail.solar_system_id}-${timeWindow}`;
 
-    // Remove old battles
-    battles = battles.filter((battle) => {
-      const age = now - new Date(battle.lastKill).getTime();
-      return age < BATTLE_TIMEOUT;
+    // Look for existing battle with same ID
+    let foundBattle = battles.find((battle) => {
+      const firstKillTime = new Date(
+        battle.kills[0].killmail.killmail_time
+      ).getTime();
+      const battleTimeWindow = Math.floor(firstKillTime / (3 * 60 * 1000));
+      return (
+        battle.systemId === killmail.killmail.solar_system_id &&
+        battleTimeWindow === timeWindow &&
+        areKillsRelated(battle.kills[0], killmail)
+      );
     });
 
-    const systemId = killmail.killmail.solar_system_id;
-
-    // First, look for related battles in the same system
-    let foundBattle = battles.find(
-      (battle) =>
-        battle.systemId === systemId &&
-        battle.kills.some((kill) => areKillsRelated(kill, killmail))
-    );
+    console.log("Processing killmail:", {
+      id: killmail.killID,
+      system: killmail.killmail.solar_system_id,
+      time: killmail.killmail.killmail_time,
+      attackers: killmail.killmail.attackers.length,
+      value: killmail.zkb.totalValue,
+    });
 
     if (foundBattle) {
-      // Add kill to existing battle
+      // Update existing battle
       foundBattle.kills.push(killmail);
       foundBattle.totalValue += killmail.zkb.totalValue;
       foundBattle.lastKill = killmail.killmail.killmail_time;
@@ -102,63 +105,56 @@ export function addKillmailToBattles(killmail) {
           killmail.killmail.victim.character_id
         );
       }
-      if (killmail.killmail.victim.corporation_id) {
-        foundBattle.involvedCorporations.add(
-          killmail.killmail.victim.corporation_id
-        );
-      }
-      if (killmail.killmail.victim.alliance_id) {
-        foundBattle.involvedAlliances.add(killmail.killmail.victim.alliance_id);
-      }
     } else {
       // Create new battle
       const newBattle = {
-        systemId,
+        systemId: killmail.killmail.solar_system_id,
+        battleId: battleId, // Add the battleId to the battle object
         kills: [killmail],
-        totalValue: killmail.zkb.totalValue || 0, // Add default value of 0
+        totalValue: killmail.zkb.totalValue,
         lastKill: killmail.killmail.killmail_time,
-        involvedCharacters: new Set(),
-        involvedCorporations: new Set(),
-        involvedAlliances: new Set(),
+        involvedCharacters: new Set([
+          killmail.killmail.victim.character_id,
+          ...killmail.killmail.attackers
+            .map((a) => a.character_id)
+            .filter(Boolean),
+        ]),
+        involvedCorporations: new Set([
+          killmail.killmail.victim.corporation_id,
+          ...killmail.killmail.attackers
+            .map((a) => a.corporation_id)
+            .filter(Boolean),
+        ]),
+        involvedAlliances: new Set([
+          killmail.killmail.victim.alliance_id,
+          ...killmail.killmail.attackers
+            .map((a) => a.alliance_id)
+            .filter(Boolean),
+        ]),
       };
-
-      // Add initial involved entities
-      killmail.killmail.attackers.forEach((attacker) => {
-        if (attacker.character_id)
-          newBattle.involvedCharacters.add(attacker.character_id);
-        if (attacker.corporation_id)
-          newBattle.involvedCorporations.add(attacker.corporation_id);
-        if (attacker.alliance_id)
-          newBattle.involvedAlliances.add(attacker.alliance_id);
-      });
-
-      if (killmail.killmail.victim.character_id) {
-        newBattle.involvedCharacters.add(killmail.killmail.victim.character_id);
-      }
-      if (killmail.killmail.victim.corporation_id) {
-        newBattle.involvedCorporations.add(
-          killmail.killmail.victim.corporation_id
-        );
-      }
-      if (killmail.killmail.victim.alliance_id) {
-        newBattle.involvedAlliances.add(killmail.killmail.victim.alliance_id);
-      }
-
-      console.log("Created new battle:", {
-        systemId,
-        killCount: 1,
-        involvedCharacters: newBattle.involvedCharacters.size,
-        involvedCorporations: newBattle.involvedCorporations.size,
-        involvedAlliances: newBattle.involvedAlliances.size,
-      });
-
       battles.push(newBattle);
     }
 
-    // Check for battle merging
+    // After processing
+    console.log("Current battles:", {
+      count: battles.length,
+      battles: battles.map((b) => ({
+        system: b.systemId,
+        battleId: b.battleId,
+        kills: b.kills.length,
+        involved: b.involvedCharacters.size,
+        value: b.totalValue,
+      })),
+    });
+
+    // Merge related battles
     battles = mergeBattles(battles);
 
-    return battles;
+    // Clean up old battles
+    return battles.filter((battle) => {
+      const battleAge = now - new Date(battle.lastKill).getTime();
+      return battleAge < MAX_BATTLE_AGE;
+    });
   });
 }
 

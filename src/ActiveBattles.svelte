@@ -8,71 +8,69 @@
   let ctx;
   let bubbles = new Map();
   let animationFrame;
+  let defaultSize = 40; // Default size when canvas isn't ready
 
   // Physics constants
   const FRICTION = 0.99;
-  const REPULSION = 0.2;
+  const REPULSION = 0.5;
   const FLASH_DURATION = 1000;
 
   class Bubble {
     constructor(battle) {
       this.battle = battle;
-      this.id = battle.kills[0]?.killmail_id;
-      this.x = this.x || Math.random() * window.innerWidth;
-      this.y = this.y || Math.random() * window.innerHeight;
-      this.vx = this.vx || Math.random() - 0.5;
-      this.vy = this.vy || Math.random() - 0.5;
+      this.id =
+        battle.battleId || `${battle.systemId}-${battle.kills[0]?.killmail_id}`;
+
+      // Use default center position if canvas isn't ready
+      this.x = canvas?.width ? canvas.width / 2 : 0;
+      this.y = canvas?.height ? canvas.height / 2 : 0;
+
+      this.vx = (Math.random() - 0.5) * 0.1;
+      this.vy = (Math.random() - 0.5) * 0.1;
+
       this.lastValue = this.currentValue || battle.totalValue;
       this.currentValue = battle.totalValue;
       this.targetSize = this.calculateSize();
-      this.currentSize = this.currentSize || 0;
-      this.flashTime = this.currentValue > this.lastValue ? Date.now() : 0;
+      this.currentSize = 0;
+      this.flashTime = Date.now();
+
+      // Flag to indicate bubble needs positioning
+      this.needsPositioning = true;
     }
 
     calculateSize() {
-      return Math.max(30, Math.log10(this.battle.totalValue + 1) * 10);
+      const participantFactor = Math.log10(this.battle.involvedCount + 1) * 20;
+      const valueFactor = Math.log10(this.battle.totalValue + 1) * 3;
+      return Math.max(40, participantFactor + valueFactor);
     }
 
     update(bubbles) {
-      // Smooth size transition
       this.currentSize += (this.targetSize - this.currentSize) * 0.1;
 
-      // Physics updates
+      // Strong center gravity
+      const dx = canvas.width / 2 - this.x;
+      const dy = canvas.height / 2 - this.y;
+      const centerForce = 0.02;
+      this.vx += dx * centerForce;
+      this.vy += dy * centerForce;
+
+      // Update position
       this.x += this.vx;
       this.y += this.vy;
-      this.vx *= FRICTION;
-      this.vy *= FRICTION;
+      this.vx *= 0.95;
+      this.vy *= 0.95;
 
-      // Boundary checks with size
-      const padding = this.currentSize * 1.2; // Extra padding for text
-      if (this.x < padding) {
-        this.x = padding;
-        this.vx *= -0.5;
-      }
-      if (this.x > canvas.width - padding) {
-        this.x = canvas.width - padding;
-        this.vx *= -0.5;
-      }
-      if (this.y < padding) {
-        this.y = padding;
-        this.vy *= -0.5;
-      }
-      if (this.y > canvas.height - padding) {
-        this.y = canvas.height - padding;
-        this.vy *= -0.5;
-      }
-
-      // Bubble collision and repulsion
+      // Strong repulsion between bubbles
       bubbles.forEach((other) => {
         if (other === this) return;
         const dx = other.x - this.x;
         const dy = other.y - this.y;
         const distance = Math.sqrt(dx * dx + dy * dy);
-        const minDist = this.currentSize + other.currentSize;
+        const minDist = (this.currentSize + other.currentSize) * 1.1;
 
         if (distance < minDist) {
           const angle = Math.atan2(dy, dx);
-          const force = (minDist - distance) * REPULSION;
+          const force = (minDist - distance) * 0.1;
           const fx = Math.cos(angle) * force;
           const fy = Math.sin(angle) * force;
 
@@ -85,49 +83,53 @@
     }
 
     draw(ctx) {
+      const gradient = ctx.createRadialGradient(
+        this.x - this.currentSize * 0.3,
+        this.y - this.currentSize * 0.3,
+        0,
+        this.x,
+        this.y,
+        this.currentSize
+      );
+
       const flashProgress = this.flashTime
         ? (Date.now() - this.flashTime) / FLASH_DURATION
         : 1;
       const flash = Math.max(0, 1 - flashProgress);
 
-      // Draw bubble with flash effect
+      gradient.addColorStop(
+        0,
+        `rgba(255, ${50 + 150 * flash}, ${50 + 150 * flash}, 0.9)`
+      );
+      gradient.addColorStop(
+        1,
+        `rgba(200, ${20 + 100 * flash}, ${20 + 100 * flash}, 0.7)`
+      );
+
       ctx.beginPath();
       ctx.arc(this.x, this.y, this.currentSize, 0, Math.PI * 2);
-      ctx.fillStyle = `rgba(${255 * flash}, ${50}, ${50}, ${0.2 + this.battle.involvedCount / 50})`;
-      ctx.strokeStyle = `rgba(255, ${100 * flash}, ${100 * flash}, 0.5)`;
-      ctx.lineWidth = 2;
+      ctx.fillStyle = gradient;
       ctx.fill();
-      ctx.stroke();
 
-      // Draw text with background
+      // Simple white text directly on sphere
+      ctx.font = `${Math.max(14, this.currentSize / 5)}px Arial`;
+      ctx.fillStyle = "white";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+
+      const lineHeight = this.currentSize / 3;
       const systemName =
         this.battle.kills[0]?.pinpoints?.nearestCelestial?.name?.split(
           " "
         )[0] || this.battle.systemId;
-      const pilotText = `${this.battle.involvedCount} pilots`;
-      const valueText = `${formatValue(this.battle.totalValue)} ISK`;
 
-      ctx.font = `${Math.max(14, this.currentSize / 5)}px Arial`;
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-
-      // Text background
-      const padding = 4;
-      const lineHeight = Math.max(16, this.currentSize / 5) * 1.2;
-
-      ctx.fillStyle = "rgba(0, 0, 0, 0.7)";
-      ctx.fillRect(
-        this.x - ctx.measureText(systemName).width / 2 - padding,
-        this.y - lineHeight * 1.5 - padding,
-        ctx.measureText(systemName).width + padding * 2,
-        lineHeight * 3 + padding * 2
-      );
-
-      // Text
-      ctx.fillStyle = "white";
       ctx.fillText(systemName, this.x, this.y - lineHeight);
-      ctx.fillText(pilotText, this.x, this.y);
-      ctx.fillText(valueText, this.x, this.y + lineHeight);
+      ctx.fillText(`${this.battle.involvedCount} pilots`, this.x, this.y);
+      ctx.fillText(
+        `${formatValue(this.battle.totalValue)} ISK`,
+        this.x,
+        this.y + lineHeight
+      );
     }
 
     containsPoint(x, y) {
@@ -148,6 +150,8 @@
   }
 
   function handleClick(event) {
+    if (!canvas) return;
+
     const rect = canvas.getBoundingClientRect();
     const x = event.clientX - rect.left;
     const y = event.clientY - rect.top;
@@ -161,30 +165,80 @@
     // Find clicked bubble
     for (let bubble of bubbles.values()) {
       if (bubble.containsPoint(canvasX, canvasY)) {
-        const latestKill = bubble.battle.kills[bubble.battle.kills.length - 1];
-        window.open(
-          `https://zkillboard.com/kill/${latestKill.killmail_id}/`,
-          "_blank"
-        );
+        // Get the most recent kill from the battle
+        const latestKill = bubble.battle.kills.sort(
+          (a, b) =>
+            new Date(b.killmail.killmail_time) -
+            new Date(a.killmail.killmail_time)
+        )[0];
+
+        if (latestKill?.killID) {
+          window.open(
+            `https://zkillboard.com/kill/${latestKill.killID}/`,
+            "_blank"
+          );
+        }
         break;
       }
     }
   }
 
+  // In animate function
   function animate() {
+    if (!canvas || !ctx) {
+      console.log("Canvas or context not available");
+      return;
+    }
+
     ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    console.log("Drawing bubbles:", bubbles.size);
+
     bubbles.forEach((bubble) => {
+      if (bubble.needsPositioning && canvas) {
+        bubble.x = canvas.width / 2;
+        bubble.y = canvas.height / 2;
+        bubble.needsPositioning = false;
+      }
       bubble.update(bubbles);
       bubble.draw(ctx);
     });
+
     animationFrame = requestAnimationFrame(animate);
   }
 
   function handleResize() {
-    if (canvas) {
-      canvas.width = window.innerWidth;
-      canvas.height = window.innerHeight - 100; // Account for controls
-    }
+    if (!canvas) return;
+
+    // Use actual pixel dimensions
+    canvas.width = canvas.clientWidth;
+    canvas.height = canvas.clientHeight;
+
+    // Reset all bubbles to center when resizing
+    bubbles.forEach((bubble) => {
+      bubble.x = canvas.width / 2;
+      bubble.y = canvas.height / 2;
+    });
+  }
+
+  function initializeCanvas() {
+    if (!canvas) return;
+
+    ctx = canvas.getContext("2d");
+
+    // Set canvas dimensions to match display size
+    canvas.width = canvas.clientWidth;
+    canvas.height = canvas.clientHeight;
+
+    // Position all bubbles initially
+    bubbles.forEach((bubble) => {
+      bubble.x = canvas.width / 2;
+      bubble.y = canvas.height / 2;
+      bubble.needsPositioning = false;
+    });
+
+    // Start animation loop
+    animate();
   }
 
   $: {
@@ -193,32 +247,56 @@
       (battle) => battle.involvedCount >= minInvolved
     );
 
-    // Update bubbles map
-    const newBubbles = new Map();
-    battles.forEach((battle) => {
-      const id = battle.kills[0]?.killmail_id;
-      const existingBubble = bubbles.get(id);
-      if (existingBubble) {
-        existingBubble.battle = battle;
-        existingBubble.targetSize = existingBubble.calculateSize();
-        if (battle.totalValue > existingBubble.lastValue) {
-          existingBubble.flashTime = Date.now();
+    if (canvas) {
+      // Position any bubbles that need it
+      bubbles.forEach((bubble) => {
+        if (bubble.needsPositioning) {
+          bubble.x = canvas.width / 2;
+          bubble.y = canvas.height / 2;
+          bubble.needsPositioning = false;
         }
-        existingBubble.lastValue = existingBubble.currentValue;
-        existingBubble.currentValue = battle.totalValue;
-        newBubbles.set(id, existingBubble);
-      } else {
-        newBubbles.set(id, new Bubble(battle));
+      });
+    }
+
+    console.log("Processing filtered battles:", battles.length);
+
+    // Generate unique IDs based on system and first kill if battleId not present
+    battles.forEach((battle) => {
+      if (!battle.id) {
+        battle.id = `${battle.systemId}-${battle.kills[0].killmail_id}`;
       }
     });
-    bubbles = newBubbles;
+
+    // Clear any bubbles for battles that no longer exist
+    bubbles.forEach((bubble, id) => {
+      if (!battles.find((b) => b.id === id)) {
+        bubbles.delete(id);
+      }
+    });
+
+    // Create new bubbles for battles that don't have them
+    battles.forEach((battle) => {
+      if (!bubbles.has(battle.id)) {
+        console.log("Creating new bubble for battle:", battle.id);
+        bubbles.set(battle.id, new Bubble(battle));
+      } else {
+        // Update existing bubble with new battle data
+        const bubble = bubbles.get(battle.id);
+        bubble.battle = battle;
+        bubble.targetSize = bubble.calculateSize();
+        if (battle.totalValue > bubble.lastValue) {
+          bubble.flashTime = Date.now();
+        }
+        bubble.lastValue = bubble.currentValue;
+        bubble.currentValue = battle.totalValue;
+      }
+    });
   }
 
   onMount(() => {
-    ctx = canvas.getContext("2d");
-    handleResize();
+    initializeCanvas();
     window.addEventListener("resize", handleResize);
-    animate();
+    animationFrame = requestAnimationFrame(animate); // Store the animation frame
   });
 
   onDestroy(() => {
@@ -259,6 +337,19 @@
 
   input[type="range"] {
     width: 200px;
+  }
+
+  .active-battles {
+    display: flex;
+    flex-direction: column;
+    height: 100vh; /* Set explicit height */
+  }
+
+  canvas {
+    flex: 1;
+    cursor: pointer;
+    width: 100%; /* Set explicit width */
+    height: 100%; /* Set explicit height */
   }
 
   label {

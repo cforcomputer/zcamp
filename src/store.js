@@ -133,7 +133,8 @@ export const filteredKillmails = derived(
       if (
         $settings.location_filter_enabled &&
         $settings.location_filter &&
-        killmail.zkb.locationID !== parseInt($settings.location_filter)
+        killmail.killmail.solar_system_id !==
+          parseInt($settings.location_filter)
       ) {
         return false;
       }
