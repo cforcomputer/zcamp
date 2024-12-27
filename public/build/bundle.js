@@ -70322,7 +70322,7 @@ void main() {
 	const { Error: Error_1, Object: Object_1, console: console_1$2 } = globals;
 	const file$3 = "src\\MapVisualization.svelte";
 
-	// (1080:20) 
+	// (1091:20) 
 	function create_if_block_6(ctx) {
 		let div;
 		let t;
@@ -70332,7 +70332,7 @@ void main() {
 				div = element("div");
 				t = text(/*error*/ ctx[2]);
 				attr_dev(div, "class", "status-message error svelte-ur9yx9");
-				add_location(div, file$3, 1080, 6, 32171);
+				add_location(div, file$3, 1091, 6, 32365);
 			},
 			m: function mount(target, anchor) {
 				insert_dev(target, div, anchor);
@@ -70352,14 +70352,14 @@ void main() {
 			block,
 			id: create_if_block_6.name,
 			type: "if",
-			source: "(1080:20) ",
+			source: "(1091:20) ",
 			ctx
 		});
 
 		return block;
 	}
 
-	// (1078:4) {#if loading}
+	// (1089:4) {#if loading}
 	function create_if_block_5(ctx) {
 		let div;
 
@@ -70368,7 +70368,7 @@ void main() {
 				div = element("div");
 				div.textContent = "Loading map...";
 				attr_dev(div, "class", "status-message svelte-ur9yx9");
-				add_location(div, file$3, 1078, 6, 32093);
+				add_location(div, file$3, 1089, 6, 32287);
 			},
 			m: function mount(target, anchor) {
 				insert_dev(target, div, anchor);
@@ -70385,14 +70385,14 @@ void main() {
 			block,
 			id: create_if_block_5.name,
 			type: "if",
-			source: "(1078:4) {#if loading}",
+			source: "(1089:4) {#if loading}",
 			ctx
 		});
 
 		return block;
 	}
 
-	// (1086:4) {#if kill.pinpoints}
+	// (1097:4) {#if kill.pinpoints}
 	function create_if_block_4(ctx) {
 		let pre;
 		let t_value = JSON.stringify(/*kill*/ ctx[0].pinpoints, null, 2) + "";
@@ -70403,7 +70403,7 @@ void main() {
 				pre = element("pre");
 				t = text(t_value);
 				set_style(pre, "display", "none");
-				add_location(pre, file$3, 1086, 6, 32303);
+				add_location(pre, file$3, 1097, 6, 32497);
 			},
 			m: function mount(target, anchor) {
 				insert_dev(target, pre, anchor);
@@ -70423,14 +70423,14 @@ void main() {
 			block,
 			id: create_if_block_4.name,
 			type: "if",
-			source: "(1086:4) {#if kill.pinpoints}",
+			source: "(1097:4) {#if kill.pinpoints}",
 			ctx
 		});
 
 		return block;
 	}
 
-	// (1126:4) {:else}
+	// (1137:4) {:else}
 	function create_else_block$1(ctx) {
 		let p;
 
@@ -70439,7 +70439,7 @@ void main() {
 				p = element("p");
 				p.textContent = "Wreck triangulation not possible";
 				attr_dev(p, "class", "svelte-ur9yx9");
-				add_location(p, file$3, 1126, 6, 33830);
+				add_location(p, file$3, 1137, 6, 34024);
 			},
 			m: function mount(target, anchor) {
 				insert_dev(target, p, anchor);
@@ -70456,14 +70456,14 @@ void main() {
 			block,
 			id: create_else_block$1.name,
 			type: "else",
-			source: "(1126:4) {:else}",
+			source: "(1137:4) {:else}",
 			ctx
 		});
 
 		return block;
 	}
 
-	// (1120:88) 
+	// (1131:88) 
 	function create_if_block_3(ctx) {
 		let p;
 		let t0;
@@ -70483,7 +70483,7 @@ void main() {
 				t3 = text(t3_value);
 				t4 = text(" km)");
 				attr_dev(p, "class", "svelte-ur9yx9");
-				add_location(p, file$3, 1120, 6, 33637);
+				add_location(p, file$3, 1131, 6, 33831);
 			},
 			m: function mount(target, anchor) {
 				insert_dev(target, p, anchor);
@@ -70508,14 +70508,14 @@ void main() {
 			block,
 			id: create_if_block_3.name,
 			type: "if",
-			source: "(1120:88) ",
+			source: "(1131:88) ",
 			ctx
 		});
 
 		return block;
 	}
 
-	// (1099:82) 
+	// (1110:82) 
 	function create_if_block_2(ctx) {
 		let p0;
 		let t0;
@@ -70583,13 +70583,13 @@ void main() {
 				t21 = text(t21_value);
 				t22 = text(" km)");
 				attr_dev(p0, "class", "svelte-ur9yx9");
-				add_location(p0, file$3, 1099, 6, 32911);
+				add_location(p0, file$3, 1110, 6, 33105);
 				attr_dev(p1, "class", "svelte-ur9yx9");
-				add_location(p1, file$3, 1104, 6, 33070);
+				add_location(p1, file$3, 1115, 6, 33264);
 				attr_dev(p2, "class", "svelte-ur9yx9");
-				add_location(p2, file$3, 1109, 6, 33229);
+				add_location(p2, file$3, 1120, 6, 33423);
 				attr_dev(p3, "class", "svelte-ur9yx9");
-				add_location(p3, file$3, 1114, 6, 33388);
+				add_location(p3, file$3, 1125, 6, 33582);
 			},
 			m: function mount(target, anchor) {
 				insert_dev(target, p0, anchor);
@@ -70647,14 +70647,14 @@ void main() {
 			block,
 			id: create_if_block_2.name,
 			type: "if",
-			source: "(1099:82) ",
+			source: "(1110:82) ",
 			ctx
 		});
 
 		return block;
 	}
 
-	// (1093:88) 
+	// (1104:88) 
 	function create_if_block_1$1(ctx) {
 		let p;
 		let t0;
@@ -70669,7 +70669,7 @@ void main() {
 				t1 = text(t1_value);
 				t2 = text(" km)");
 				attr_dev(p, "class", "svelte-ur9yx9");
-				add_location(p, file$3, 1093, 6, 32665);
+				add_location(p, file$3, 1104, 6, 32859);
 			},
 			m: function mount(target, anchor) {
 				insert_dev(target, p, anchor);
@@ -70691,14 +70691,14 @@ void main() {
 			block,
 			id: create_if_block_1$1.name,
 			type: "if",
-			source: "(1093:88) ",
+			source: "(1104:88) ",
 			ctx
 		});
 
 		return block;
 	}
 
-	// (1091:4) {#if kill.pinpoints?.atCelestial}
+	// (1102:4) {#if kill.pinpoints?.atCelestial}
 	function create_if_block$3(ctx) {
 		let p;
 
@@ -70707,7 +70707,7 @@ void main() {
 				p = element("p");
 				p.textContent = "Triangulation possible - At celestial";
 				attr_dev(p, "class", "svelte-ur9yx9");
-				add_location(p, file$3, 1091, 6, 32523);
+				add_location(p, file$3, 1102, 6, 32717);
 			},
 			m: function mount(target, anchor) {
 				insert_dev(target, p, anchor);
@@ -70724,7 +70724,7 @@ void main() {
 			block,
 			id: create_if_block$3.name,
 			type: "if",
-			source: "(1091:4) {#if kill.pinpoints?.atCelestial}",
+			source: "(1102:4) {#if kill.pinpoints?.atCelestial}",
 			ctx
 		});
 
@@ -70799,21 +70799,21 @@ void main() {
 				t11 = space();
 				if_block2.c();
 				attr_dev(button0, "class", "focus-sun svelte-ur9yx9");
-				add_location(button0, file$3, 1062, 4, 31616);
+				add_location(button0, file$3, 1073, 4, 31810);
 				attr_dev(button1, "class", "focus-kill svelte-ur9yx9");
-				add_location(button1, file$3, 1063, 4, 31688);
+				add_location(button1, file$3, 1074, 4, 31882);
 				attr_dev(div0, "class", "controls svelte-ur9yx9");
-				add_location(div0, file$3, 1061, 2, 31588);
+				add_location(div0, file$3, 1072, 2, 31782);
 				attr_dev(div1, "class", "map-container svelte-ur9yx9");
-				add_location(div1, file$3, 1076, 2, 32017);
+				add_location(div1, file$3, 1087, 2, 32211);
 				attr_dev(p0, "class", "svelte-ur9yx9");
-				add_location(p0, file$3, 1088, 4, 32394);
+				add_location(p0, file$3, 1099, 4, 32588);
 				attr_dev(p1, "class", "svelte-ur9yx9");
-				add_location(p1, file$3, 1089, 4, 32432);
+				add_location(p1, file$3, 1100, 4, 32626);
 				attr_dev(div2, "class", "info-panel svelte-ur9yx9");
-				add_location(div2, file$3, 1084, 2, 32245);
+				add_location(div2, file$3, 1095, 2, 32439);
 				attr_dev(div3, "class", "visualization-container svelte-ur9yx9");
-				add_location(div3, file$3, 1060, 0, 31547);
+				add_location(div3, file$3, 1071, 0, 31741);
 			},
 			l: function claim(nodes) {
 				throw new Error_1("options.hydrate only works if the component was compiled with the `hydratable: true` option");
@@ -71048,17 +71048,21 @@ void main() {
 		const objectsWithLabels = new Map();
 
 		const SIZES = {
-			KILL: { radius: 0.00001 }, // Much smaller radius
-			SUN: { radius: 30 },
+			KILL: { radius: 0.00001 },
+			SUN: { radius: 0.03 }, // Adjusted scale
 			PLANET: { radius: 0.003 },
 			MOON: { radius: 0.00009 },
 			ASTEROID: {
-				radius: 0.05,
+				radius: 0.00005,
 				particleCount: 5,
-				spread: 0.1
+				spread: 0.0001
 			},
-			STARGATE: { radius: 6, length: 3, sphereRadius: 5 },
-			STATION: { size: 20 }
+			STARGATE: {
+				radius: 0.006,
+				length: 0.003,
+				sphereRadius: 0.005
+			},
+			STATION: { size: 0.02 }
 		};
 
 		function createPinpointLines(pinpointData) {
@@ -71066,37 +71070,40 @@ void main() {
 			console.log("Creating pinpoint lines with data:", pinpointData);
 
 			const points = pinpointData.points.map(point => {
-				// Convert string positions to numbers
 				const x = parseFloat(point.position.x) * SCALE_FACTOR;
-
 				const y = parseFloat(point.position.y) * SCALE_FACTOR;
 				const z = parseFloat(point.position.z) * SCALE_FACTOR;
-				console.log(`Celestial point ${point.name}:`, { x, y, z });
 				return new Vector3(x, y, z);
 			});
 
-			const lineGeometry = new BufferGeometry();
-			const linePositions = [];
+			// Create a line geometry for each edge separately
+			const lines = new Group();
 
-			// Connect all points to each other
+			// Function to create a single line between two points
+			function createLine(point1, point2) {
+				const geometry = new BufferGeometry();
+				const positions = new Float32Array([point1.x, point1.y, point1.z, point2.x, point2.y, point2.z]);
+				geometry.setAttribute("position", new BufferAttribute(positions, 3));
+
+				const material = new LineBasicMaterial({
+						color: 0x00ff00,
+						transparent: true,
+						opacity: 0.5,
+						linewidth: 2,
+						depthWrite: false, // This helps prevent z-fighting
+						
+					});
+
+				return new Line(geometry, material);
+			}
+
+			// Create lines between all points
 			for (let i = 0; i < points.length; i++) {
 				for (let j = i + 1; j < points.length; j++) {
-					linePositions.push(points[i].x, points[i].y, points[i].z);
-					linePositions.push(points[j].x, points[j].y, points[j].z);
+					lines.add(createLine(points[i], points[j]));
 				}
 			}
 
-			lineGeometry.setAttribute("position", new Float32BufferAttribute(linePositions, 3));
-
-			const lineMaterial = new LineBasicMaterial({
-					color: 0x00ff00,
-					transparent: true,
-					opacity: 0.5,
-					linewidth: 2
-				});
-
-			const lines = new LineSegments(lineGeometry, lineMaterial);
-			console.log("Created lines at positions:", linePositions);
 			return lines;
 		}
 
@@ -71341,7 +71348,7 @@ void main() {
 			let viewDistance;
 
 			if (objectData.type === "killmail") {
-				viewDistance = 0.00001; // Very small fixed distance for killmail
+				viewDistance = 0.00002; // Adjusted for better stability
 			} else {
 				// Default view distances for other objects
 				const baseSize = objectData.type === "sun"
@@ -71679,7 +71686,13 @@ void main() {
 			scene = new Scene();
 			scene.background = new Color(0x000000);
 			camera = new PerspectiveCamera(75, container.clientWidth / container.clientHeight, 0.000001, 1000000000); // Much smaller near plane
-			renderer = new WebGLRenderer({ antialias: true });
+
+			renderer = new WebGLRenderer({
+					antialias: true,
+					logarithmicDepthBuffer: true, // Add this line
+					
+				});
+
 			renderer.setSize(container.clientWidth, container.clientHeight);
 			container.appendChild(renderer.domElement);
 

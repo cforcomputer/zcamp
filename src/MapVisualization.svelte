@@ -42,21 +42,21 @@
   const KM_PER_AU = 149597870.7;
 
   const SIZES = {
-    KILL: { radius: 0.00001 }, // Much smaller radius
-    SUN: { radius: 30 },
+    KILL: { radius: 0.00001 },
+    SUN: { radius: 0.03 }, // Adjusted scale
     PLANET: { radius: 0.003 },
     MOON: { radius: 0.00009 },
     ASTEROID: {
-      radius: 0.05,
+      radius: 0.00005,
       particleCount: 5,
-      spread: 0.1,
+      spread: 0.0001,
     },
     STARGATE: {
-      radius: 6,
-      length: 3,
-      sphereRadius: 5,
+      radius: 0.006,
+      length: 0.003,
+      sphereRadius: 0.005,
     },
-    STATION: { size: 20 },
+    STATION: { size: 0.02 },
   };
 
   $: if (kill) {
@@ -69,40 +69,48 @@
     console.log("Creating pinpoint lines with data:", pinpointData);
 
     const points = pinpointData.points.map((point) => {
-      // Convert string positions to numbers
       const x = parseFloat(point.position.x) * SCALE_FACTOR;
       const y = parseFloat(point.position.y) * SCALE_FACTOR;
       const z = parseFloat(point.position.z) * SCALE_FACTOR;
-
-      console.log(`Celestial point ${point.name}:`, { x, y, z });
       return new THREE.Vector3(x, y, z);
     });
 
-    const lineGeometry = new THREE.BufferGeometry();
-    const linePositions = [];
+    // Create a line geometry for each edge separately
+    const lines = new THREE.Group();
 
-    // Connect all points to each other
-    for (let i = 0; i < points.length; i++) {
-      for (let j = i + 1; j < points.length; j++) {
-        linePositions.push(points[i].x, points[i].y, points[i].z);
-        linePositions.push(points[j].x, points[j].y, points[j].z);
-      }
+    // Function to create a single line between two points
+    function createLine(point1, point2) {
+      const geometry = new THREE.BufferGeometry();
+      const positions = new Float32Array([
+        point1.x,
+        point1.y,
+        point1.z,
+        point2.x,
+        point2.y,
+        point2.z,
+      ]);
+      geometry.setAttribute(
+        "position",
+        new THREE.BufferAttribute(positions, 3)
+      );
+
+      const material = new THREE.LineBasicMaterial({
+        color: 0x00ff00,
+        transparent: true,
+        opacity: 0.5,
+        linewidth: 2,
+        depthWrite: false, // This helps prevent z-fighting
+      });
+
+      return new THREE.Line(geometry, material);
     }
 
-    lineGeometry.setAttribute(
-      "position",
-      new THREE.Float32BufferAttribute(linePositions, 3)
-    );
-
-    const lineMaterial = new THREE.LineBasicMaterial({
-      color: 0x00ff00,
-      transparent: true,
-      opacity: 0.5,
-      linewidth: 2,
-    });
-
-    const lines = new THREE.LineSegments(lineGeometry, lineMaterial);
-    console.log("Created lines at positions:", linePositions);
+    // Create lines between all points
+    for (let i = 0; i < points.length; i++) {
+      for (let j = i + 1; j < points.length; j++) {
+        lines.add(createLine(points[i], points[j]));
+      }
+    }
 
     return lines;
   }
@@ -413,7 +421,7 @@
     let viewDistance;
 
     if (objectData.type === "killmail") {
-      viewDistance = 0.00001; // Very small fixed distance for killmail
+      viewDistance = 0.00002; // Adjusted for better stability
     } else {
       // Default view distances for other objects
       const baseSize =
@@ -882,7 +890,10 @@
       1000000000
     );
 
-    renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer = new THREE.WebGLRenderer({
+      antialias: true,
+      logarithmicDepthBuffer: true, // Add this line
+    });
     renderer.setSize(container.clientWidth, container.clientHeight);
     container.appendChild(renderer.domElement);
 
