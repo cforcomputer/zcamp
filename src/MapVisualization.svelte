@@ -42,7 +42,7 @@
   const KM_PER_AU = 149597870.7;
 
   const SIZES = {
-    KILL: { radius: 10 },
+    KILL: { radius: 0.00001 }, // Much smaller radius
     SUN: { radius: 30 },
     PLANET: { radius: 0.003 },
     MOON: { radius: 0.00009 },
@@ -409,32 +409,40 @@
     const targetPosition = object.position.clone();
     const objectData = objectsWithLabels.get(object);
 
-    // Get the size based on object type
-    let baseSize;
-    if (objectData.type === "sun") baseSize = SIZES.SUN.radius;
-    else if (objectData.type === "planet") baseSize = SIZES.PLANET.radius;
-    else if (objectData.type === "moon") baseSize = SIZES.MOON.radius;
-    else if (objectData.type === "station") baseSize = SIZES.STATION.size;
-    else if (objectData.type === "stargate") baseSize = SIZES.STARGATE.radius;
-    else if (objectData.type === "killmail") baseSize = SIZES.KILL.radius;
-    else baseSize = SIZES.PLANET.radius; // Default case
+    // Get the size based on object type with special handling for killmail
+    let viewDistance;
 
-    // Calculate view distance based on object size
-    const viewFactor = 5;
-    const viewDistance = Math.max(baseSize * viewFactor, 0.1);
+    if (objectData.type === "killmail") {
+      viewDistance = 0.00001; // Very small fixed distance for killmail
+    } else {
+      // Default view distances for other objects
+      const baseSize =
+        objectData.type === "sun"
+          ? SIZES.SUN.radius
+          : objectData.type === "planet"
+            ? SIZES.PLANET.radius
+            : objectData.type === "moon"
+              ? SIZES.MOON.radius
+              : objectData.type === "station"
+                ? SIZES.STATION.size
+                : objectData.type === "stargate"
+                  ? SIZES.STARGATE.radius
+                  : SIZES.PLANET.radius;
+      viewDistance = baseSize * 5;
+    }
 
+    // Create offset vector for camera position
     const offset = new THREE.Vector3(viewDistance, viewDistance, viewDistance);
     const targetCameraPosition = targetPosition.clone().add(offset);
 
     const startPosition = camera.position.clone();
-    const duration = 1000; // 1 second
+    const duration = 1000;
     const startTime = Date.now();
 
     function animate() {
       const elapsed = Date.now() - startTime;
       const progress = Math.min(elapsed / duration, 1);
 
-      // Smooth easing
       const easeProgress =
         progress < 0.5
           ? 2 * progress * progress
@@ -486,25 +494,9 @@
     infoPanel.innerHTML = `
     <p>System name: ${systemName || "Unknown"}</p>
     <p>Closest Celestial: ${closestCelestial || "Unknown"}</p>
-    <p><a href="#" class="kill-location" style="color: white; text-decoration: none;">Kill Location</a> 
-      <span style="color: #666;">(${killPos.x}, ${killPos.y}, ${killPos.z})</span></p>
     ${pinpointHtml}
     ${objectData ? `<p>Selected: ${objectData.name} (${objectData.type})</p>` : ""}
   `;
-
-    // Re-add click handler for kill location
-    const killLocationLink = infoPanel.querySelector(".kill-location");
-    if (killLocationLink) {
-      killLocationLink.onclick = (e) => {
-        e.preventDefault();
-        const killObject = Array.from(objectsWithLabels.entries()).find(
-          ([_, data]) => data.type === "killmail"
-        );
-        if (killObject) {
-          focusOnObject(killObject[0]);
-        }
-      };
-    }
   }
 
   function getRomanNumeralGroup(name) {
@@ -886,7 +878,7 @@
     camera = new THREE.PerspectiveCamera(
       75,
       container.clientWidth / container.clientHeight,
-      0.001, // Much smaller near plane
+      0.000001, // Much smaller near plane
       1000000000
     );
 
@@ -1069,6 +1061,17 @@
 <div class="visualization-container">
   <div class="controls">
     <button class="focus-sun" on:click={focusOnSun}>Focus Sun</button>
+    <button
+      class="focus-kill"
+      on:click={() => {
+        const killObject = Array.from(objectsWithLabels.entries()).find(
+          ([_, data]) => data.type === "killmail"
+        );
+        if (killObject) {
+          focusOnObject(killObject[0]);
+        }
+      }}>Kill Location</button
+    >
   </div>
 
   <div bind:this={container} class="map-container">
@@ -1085,18 +1088,6 @@
     {/if}
     <p>System name: {systemName}</p>
     <p>Closest Celestial: {closestCelestial}</p>
-    <p>
-      <!-- svelte-ignore a11y-invalid-attribute -->
-      <a
-        href="#"
-        class="kill-location"
-        style="color: white; text-decoration: none;">Kill Location</a
-      >
-      <span style="color: #666;"
-        >({kill.killmail.victim.position.x}, {kill.killmail.victim.position.y}, {kill
-          .killmail.victim.position.z})</span
-      >
-    </p>
     {#if kill.pinpoints?.atCelestial}
       <p>Triangulation possible - At celestial</p>
     {:else if kill.pinpoints?.nearestCelestial && kill.pinpoints?.triangulationPossible}
@@ -1223,9 +1214,12 @@
     top: 20px;
     left: 20px;
     z-index: 1000;
+    display: flex;
+    gap: 10px;
   }
 
-  .focus-sun {
+  .focus-sun,
+  .focus-kill {
     background: rgba(255, 165, 0, 0.8);
     color: white;
     border: none;
@@ -1234,7 +1228,12 @@
     cursor: pointer;
   }
 
-  .focus-sun:hover {
-    background: rgba(255, 165, 0, 1);
+  .focus-kill {
+    background: rgba(255, 0, 0, 0.8);
+  }
+
+  .focus-sun:hover,
+  .focus-kill:hover {
+    opacity: 0.9;
   }
 </style>

@@ -70322,7 +70322,7 @@ void main() {
 	const { Error: Error_1, Object: Object_1, console: console_1$2 } = globals;
 	const file$3 = "src\\MapVisualization.svelte";
 
-	// (1077:20) 
+	// (1080:20) 
 	function create_if_block_6(ctx) {
 		let div;
 		let t;
@@ -70331,8 +70331,8 @@ void main() {
 			c: function create() {
 				div = element("div");
 				t = text(/*error*/ ctx[2]);
-				attr_dev(div, "class", "status-message error svelte-1fcbdfq");
-				add_location(div, file$3, 1077, 6, 32379);
+				attr_dev(div, "class", "status-message error svelte-ur9yx9");
+				add_location(div, file$3, 1080, 6, 32171);
 			},
 			m: function mount(target, anchor) {
 				insert_dev(target, div, anchor);
@@ -70352,14 +70352,14 @@ void main() {
 			block,
 			id: create_if_block_6.name,
 			type: "if",
-			source: "(1077:20) ",
+			source: "(1080:20) ",
 			ctx
 		});
 
 		return block;
 	}
 
-	// (1075:4) {#if loading}
+	// (1078:4) {#if loading}
 	function create_if_block_5(ctx) {
 		let div;
 
@@ -70367,8 +70367,8 @@ void main() {
 			c: function create() {
 				div = element("div");
 				div.textContent = "Loading map...";
-				attr_dev(div, "class", "status-message svelte-1fcbdfq");
-				add_location(div, file$3, 1075, 6, 32301);
+				attr_dev(div, "class", "status-message svelte-ur9yx9");
+				add_location(div, file$3, 1078, 6, 32093);
 			},
 			m: function mount(target, anchor) {
 				insert_dev(target, div, anchor);
@@ -70385,14 +70385,14 @@ void main() {
 			block,
 			id: create_if_block_5.name,
 			type: "if",
-			source: "(1075:4) {#if loading}",
+			source: "(1078:4) {#if loading}",
 			ctx
 		});
 
 		return block;
 	}
 
-	// (1083:4) {#if kill.pinpoints}
+	// (1086:4) {#if kill.pinpoints}
 	function create_if_block_4(ctx) {
 		let pre;
 		let t_value = JSON.stringify(/*kill*/ ctx[0].pinpoints, null, 2) + "";
@@ -70403,7 +70403,7 @@ void main() {
 				pre = element("pre");
 				t = text(t_value);
 				set_style(pre, "display", "none");
-				add_location(pre, file$3, 1083, 6, 32511);
+				add_location(pre, file$3, 1086, 6, 32303);
 			},
 			m: function mount(target, anchor) {
 				insert_dev(target, pre, anchor);
@@ -70423,14 +70423,14 @@ void main() {
 			block,
 			id: create_if_block_4.name,
 			type: "if",
-			source: "(1083:4) {#if kill.pinpoints}",
+			source: "(1086:4) {#if kill.pinpoints}",
 			ctx
 		});
 
 		return block;
 	}
 
-	// (1135:4) {:else}
+	// (1126:4) {:else}
 	function create_else_block$1(ctx) {
 		let p;
 
@@ -70438,8 +70438,8 @@ void main() {
 			c: function create() {
 				p = element("p");
 				p.textContent = "Wreck triangulation not possible";
-				attr_dev(p, "class", "svelte-1fcbdfq");
-				add_location(p, file$3, 1135, 6, 34426);
+				attr_dev(p, "class", "svelte-ur9yx9");
+				add_location(p, file$3, 1126, 6, 33830);
 			},
 			m: function mount(target, anchor) {
 				insert_dev(target, p, anchor);
@@ -70456,14 +70456,14 @@ void main() {
 			block,
 			id: create_else_block$1.name,
 			type: "else",
-			source: "(1135:4) {:else}",
+			source: "(1126:4) {:else}",
 			ctx
 		});
 
 		return block;
 	}
 
-	// (1129:88) 
+	// (1120:88) 
 	function create_if_block_3(ctx) {
 		let p;
 		let t0;
@@ -70482,8 +70482,8 @@ void main() {
 				t2 = text(" (");
 				t3 = text(t3_value);
 				t4 = text(" km)");
-				attr_dev(p, "class", "svelte-1fcbdfq");
-				add_location(p, file$3, 1129, 6, 34233);
+				attr_dev(p, "class", "svelte-ur9yx9");
+				add_location(p, file$3, 1120, 6, 33637);
 			},
 			m: function mount(target, anchor) {
 				insert_dev(target, p, anchor);
@@ -70508,14 +70508,14 @@ void main() {
 			block,
 			id: create_if_block_3.name,
 			type: "if",
-			source: "(1129:88) ",
+			source: "(1120:88) ",
 			ctx
 		});
 
 		return block;
 	}
 
-	// (1108:82) 
+	// (1099:82) 
 	function create_if_block_2(ctx) {
 		let p0;
 		let t0;
@@ -70582,14 +70582,14 @@ void main() {
 				t20 = text(" (");
 				t21 = text(t21_value);
 				t22 = text(" km)");
-				attr_dev(p0, "class", "svelte-1fcbdfq");
-				add_location(p0, file$3, 1108, 6, 33507);
-				attr_dev(p1, "class", "svelte-1fcbdfq");
-				add_location(p1, file$3, 1113, 6, 33666);
-				attr_dev(p2, "class", "svelte-1fcbdfq");
-				add_location(p2, file$3, 1118, 6, 33825);
-				attr_dev(p3, "class", "svelte-1fcbdfq");
-				add_location(p3, file$3, 1123, 6, 33984);
+				attr_dev(p0, "class", "svelte-ur9yx9");
+				add_location(p0, file$3, 1099, 6, 32911);
+				attr_dev(p1, "class", "svelte-ur9yx9");
+				add_location(p1, file$3, 1104, 6, 33070);
+				attr_dev(p2, "class", "svelte-ur9yx9");
+				add_location(p2, file$3, 1109, 6, 33229);
+				attr_dev(p3, "class", "svelte-ur9yx9");
+				add_location(p3, file$3, 1114, 6, 33388);
 			},
 			m: function mount(target, anchor) {
 				insert_dev(target, p0, anchor);
@@ -70647,14 +70647,14 @@ void main() {
 			block,
 			id: create_if_block_2.name,
 			type: "if",
-			source: "(1108:82) ",
+			source: "(1099:82) ",
 			ctx
 		});
 
 		return block;
 	}
 
-	// (1102:88) 
+	// (1093:88) 
 	function create_if_block_1$1(ctx) {
 		let p;
 		let t0;
@@ -70668,8 +70668,8 @@ void main() {
 				t0 = text("Triangulation possible - Near celestial (");
 				t1 = text(t1_value);
 				t2 = text(" km)");
-				attr_dev(p, "class", "svelte-1fcbdfq");
-				add_location(p, file$3, 1102, 6, 33261);
+				attr_dev(p, "class", "svelte-ur9yx9");
+				add_location(p, file$3, 1093, 6, 32665);
 			},
 			m: function mount(target, anchor) {
 				insert_dev(target, p, anchor);
@@ -70691,14 +70691,14 @@ void main() {
 			block,
 			id: create_if_block_1$1.name,
 			type: "if",
-			source: "(1102:88) ",
+			source: "(1093:88) ",
 			ctx
 		});
 
 		return block;
 	}
 
-	// (1100:4) {#if kill.pinpoints?.atCelestial}
+	// (1091:4) {#if kill.pinpoints?.atCelestial}
 	function create_if_block$3(ctx) {
 		let p;
 
@@ -70706,8 +70706,8 @@ void main() {
 			c: function create() {
 				p = element("p");
 				p.textContent = "Triangulation possible - At celestial";
-				attr_dev(p, "class", "svelte-1fcbdfq");
-				add_location(p, file$3, 1100, 6, 33119);
+				attr_dev(p, "class", "svelte-ur9yx9");
+				add_location(p, file$3, 1091, 6, 32523);
 			},
 			m: function mount(target, anchor) {
 				insert_dev(target, p, anchor);
@@ -70724,7 +70724,7 @@ void main() {
 			block,
 			id: create_if_block$3.name,
 			type: "if",
-			source: "(1100:4) {#if kill.pinpoints?.atCelestial}",
+			source: "(1091:4) {#if kill.pinpoints?.atCelestial}",
 			ctx
 		});
 
@@ -70734,35 +70734,22 @@ void main() {
 	function create_fragment$3(ctx) {
 		let div3;
 		let div0;
-		let button;
+		let button0;
 		let t1;
-		let div1;
-		let t2;
-		let div2;
+		let button1;
 		let t3;
-		let p0;
+		let div1;
 		let t4;
+		let div2;
 		let t5;
+		let p0;
 		let t6;
-		let p1;
 		let t7;
 		let t8;
+		let p1;
 		let t9;
-		let p2;
-		let a;
+		let t10;
 		let t11;
-		let span;
-		let t12;
-		let t13_value = /*kill*/ ctx[0].killmail.victim.position.x + "";
-		let t13;
-		let t14;
-		let t15_value = /*kill*/ ctx[0].killmail.victim.position.y + "";
-		let t15;
-		let t16;
-		let t17_value = /*kill*/ ctx[0].killmail.victim.position.z + "";
-		let t17;
-		let t18;
-		let t19;
 		let mounted;
 		let dispose;
 
@@ -70790,60 +70777,43 @@ void main() {
 			c: function create() {
 				div3 = element("div");
 				div0 = element("div");
-				button = element("button");
-				button.textContent = "Focus Sun";
+				button0 = element("button");
+				button0.textContent = "Focus Sun";
 				t1 = space();
+				button1 = element("button");
+				button1.textContent = "Kill Location";
+				t3 = space();
 				div1 = element("div");
 				if (if_block0) if_block0.c();
-				t2 = space();
+				t4 = space();
 				div2 = element("div");
 				if (if_block1) if_block1.c();
-				t3 = space();
+				t5 = space();
 				p0 = element("p");
-				t4 = text("System name: ");
-				t5 = text(/*systemName*/ ctx[4]);
-				t6 = space();
+				t6 = text("System name: ");
+				t7 = text(/*systemName*/ ctx[4]);
+				t8 = space();
 				p1 = element("p");
-				t7 = text("Closest Celestial: ");
-				t8 = text(/*closestCelestial*/ ctx[5]);
-				t9 = space();
-				p2 = element("p");
-				a = element("a");
-				a.textContent = "Kill Location";
+				t9 = text("Closest Celestial: ");
+				t10 = text(/*closestCelestial*/ ctx[5]);
 				t11 = space();
-				span = element("span");
-				t12 = text("(");
-				t13 = text(t13_value);
-				t14 = text(", ");
-				t15 = text(t15_value);
-				t16 = text(", ");
-				t17 = text(t17_value);
-				t18 = text(")");
-				t19 = space();
 				if_block2.c();
-				attr_dev(button, "class", "focus-sun svelte-1fcbdfq");
-				add_location(button, file$3, 1070, 4, 32143);
-				attr_dev(div0, "class", "controls svelte-1fcbdfq");
-				add_location(div0, file$3, 1069, 2, 32115);
-				attr_dev(div1, "class", "map-container svelte-1fcbdfq");
-				add_location(div1, file$3, 1073, 2, 32225);
-				attr_dev(p0, "class", "svelte-1fcbdfq");
-				add_location(p0, file$3, 1085, 4, 32602);
-				attr_dev(p1, "class", "svelte-1fcbdfq");
-				add_location(p1, file$3, 1086, 4, 32640);
-				attr_dev(a, "href", "#");
-				attr_dev(a, "class", "kill-location");
-				set_style(a, "color", "white");
-				set_style(a, "text-decoration", "none");
-				add_location(a, file$3, 1089, 6, 32754);
-				set_style(span, "color", "#666");
-				add_location(span, file$3, 1094, 6, 32893);
-				attr_dev(p2, "class", "svelte-1fcbdfq");
-				add_location(p2, file$3, 1087, 4, 32690);
-				attr_dev(div2, "class", "info-panel svelte-1fcbdfq");
-				add_location(div2, file$3, 1081, 2, 32453);
-				attr_dev(div3, "class", "visualization-container svelte-1fcbdfq");
-				add_location(div3, file$3, 1068, 0, 32074);
+				attr_dev(button0, "class", "focus-sun svelte-ur9yx9");
+				add_location(button0, file$3, 1062, 4, 31616);
+				attr_dev(button1, "class", "focus-kill svelte-ur9yx9");
+				add_location(button1, file$3, 1063, 4, 31688);
+				attr_dev(div0, "class", "controls svelte-ur9yx9");
+				add_location(div0, file$3, 1061, 2, 31588);
+				attr_dev(div1, "class", "map-container svelte-ur9yx9");
+				add_location(div1, file$3, 1076, 2, 32017);
+				attr_dev(p0, "class", "svelte-ur9yx9");
+				add_location(p0, file$3, 1088, 4, 32394);
+				attr_dev(p1, "class", "svelte-ur9yx9");
+				add_location(p1, file$3, 1089, 4, 32432);
+				attr_dev(div2, "class", "info-panel svelte-ur9yx9");
+				add_location(div2, file$3, 1084, 2, 32245);
+				attr_dev(div3, "class", "visualization-container svelte-ur9yx9");
+				add_location(div3, file$3, 1060, 0, 31547);
 			},
 			l: function claim(nodes) {
 				throw new Error_1("options.hydrate only works if the component was compiled with the `hydratable: true` option");
@@ -70851,39 +70821,33 @@ void main() {
 			m: function mount(target, anchor) {
 				insert_dev(target, div3, anchor);
 				append_dev(div3, div0);
-				append_dev(div0, button);
-				append_dev(div3, t1);
+				append_dev(div0, button0);
+				append_dev(div0, t1);
+				append_dev(div0, button1);
+				append_dev(div3, t3);
 				append_dev(div3, div1);
 				if (if_block0) if_block0.m(div1, null);
-				/*div1_binding*/ ctx[8](div1);
-				append_dev(div3, t2);
+				/*div1_binding*/ ctx[11](div1);
+				append_dev(div3, t4);
 				append_dev(div3, div2);
 				if (if_block1) if_block1.m(div2, null);
-				append_dev(div2, t3);
+				append_dev(div2, t5);
 				append_dev(div2, p0);
-				append_dev(p0, t4);
-				append_dev(p0, t5);
-				append_dev(div2, t6);
+				append_dev(p0, t6);
+				append_dev(p0, t7);
+				append_dev(div2, t8);
 				append_dev(div2, p1);
-				append_dev(p1, t7);
-				append_dev(p1, t8);
-				append_dev(div2, t9);
-				append_dev(div2, p2);
-				append_dev(p2, a);
-				append_dev(p2, t11);
-				append_dev(p2, span);
-				append_dev(span, t12);
-				append_dev(span, t13);
-				append_dev(span, t14);
-				append_dev(span, t15);
-				append_dev(span, t16);
-				append_dev(span, t17);
-				append_dev(span, t18);
-				append_dev(div2, t19);
+				append_dev(p1, t9);
+				append_dev(p1, t10);
+				append_dev(div2, t11);
 				if_block2.m(div2, null);
 
 				if (!mounted) {
-					dispose = listen_dev(button, "click", /*focusOnSun*/ ctx[6], false, false, false, false);
+					dispose = [
+						listen_dev(button0, "click", /*focusOnSun*/ ctx[8], false, false, false, false),
+						listen_dev(button1, "click", /*click_handler*/ ctx[10], false, false, false, false)
+					];
+
 					mounted = true;
 				}
 			},
@@ -70906,18 +70870,15 @@ void main() {
 					} else {
 						if_block1 = create_if_block_4(ctx);
 						if_block1.c();
-						if_block1.m(div2, t3);
+						if_block1.m(div2, t5);
 					}
 				} else if (if_block1) {
 					if_block1.d(1);
 					if_block1 = null;
 				}
 
-				if (dirty[0] & /*systemName*/ 16) set_data_dev(t5, /*systemName*/ ctx[4]);
-				if (dirty[0] & /*closestCelestial*/ 32) set_data_dev(t8, /*closestCelestial*/ ctx[5]);
-				if (dirty[0] & /*kill*/ 1 && t13_value !== (t13_value = /*kill*/ ctx[0].killmail.victim.position.x + "")) set_data_dev(t13, t13_value);
-				if (dirty[0] & /*kill*/ 1 && t15_value !== (t15_value = /*kill*/ ctx[0].killmail.victim.position.y + "")) set_data_dev(t15, t15_value);
-				if (dirty[0] & /*kill*/ 1 && t17_value !== (t17_value = /*kill*/ ctx[0].killmail.victim.position.z + "")) set_data_dev(t17, t17_value);
+				if (dirty[0] & /*systemName*/ 16) set_data_dev(t7, /*systemName*/ ctx[4]);
+				if (dirty[0] & /*closestCelestial*/ 32) set_data_dev(t10, /*closestCelestial*/ ctx[5]);
 
 				if (current_block_type_1 === (current_block_type_1 = select_block_type_1(ctx)) && if_block2) {
 					if_block2.p(ctx, dirty);
@@ -70942,11 +70903,11 @@ void main() {
 					if_block0.d();
 				}
 
-				/*div1_binding*/ ctx[8](null);
+				/*div1_binding*/ ctx[11](null);
 				if (if_block1) if_block1.d();
 				if_block2.d();
 				mounted = false;
-				dispose();
+				run_all(dispose);
 			}
 		};
 
@@ -71087,7 +71048,7 @@ void main() {
 		const objectsWithLabels = new Map();
 
 		const SIZES = {
-			KILL: { radius: 10 },
+			KILL: { radius: 0.00001 }, // Much smaller radius
 			SUN: { radius: 30 },
 			PLANET: { radius: 0.003 },
 			MOON: { radius: 0.00009 },
@@ -71376,26 +71337,40 @@ void main() {
 			const targetPosition = object.position.clone();
 			const objectData = objectsWithLabels.get(object);
 
-			// Get the size based on object type
-			let baseSize;
+			// Get the size based on object type with special handling for killmail
+			let viewDistance;
 
-			if (objectData.type === "sun") baseSize = SIZES.SUN.radius; else if (objectData.type === "planet") baseSize = SIZES.PLANET.radius; else if (objectData.type === "moon") baseSize = SIZES.MOON.radius; else if (objectData.type === "station") baseSize = SIZES.STATION.size; else if (objectData.type === "stargate") baseSize = SIZES.STARGATE.radius; else if (objectData.type === "killmail") baseSize = SIZES.KILL.radius; else baseSize = SIZES.PLANET.radius; // Default case
+			if (objectData.type === "killmail") {
+				viewDistance = 0.00001; // Very small fixed distance for killmail
+			} else {
+				// Default view distances for other objects
+				const baseSize = objectData.type === "sun"
+				? SIZES.SUN.radius
+				: objectData.type === "planet"
+					? SIZES.PLANET.radius
+					: objectData.type === "moon"
+						? SIZES.MOON.radius
+						: objectData.type === "station"
+							? SIZES.STATION.size
+							: objectData.type === "stargate"
+								? SIZES.STARGATE.radius
+								: SIZES.PLANET.radius;
 
-			// Calculate view distance based on object size
-			const viewFactor = 5;
+				viewDistance = baseSize * 5;
+			}
 
-			const viewDistance = Math.max(baseSize * viewFactor, 0.1);
+			// Create offset vector for camera position
 			const offset = new Vector3(viewDistance, viewDistance, viewDistance);
+
 			const targetCameraPosition = targetPosition.clone().add(offset);
 			const startPosition = camera.position.clone();
-			const duration = 1000; // 1 second
+			const duration = 1000;
 			const startTime = Date.now();
 
 			function animate() {
 				const elapsed = Date.now() - startTime;
 				const progress = Math.min(elapsed / duration, 1);
 
-				// Smooth easing
 				const easeProgress = progress < 0.5
 				? 2 * progress * progress
 				: -1 + (4 - 2 * progress) * progress;
@@ -71414,7 +71389,7 @@ void main() {
 		function updateInfoPanel(objectData = null) {
 			const infoPanel = document.querySelector(".info-panel");
 			if (!infoPanel) return;
-			const killPos = kill.killmail.victim.position;
+			kill.killmail.victim.position;
 			let pinpointHtml = "";
 
 			if (kill.pinpoints?.atCelestial) {
@@ -71430,27 +71405,11 @@ void main() {
 			infoPanel.innerHTML = `
     <p>System name: ${systemName || "Unknown"}</p>
     <p>Closest Celestial: ${closestCelestial || "Unknown"}</p>
-    <p><a href="#" class="kill-location" style="color: white; text-decoration: none;">Kill Location</a> 
-      <span style="color: #666;">(${killPos.x}, ${killPos.y}, ${killPos.z})</span></p>
     ${pinpointHtml}
     ${objectData
 		? `<p>Selected: ${objectData.name} (${objectData.type})</p>`
 		: ""}
   `;
-
-			// Re-add click handler for kill location
-			const killLocationLink = infoPanel.querySelector(".kill-location");
-
-			if (killLocationLink) {
-				killLocationLink.onclick = e => {
-					e.preventDefault();
-					const killObject = Array.from(objectsWithLabels.entries()).find(([_, data]) => data.type === "killmail");
-
-					if (killObject) {
-						focusOnObject(killObject[0]);
-					}
-				};
-			}
 		}
 
 		function focusOnSun() {
@@ -71719,7 +71678,7 @@ void main() {
 
 			scene = new Scene();
 			scene.background = new Color(0x000000);
-			camera = new PerspectiveCamera(75, container.clientWidth / container.clientHeight, 0.001, 1000000000); // Much smaller near plane
+			camera = new PerspectiveCamera(75, container.clientWidth / container.clientHeight, 0.000001, 1000000000); // Much smaller near plane
 			renderer = new WebGLRenderer({ antialias: true });
 			renderer.setSize(container.clientWidth, container.clientHeight);
 			container.appendChild(renderer.domElement);
@@ -71898,6 +71857,14 @@ void main() {
 			if (!~writable_props.indexOf(key) && key.slice(0, 2) !== '$$' && key !== 'slot') console_1$2.warn(`<MapVisualization> was created with unknown prop '${key}'`);
 		});
 
+		const click_handler = () => {
+			const killObject = Array.from(objectsWithLabels.entries()).find(([_, data]) => data.type === "killmail");
+
+			if (killObject) {
+				focusOnObject(killObject[0]);
+			}
+		};
+
 		function div1_binding($$value) {
 			binding_callbacks[$$value ? 'unshift' : 'push'](() => {
 				container = $$value;
@@ -71906,7 +71873,7 @@ void main() {
 		}
 
 		$$self.$$set = $$props => {
-			if ('killmailId' in $$props) $$invalidate(7, killmailId = $$props.killmailId);
+			if ('killmailId' in $$props) $$invalidate(9, killmailId = $$props.killmailId);
 			if ('kill' in $$props) $$invalidate(0, kill = $$props.kill);
 		};
 
@@ -71969,7 +71936,7 @@ void main() {
 		});
 
 		$$self.$inject_state = $$props => {
-			if ('killmailId' in $$props) $$invalidate(7, killmailId = $$props.killmailId);
+			if ('killmailId' in $$props) $$invalidate(9, killmailId = $$props.killmailId);
 			if ('kill' in $$props) $$invalidate(0, kill = $$props.kill);
 			if ('container' in $$props) $$invalidate(1, container = $$props.container);
 			if ('scene' in $$props) scene = $$props.scene;
@@ -72020,8 +71987,11 @@ void main() {
 			loading,
 			systemName,
 			closestCelestial,
+			objectsWithLabels,
+			focusOnObject,
 			focusOnSun,
 			killmailId,
+			click_handler,
 			div1_binding
 		];
 	}
@@ -72029,7 +71999,7 @@ void main() {
 	class MapVisualization extends SvelteComponentDev {
 		constructor(options) {
 			super(options);
-			init(this, options, instance$3, create_fragment$3, safe_not_equal, { killmailId: 7, kill: 0 }, null, [-1, -1]);
+			init(this, options, instance$3, create_fragment$3, safe_not_equal, { killmailId: 9, kill: 0 }, null, [-1, -1]);
 
 			dispatch_dev("SvelteRegisterComponent", {
 				component: this,
