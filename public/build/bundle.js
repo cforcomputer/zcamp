@@ -5690,7 +5690,8 @@ var app = (function () {
 	const killmails = writable([]);
 	const filterLists = writable([]);
 	const profiles = writable([]);
-	const settings = writable({
+
+	const DEFAULT_SETTINGS$1 = {
 	  dropped_value_enabled: false,
 	  total_value_enabled: false,
 	  points_enabled: false,
@@ -5712,8 +5713,23 @@ var app = (function () {
 	  triangulation_filter_exclude: false,
 	  webhook_enabled: false,
 	  webhook_url: "",
-	});
-
+	  // location type/new filters
+	  location_type_filter_enabled: false,
+	  location_types: {
+	    highsec: false,
+	    lowsec: false,
+	    nullsec: false,
+	    wspace: false,
+	    abyssal: false,
+	  },
+	  combat_label_filter_enabled: false,
+	  combat_labels: {
+	    ganked: false,
+	    pvp: false,
+	    padding: false,
+	  },
+	};
+	const settings = writable(DEFAULT_SETTINGS$1);
 	const filteredKillmails = derived(
 	  [killmails, settings, filterLists],
 	  ([$killmails, $settings, $filterLists]) => {
@@ -5728,6 +5744,7 @@ var app = (function () {
 	          if (!isTriangulatable) return false;
 	        }
 	      }
+
 	      // Apply filter lists
 	      for (let list of $filterLists) {
 	        if (!list.enabled) continue;
@@ -5774,6 +5791,61 @@ var app = (function () {
 	          case "solar_system":
 	            match = ids.includes(killmail.killmail.solar_system_id?.toString());
 	            break;
+	          case "region": {
+	            const celestialData = killmail.pinpoints?.celestialData;
+	            if (!celestialData) return false;
+
+	            // Debug log to verify data
+	            console.log("Region Filter - Comparing:", {
+	              celestialRegionId: celestialData.regionid,
+	              celestialRegionName: celestialData.regionname,
+	              filterIds: ids,
+	            });
+
+	            // Ensure ids is an array
+	            const idList = Array.isArray(ids) ? ids : [ids];
+
+	            // Compare both ID and name, accounting for string/number conversion
+	            match = idList.some((id) => {
+	              const matchesId =
+	                celestialData.regionid.toString() === id.toString();
+	              const matchesName =
+	                celestialData.regionname.toLowerCase() ===
+	                id.toString().toLowerCase();
+
+	              // Debug log for each comparison
+	              console.log("Comparing:", {
+	                id,
+	                matchesId,
+	                matchesName,
+	                celestialRegionId: celestialData.regionid,
+	                celestialRegionName: celestialData.regionname,
+	              });
+
+	              return matchesId || matchesName;
+	            });
+
+	            break;
+	          }
+	          case "location_type":
+	            match = killmail.zkb.labels.some((label) =>
+	              ids.includes(label.replace("loc:", ""))
+	            );
+	            break;
+	          case "ship_category":
+	            match = killmail.zkb.labels.some(
+	              (label) =>
+	                (label.startsWith("cat:") || label === "capital") &&
+	                ids.includes(label.replace("cat:", ""))
+	            );
+	            break;
+	          case "combat_type":
+	            match = killmail.zkb.labels.some(
+	              (label) =>
+	                ids.includes(label) &&
+	                ["atShip", "ganked", "pvp", "padding"].includes(label)
+	            );
+	            break;
 	        }
 
 	        if (list.is_exclude && match) return false;
@@ -5817,13 +5889,25 @@ var app = (function () {
 	      }
 
 	      // Location Filter
-	      if (
-	        $settings.location_filter_enabled &&
-	        $settings.location_filter &&
-	        killmail.killmail.solar_system_id !==
-	          parseInt($settings.location_filter)
-	      ) {
-	        return false;
+	      // Location Type Filter
+	      if ($settings.location_type_filter_enabled && $settings.location_types) {
+	        const selectedTypes = Object.entries(
+	          $settings.location_types || {
+	            highsec: false,
+	            lowsec: false,
+	            nullsec: false,
+	            wspace: false,
+	            abyssal: false,
+	          }
+	        )
+	          .filter(([_, enabled]) => enabled)
+	          .map(([type, _]) => `loc:${type}`);
+	        if (
+	          selectedTypes.length > 0 &&
+	          !killmail.zkb.labels.some((label) => selectedTypes.includes(label))
+	        ) {
+	          return false;
+	        }
 	      }
 
 	      // Ship Type Filter
@@ -5924,6 +6008,44 @@ var app = (function () {
 	        return false;
 	      }
 
+	      // Location Type Filter
+	      if ($settings.location_type_filter_enabled) {
+	        const selectedTypes = Object.entries(settings.location_types)
+	          .filter(([_, enabled]) => enabled)
+	          .map(([type, _]) => `loc:${type}`);
+	        if (
+	          selectedTypes.length > 0 &&
+	          !killmail.zkb.labels.some((label) => selectedTypes.includes(label))
+	        ) {
+	          return false;
+	        }
+	      }
+
+	      // Ship Category Filter
+	      // When capitals only is enabled
+	      if ($settings.capitals_only && !killmail.zkb.labels.includes("capital")) {
+	        return false;
+	      }
+
+	      // Combat Type Filter
+	      if ($settings.combat_label_filter_enabled && $settings.combat_labels) {
+	        const selectedLabels = Object.entries(
+	          $settings.combat_labels || {
+	            ganked: false,
+	            pvp: false,
+	            padding: false,
+	          }
+	        )
+	          .filter(([_, enabled]) => enabled)
+	          .map(([label, _]) => label);
+	        if (
+	          selectedLabels.length > 0 &&
+	          !killmail.zkb.labels.some((label) => selectedLabels.includes(label))
+	        ) {
+	          return false;
+	        }
+	      }
+
 	      return true;
 	    });
 
@@ -5935,6 +6057,31 @@ var app = (function () {
 	    });
 	  }
 	);
+
+	function initializeSettings(serverSettings) {
+	  try {
+	    const parsedSettings =
+	      typeof serverSettings === "string"
+	        ? JSON.parse(serverSettings)
+	        : serverSettings;
+
+	    return {
+	      ...DEFAULT_SETTINGS$1,
+	      ...parsedSettings,
+	      location_types: {
+	        ...DEFAULT_SETTINGS$1.location_types,
+	        ...(parsedSettings?.location_types || {}),
+	      },
+	      combat_labels: {
+	        ...DEFAULT_SETTINGS$1.combat_labels,
+	        ...(parsedSettings?.combat_labels || {}),
+	      },
+	    };
+	  } catch (e) {
+	    console.error("Error initializing settings:", e);
+	    return DEFAULT_SETTINGS$1;
+	  }
+	}
 
 	// In src/socket.js
 
@@ -6804,8 +6951,8 @@ var app = (function () {
 	const { console: console_1$4 } = globals;
 	const file$6 = "src\\SettingsManager.svelte";
 
-	// (192:2) {#if localSettings}
-	function create_if_block_1$4(ctx) {
+	// (222:2) {#if localSettings}
+	function create_if_block_3$1(ctx) {
 		let label0;
 		let input0;
 		let t0;
@@ -6938,7 +7085,7 @@ var app = (function () {
 		let input30;
 		let mounted;
 		let dispose;
-		let if_block = /*localSettings*/ ctx[6].triangulation_filter_enabled && create_if_block_2$2(ctx);
+		let if_block = /*localSettings*/ ctx[6].triangulation_filter_enabled && create_if_block_4$1(ctx);
 
 		const block = {
 			c: function create() {
@@ -7077,148 +7224,148 @@ var app = (function () {
 				t67 = text("Solar System ID:\r\n      ");
 				input30 = element("input");
 				attr_dev(input0, "type", "checkbox");
-				add_location(input0, file$6, 193, 6, 5521);
+				add_location(input0, file$6, 223, 6, 6392);
 				attr_dev(label0, "class", "svelte-gu7nlb");
-				add_location(label0, file$6, 192, 4, 5506);
+				add_location(label0, file$6, 222, 4, 6377);
 				attr_dev(input1, "type", "number");
 				attr_dev(input1, "class", "svelte-gu7nlb");
-				add_location(input1, file$6, 206, 6, 5875);
+				add_location(input1, file$6, 236, 6, 6746);
 				attr_dev(label1, "class", "svelte-gu7nlb");
-				add_location(label1, file$6, 204, 4, 5830);
+				add_location(label1, file$6, 234, 4, 6701);
 				attr_dev(input2, "type", "checkbox");
-				add_location(input2, file$6, 215, 6, 6098);
+				add_location(input2, file$6, 245, 6, 6969);
 				attr_dev(label2, "class", "svelte-gu7nlb");
-				add_location(label2, file$6, 214, 4, 6083);
+				add_location(label2, file$6, 244, 4, 6954);
 				attr_dev(input3, "type", "checkbox");
-				add_location(input3, file$6, 228, 6, 6416);
+				add_location(input3, file$6, 258, 6, 7287);
 				attr_dev(label3, "class", "svelte-gu7nlb");
-				add_location(label3, file$6, 227, 4, 6401);
+				add_location(label3, file$6, 257, 4, 7272);
 				attr_dev(h30, "class", "svelte-gu7nlb");
-				add_location(h30, file$6, 255, 4, 7185);
+				add_location(h30, file$6, 285, 4, 8056);
 				attr_dev(input4, "type", "checkbox");
-				add_location(input4, file$6, 257, 6, 7226);
+				add_location(input4, file$6, 287, 6, 8097);
 				attr_dev(label4, "class", "svelte-gu7nlb");
-				add_location(label4, file$6, 256, 4, 7211);
+				add_location(label4, file$6, 286, 4, 8082);
 				attr_dev(input5, "type", "number");
 				attr_dev(input5, "class", "svelte-gu7nlb");
-				add_location(input5, file$6, 270, 6, 7576);
+				add_location(input5, file$6, 300, 6, 8447);
 				attr_dev(label5, "class", "svelte-gu7nlb");
-				add_location(label5, file$6, 268, 4, 7540);
+				add_location(label5, file$6, 298, 4, 8411);
 				attr_dev(input6, "type", "number");
 				attr_dev(input6, "class", "svelte-gu7nlb");
-				add_location(input6, file$6, 280, 6, 7836);
+				add_location(input6, file$6, 310, 6, 8707);
 				attr_dev(label6, "class", "svelte-gu7nlb");
-				add_location(label6, file$6, 278, 4, 7793);
+				add_location(label6, file$6, 308, 4, 8664);
 				attr_dev(input7, "type", "checkbox");
-				add_location(input7, file$6, 288, 6, 8042);
+				add_location(input7, file$6, 318, 6, 8913);
 				attr_dev(label7, "class", "svelte-gu7nlb");
-				add_location(label7, file$6, 287, 4, 8027);
+				add_location(label7, file$6, 317, 4, 8898);
 				attr_dev(input8, "type", "number");
 				attr_dev(input8, "class", "svelte-gu7nlb");
-				add_location(input8, file$6, 298, 6, 8322);
+				add_location(input8, file$6, 328, 6, 9193);
 				attr_dev(label8, "class", "svelte-gu7nlb");
-				add_location(label8, file$6, 296, 4, 8284);
+				add_location(label8, file$6, 326, 4, 9155);
 				attr_dev(input9, "type", "checkbox");
-				add_location(input9, file$6, 306, 6, 8513);
+				add_location(input9, file$6, 336, 6, 9384);
 				attr_dev(label9, "class", "svelte-gu7nlb");
-				add_location(label9, file$6, 305, 4, 8498);
+				add_location(label9, file$6, 335, 4, 9369);
 				attr_dev(input10, "type", "checkbox");
-				add_location(input10, file$6, 315, 6, 8731);
+				add_location(input10, file$6, 345, 6, 9602);
 				attr_dev(label10, "class", "svelte-gu7nlb");
-				add_location(label10, file$6, 314, 4, 8716);
+				add_location(label10, file$6, 344, 4, 9587);
 				attr_dev(input11, "type", "checkbox");
-				add_location(input11, file$6, 324, 6, 8938);
+				add_location(input11, file$6, 354, 6, 9809);
 				attr_dev(label11, "class", "svelte-gu7nlb");
-				add_location(label11, file$6, 323, 4, 8923);
+				add_location(label11, file$6, 353, 4, 9794);
 				attr_dev(input12, "type", "checkbox");
-				add_location(input12, file$6, 333, 6, 9160);
+				add_location(input12, file$6, 363, 6, 10031);
 				attr_dev(label12, "class", "svelte-gu7nlb");
-				add_location(label12, file$6, 332, 4, 9145);
+				add_location(label12, file$6, 362, 4, 10016);
 				attr_dev(input13, "type", "number");
 				attr_dev(input13, "class", "svelte-gu7nlb");
-				add_location(input13, file$6, 346, 6, 9505);
+				add_location(input13, file$6, 376, 6, 10376);
 				attr_dev(label13, "class", "svelte-gu7nlb");
-				add_location(label13, file$6, 344, 4, 9470);
+				add_location(label13, file$6, 374, 4, 10341);
 				attr_dev(input14, "type", "checkbox");
-				add_location(input14, file$6, 355, 6, 9734);
+				add_location(input14, file$6, 385, 6, 10605);
 				attr_dev(label14, "class", "svelte-gu7nlb");
-				add_location(label14, file$6, 354, 4, 9719);
+				add_location(label14, file$6, 384, 4, 10590);
 				attr_dev(input15, "type", "number");
 				attr_dev(input15, "class", "svelte-gu7nlb");
-				add_location(input15, file$6, 368, 6, 10084);
+				add_location(input15, file$6, 398, 6, 10955);
 				attr_dev(label15, "class", "svelte-gu7nlb");
-				add_location(label15, file$6, 366, 4, 10048);
+				add_location(label15, file$6, 396, 4, 10919);
 				attr_dev(input16, "type", "checkbox");
-				add_location(input16, file$6, 377, 6, 10316);
+				add_location(input16, file$6, 407, 6, 11187);
 				attr_dev(label16, "class", "svelte-gu7nlb");
-				add_location(label16, file$6, 376, 4, 10301);
+				add_location(label16, file$6, 406, 4, 11172);
 				attr_dev(input17, "type", "number");
 				attr_dev(input17, "class", "svelte-gu7nlb");
-				add_location(input17, file$6, 390, 6, 10670);
+				add_location(input17, file$6, 420, 6, 11541);
 				attr_dev(label17, "class", "svelte-gu7nlb");
-				add_location(label17, file$6, 388, 4, 10622);
+				add_location(label17, file$6, 418, 4, 11493);
 				attr_dev(input18, "type", "checkbox");
-				add_location(input18, file$6, 399, 6, 10896);
+				add_location(input18, file$6, 429, 6, 11767);
 				attr_dev(label18, "class", "svelte-gu7nlb");
-				add_location(label18, file$6, 398, 4, 10881);
+				add_location(label18, file$6, 428, 4, 11752);
 				attr_dev(h31, "class", "svelte-gu7nlb");
-				add_location(h31, file$6, 411, 4, 11196);
+				add_location(h31, file$6, 441, 4, 12067);
 				attr_dev(input19, "type", "checkbox");
-				add_location(input19, file$6, 413, 6, 11242);
+				add_location(input19, file$6, 443, 6, 12113);
 				attr_dev(label19, "class", "svelte-gu7nlb");
-				add_location(label19, file$6, 412, 4, 11227);
+				add_location(label19, file$6, 442, 4, 12098);
 				attr_dev(input20, "type", "number");
 				attr_dev(input20, "class", "svelte-gu7nlb");
-				add_location(input20, file$6, 426, 6, 11632);
+				add_location(input20, file$6, 456, 6, 12503);
 				attr_dev(label20, "class", "svelte-gu7nlb");
-				add_location(label20, file$6, 424, 4, 11588);
+				add_location(label20, file$6, 454, 4, 12459);
 				attr_dev(input21, "type", "checkbox");
-				add_location(input21, file$6, 438, 6, 11927);
+				add_location(input21, file$6, 468, 6, 12798);
 				attr_dev(label21, "class", "svelte-gu7nlb");
-				add_location(label21, file$6, 437, 4, 11912);
+				add_location(label21, file$6, 467, 4, 12783);
 				attr_dev(input22, "type", "number");
 				attr_dev(input22, "class", "svelte-gu7nlb");
-				add_location(input22, file$6, 451, 6, 12332);
+				add_location(input22, file$6, 481, 6, 13203);
 				attr_dev(label22, "class", "svelte-gu7nlb");
-				add_location(label22, file$6, 449, 4, 12285);
+				add_location(label22, file$6, 479, 4, 13156);
 				attr_dev(input23, "type", "checkbox");
-				add_location(input23, file$6, 463, 6, 12636);
+				add_location(input23, file$6, 493, 6, 13507);
 				attr_dev(label23, "class", "svelte-gu7nlb");
-				add_location(label23, file$6, 462, 4, 12621);
+				add_location(label23, file$6, 492, 4, 13492);
 				attr_dev(input24, "type", "number");
 				attr_dev(input24, "class", "svelte-gu7nlb");
-				add_location(input24, file$6, 476, 6, 13031);
+				add_location(input24, file$6, 506, 6, 13902);
 				attr_dev(label24, "class", "svelte-gu7nlb");
-				add_location(label24, file$6, 474, 4, 12986);
+				add_location(label24, file$6, 504, 4, 13857);
 				attr_dev(h32, "class", "svelte-gu7nlb");
-				add_location(h32, file$6, 487, 4, 13314);
+				add_location(h32, file$6, 517, 4, 14185);
 				attr_dev(input25, "type", "checkbox");
-				add_location(input25, file$6, 489, 6, 13358);
+				add_location(input25, file$6, 519, 6, 14229);
 				attr_dev(label25, "class", "svelte-gu7nlb");
-				add_location(label25, file$6, 488, 4, 13343);
+				add_location(label25, file$6, 518, 4, 14214);
 				attr_dev(input26, "type", "number");
 				attr_dev(input26, "class", "svelte-gu7nlb");
-				add_location(input26, file$6, 502, 6, 13738);
+				add_location(input26, file$6, 532, 6, 14609);
 				attr_dev(label26, "class", "svelte-gu7nlb");
-				add_location(label26, file$6, 500, 4, 13696);
+				add_location(label26, file$6, 530, 4, 14567);
 				attr_dev(input27, "type", "checkbox");
-				add_location(input27, file$6, 514, 6, 14027);
+				add_location(input27, file$6, 544, 6, 14898);
 				attr_dev(label27, "class", "svelte-gu7nlb");
-				add_location(label27, file$6, 513, 4, 14012);
+				add_location(label27, file$6, 543, 4, 14883);
 				attr_dev(input28, "type", "number");
 				attr_dev(input28, "class", "svelte-gu7nlb");
-				add_location(input28, file$6, 527, 6, 14422);
+				add_location(input28, file$6, 557, 6, 15293);
 				attr_dev(label28, "class", "svelte-gu7nlb");
-				add_location(label28, file$6, 525, 4, 14377);
+				add_location(label28, file$6, 555, 4, 15248);
 				attr_dev(input29, "type", "checkbox");
-				add_location(input29, file$6, 539, 6, 14720);
+				add_location(input29, file$6, 569, 6, 15591);
 				attr_dev(label29, "class", "svelte-gu7nlb");
-				add_location(label29, file$6, 538, 4, 14705);
+				add_location(label29, file$6, 568, 4, 15576);
 				attr_dev(input30, "type", "number");
 				attr_dev(input30, "class", "svelte-gu7nlb");
-				add_location(input30, file$6, 552, 6, 15085);
+				add_location(input30, file$6, 582, 6, 15956);
 				attr_dev(label30, "class", "svelte-gu7nlb");
-				add_location(label30, file$6, 550, 4, 15046);
+				add_location(label30, file$6, 580, 4, 15917);
 			},
 			m: function mount(target, anchor) {
 				insert_dev(target, label0, anchor);
@@ -7474,7 +7621,7 @@ var app = (function () {
 					if (if_block) {
 						if_block.p(ctx, dirty);
 					} else {
-						if_block = create_if_block_2$2(ctx);
+						if_block = create_if_block_4$1(ctx);
 						if_block.c();
 						if_block.m(t8.parentNode, t8);
 					}
@@ -7671,17 +7818,17 @@ var app = (function () {
 
 		dispatch_dev("SvelteRegisterBlock", {
 			block,
-			id: create_if_block_1$4.name,
+			id: create_if_block_3$1.name,
 			type: "if",
-			source: "(192:2) {#if localSettings}",
+			source: "(222:2) {#if localSettings}",
 			ctx
 		});
 
 		return block;
 	}
 
-	// (241:4) {#if localSettings.triangulation_filter_enabled}
-	function create_if_block_2$2(ctx) {
+	// (271:4) {#if localSettings.triangulation_filter_enabled}
+	function create_if_block_4$1(ctx) {
 		let label;
 		let input;
 		let t;
@@ -7694,9 +7841,9 @@ var app = (function () {
 				input = element("input");
 				t = text("\r\n        Exclude Triangulatable Kills");
 				attr_dev(input, "type", "checkbox");
-				add_location(input, file$6, 242, 8, 6821);
+				add_location(input, file$6, 272, 8, 7692);
 				attr_dev(label, "class", "svelte-gu7nlb");
-				add_location(label, file$6, 241, 6, 6804);
+				add_location(label, file$6, 271, 6, 7675);
 			},
 			m: function mount(target, anchor) {
 				insert_dev(target, label, anchor);
@@ -7730,16 +7877,282 @@ var app = (function () {
 
 		dispatch_dev("SvelteRegisterBlock", {
 			block,
-			id: create_if_block_2$2.name,
+			id: create_if_block_4$1.name,
 			type: "if",
-			source: "(241:4) {#if localSettings.triangulation_filter_enabled}",
+			source: "(271:4) {#if localSettings.triangulation_filter_enabled}",
 			ctx
 		});
 
 		return block;
 	}
 
-	// (576:2) {#if localSettings.webhook_enabled}
+	// (609:2) {#if localSettings.location_type_filter_enabled}
+	function create_if_block_2$2(ctx) {
+		let div;
+		let label0;
+		let input0;
+		let t0;
+		let t1;
+		let label1;
+		let input1;
+		let t2;
+		let t3;
+		let label2;
+		let input2;
+		let t4;
+		let t5;
+		let label3;
+		let input3;
+		let t6;
+		let t7;
+		let label4;
+		let input4;
+		let t8;
+		let mounted;
+		let dispose;
+
+		const block = {
+			c: function create() {
+				div = element("div");
+				label0 = element("label");
+				input0 = element("input");
+				t0 = text("\r\n        High Security");
+				t1 = space();
+				label1 = element("label");
+				input1 = element("input");
+				t2 = text("\r\n        Low Security");
+				t3 = space();
+				label2 = element("label");
+				input2 = element("input");
+				t4 = text("\r\n        Null Security");
+				t5 = space();
+				label3 = element("label");
+				input3 = element("input");
+				t6 = text("\r\n        Wormhole Space");
+				t7 = space();
+				label4 = element("label");
+				input4 = element("input");
+				t8 = text("\r\n        Abyssal Space");
+				attr_dev(input0, "type", "checkbox");
+				add_location(input0, file$6, 611, 8, 16691);
+				attr_dev(label0, "class", "svelte-gu7nlb");
+				add_location(label0, file$6, 610, 6, 16674);
+				attr_dev(input1, "type", "checkbox");
+				add_location(input1, file$6, 620, 8, 16967);
+				attr_dev(label1, "class", "svelte-gu7nlb");
+				add_location(label1, file$6, 619, 6, 16950);
+				attr_dev(input2, "type", "checkbox");
+				add_location(input2, file$6, 629, 8, 17241);
+				attr_dev(label2, "class", "svelte-gu7nlb");
+				add_location(label2, file$6, 628, 6, 17224);
+				attr_dev(input3, "type", "checkbox");
+				add_location(input3, file$6, 638, 8, 17517);
+				attr_dev(label3, "class", "svelte-gu7nlb");
+				add_location(label3, file$6, 637, 6, 17500);
+				attr_dev(input4, "type", "checkbox");
+				add_location(input4, file$6, 647, 8, 17793);
+				attr_dev(label4, "class", "svelte-gu7nlb");
+				add_location(label4, file$6, 646, 6, 17776);
+				attr_dev(div, "class", "location-types");
+				add_location(div, file$6, 609, 4, 16638);
+			},
+			m: function mount(target, anchor) {
+				insert_dev(target, div, anchor);
+				append_dev(div, label0);
+				append_dev(label0, input0);
+				input0.checked = /*localSettings*/ ctx[6].location_types.highsec;
+				append_dev(label0, t0);
+				append_dev(div, t1);
+				append_dev(div, label1);
+				append_dev(label1, input1);
+				input1.checked = /*localSettings*/ ctx[6].location_types.lowsec;
+				append_dev(label1, t2);
+				append_dev(div, t3);
+				append_dev(div, label2);
+				append_dev(label2, input2);
+				input2.checked = /*localSettings*/ ctx[6].location_types.nullsec;
+				append_dev(label2, t4);
+				append_dev(div, t5);
+				append_dev(div, label3);
+				append_dev(label3, input3);
+				input3.checked = /*localSettings*/ ctx[6].location_types.wspace;
+				append_dev(label3, t6);
+				append_dev(div, t7);
+				append_dev(div, label4);
+				append_dev(label4, input4);
+				input4.checked = /*localSettings*/ ctx[6].location_types.abyssal;
+				append_dev(label4, t8);
+
+				if (!mounted) {
+					dispose = [
+						listen_dev(input0, "change", /*input0_change_handler_2*/ ctx[85]),
+						listen_dev(input0, "change", /*change_handler_20*/ ctx[86], false, false, false, false),
+						listen_dev(input1, "change", /*input1_change_handler*/ ctx[87]),
+						listen_dev(input1, "change", /*change_handler_21*/ ctx[88], false, false, false, false),
+						listen_dev(input2, "change", /*input2_change_handler_1*/ ctx[89]),
+						listen_dev(input2, "change", /*change_handler_22*/ ctx[90], false, false, false, false),
+						listen_dev(input3, "change", /*input3_change_handler_1*/ ctx[91]),
+						listen_dev(input3, "change", /*change_handler_23*/ ctx[92], false, false, false, false),
+						listen_dev(input4, "change", /*input4_change_handler_1*/ ctx[93]),
+						listen_dev(input4, "change", /*change_handler_24*/ ctx[94], false, false, false, false)
+					];
+
+					mounted = true;
+				}
+			},
+			p: function update(ctx, dirty) {
+				if (dirty[0] & /*localSettings*/ 64) {
+					input0.checked = /*localSettings*/ ctx[6].location_types.highsec;
+				}
+
+				if (dirty[0] & /*localSettings*/ 64) {
+					input1.checked = /*localSettings*/ ctx[6].location_types.lowsec;
+				}
+
+				if (dirty[0] & /*localSettings*/ 64) {
+					input2.checked = /*localSettings*/ ctx[6].location_types.nullsec;
+				}
+
+				if (dirty[0] & /*localSettings*/ 64) {
+					input3.checked = /*localSettings*/ ctx[6].location_types.wspace;
+				}
+
+				if (dirty[0] & /*localSettings*/ 64) {
+					input4.checked = /*localSettings*/ ctx[6].location_types.abyssal;
+				}
+			},
+			d: function destroy(detaching) {
+				if (detaching) {
+					detach_dev(div);
+				}
+
+				mounted = false;
+				run_all(dispose);
+			}
+		};
+
+		dispatch_dev("SvelteRegisterBlock", {
+			block,
+			id: create_if_block_2$2.name,
+			type: "if",
+			source: "(609:2) {#if localSettings.location_type_filter_enabled}",
+			ctx
+		});
+
+		return block;
+	}
+
+	// (684:2) {#if localSettings.combat_label_filter_enabled}
+	function create_if_block_1$4(ctx) {
+		let div;
+		let label0;
+		let input0;
+		let t0;
+		let t1;
+		let label1;
+		let input1;
+		let t2;
+		let t3;
+		let label2;
+		let input2;
+		let t4;
+		let mounted;
+		let dispose;
+
+		const block = {
+			c: function create() {
+				div = element("div");
+				label0 = element("label");
+				input0 = element("input");
+				t0 = text("\r\n        Ganked");
+				t1 = space();
+				label1 = element("label");
+				input1 = element("input");
+				t2 = text("\r\n        PvP");
+				t3 = space();
+				label2 = element("label");
+				input2 = element("input");
+				t4 = text("\r\n        Padding");
+				attr_dev(input0, "type", "checkbox");
+				add_location(input0, file$6, 686, 8, 18790);
+				attr_dev(label0, "class", "svelte-gu7nlb");
+				add_location(label0, file$6, 685, 6, 18773);
+				attr_dev(input1, "type", "checkbox");
+				add_location(input1, file$6, 695, 8, 19055);
+				attr_dev(label1, "class", "svelte-gu7nlb");
+				add_location(label1, file$6, 694, 6, 19038);
+				attr_dev(input2, "type", "checkbox");
+				add_location(input2, file$6, 704, 8, 19314);
+				attr_dev(label2, "class", "svelte-gu7nlb");
+				add_location(label2, file$6, 703, 6, 19297);
+				attr_dev(div, "class", "combat-labels");
+				add_location(div, file$6, 684, 4, 18738);
+			},
+			m: function mount(target, anchor) {
+				insert_dev(target, div, anchor);
+				append_dev(div, label0);
+				append_dev(label0, input0);
+				input0.checked = /*localSettings*/ ctx[6].combat_labels.ganked;
+				append_dev(label0, t0);
+				append_dev(div, t1);
+				append_dev(div, label1);
+				append_dev(label1, input1);
+				input1.checked = /*localSettings*/ ctx[6].combat_labels.pvp;
+				append_dev(label1, t2);
+				append_dev(div, t3);
+				append_dev(div, label2);
+				append_dev(label2, input2);
+				input2.checked = /*localSettings*/ ctx[6].combat_labels.padding;
+				append_dev(label2, t4);
+
+				if (!mounted) {
+					dispose = [
+						listen_dev(input0, "change", /*input0_change_handler_3*/ ctx[99]),
+						listen_dev(input0, "change", /*change_handler_27*/ ctx[100], false, false, false, false),
+						listen_dev(input1, "change", /*input1_change_handler_2*/ ctx[101]),
+						listen_dev(input1, "change", /*change_handler_28*/ ctx[102], false, false, false, false),
+						listen_dev(input2, "change", /*input2_change_handler_3*/ ctx[103]),
+						listen_dev(input2, "change", /*change_handler_29*/ ctx[104], false, false, false, false)
+					];
+
+					mounted = true;
+				}
+			},
+			p: function update(ctx, dirty) {
+				if (dirty[0] & /*localSettings*/ 64) {
+					input0.checked = /*localSettings*/ ctx[6].combat_labels.ganked;
+				}
+
+				if (dirty[0] & /*localSettings*/ 64) {
+					input1.checked = /*localSettings*/ ctx[6].combat_labels.pvp;
+				}
+
+				if (dirty[0] & /*localSettings*/ 64) {
+					input2.checked = /*localSettings*/ ctx[6].combat_labels.padding;
+				}
+			},
+			d: function destroy(detaching) {
+				if (detaching) {
+					detach_dev(div);
+				}
+
+				mounted = false;
+				run_all(dispose);
+			}
+		};
+
+		dispatch_dev("SvelteRegisterBlock", {
+			block,
+			id: create_if_block_1$4.name,
+			type: "if",
+			source: "(684:2) {#if localSettings.combat_label_filter_enabled}",
+			ctx
+		});
+
+		return block;
+	}
+
+	// (727:2) {#if localSettings.webhook_enabled}
 	function create_if_block$5(ctx) {
 		let label;
 		let t;
@@ -7756,9 +8169,9 @@ var app = (function () {
 				attr_dev(input, "placeholder", "https://discord.com/api/webhooks/...");
 				set_style(input, "width", "100%");
 				set_style(input, "max-width", "500px");
-				add_location(input, file$6, 578, 6, 15714);
+				add_location(input, file$6, 729, 6, 19940);
 				attr_dev(label, "class", "svelte-gu7nlb");
-				add_location(label, file$6, 576, 4, 15679);
+				add_location(label, file$6, 727, 4, 19905);
 			},
 			m: function mount(target, anchor) {
 				insert_dev(target, label, anchor);
@@ -7768,8 +8181,8 @@ var app = (function () {
 
 				if (!mounted) {
 					dispose = [
-						listen_dev(input, "input", /*input_input_handler*/ ctx[85]),
-						listen_dev(input, "input", /*input_handler_13*/ ctx[86], false, false, false, false)
+						listen_dev(input, "input", /*input_input_handler*/ ctx[107]),
+						listen_dev(input, "input", /*input_handler_13*/ ctx[108], false, false, false, false)
 					];
 
 					mounted = true;
@@ -7794,7 +8207,7 @@ var app = (function () {
 			block,
 			id: create_if_block$5.name,
 			type: "if",
-			source: "(576:2) {#if localSettings.webhook_enabled}",
+			source: "(727:2) {#if localSettings.webhook_enabled}",
 			ctx
 		});
 
@@ -7807,24 +8220,38 @@ var app = (function () {
 		let updating_selectedProfile;
 		let t0;
 		let t1;
-		let h30;
-		let t3;
 		let label0;
 		let input0;
+		let t2;
+		let t3;
 		let t4;
+		let label1;
+		let input1;
 		let t5;
 		let t6;
-		let h31;
-		let t8;
-		let div0;
-		let input1;
-		let t9;
+		let label2;
 		let input2;
-		let t10;
-		let label1;
-		let input3;
+		let t7;
+		let t8;
+		let t9;
+		let h30;
 		let t11;
+		let label3;
+		let input3;
 		let t12;
+		let t13;
+		let t14;
+		let h31;
+		let t16;
+		let div0;
+		let input4;
+		let t17;
+		let input5;
+		let t18;
+		let label4;
+		let input6;
+		let t19;
+		let t20;
 		let select;
 		let option0;
 		let option1;
@@ -7834,9 +8261,10 @@ var app = (function () {
 		let option5;
 		let option6;
 		let option7;
-		let t21;
+		let option8;
+		let t30;
 		let button;
-		let t23;
+		let t32;
 		let filterlistmanager;
 		let current;
 		let mounted;
@@ -7862,8 +8290,10 @@ var app = (function () {
 		profilelistmanager.$on("loadProfile", /*loadProfile*/ ctx[11]);
 		profilelistmanager.$on("fetchProfiles", /*fetchProfiles*/ ctx[13]);
 		profilelistmanager.$on("deleteProfile", /*deleteProfile*/ ctx[12]);
-		let if_block0 = /*localSettings*/ ctx[6] && create_if_block_1$4(ctx);
-		let if_block1 = /*localSettings*/ ctx[6].webhook_enabled && create_if_block$5(ctx);
+		let if_block0 = /*localSettings*/ ctx[6] && create_if_block_3$1(ctx);
+		let if_block1 = /*localSettings*/ ctx[6].location_type_filter_enabled && create_if_block_2$2(ctx);
+		let if_block2 = /*localSettings*/ ctx[6].combat_label_filter_enabled && create_if_block_1$4(ctx);
+		let if_block3 = /*localSettings*/ ctx[6].webhook_enabled && create_if_block$5(ctx);
 		filterlistmanager = new FilterListManager({ $$inline: true });
 		filterlistmanager.$on("updateFilterLists", /*handleFilterListsUpdate*/ ctx[9]);
 
@@ -7874,27 +8304,43 @@ var app = (function () {
 				t0 = space();
 				if (if_block0) if_block0.c();
 				t1 = space();
-				h30 = element("h3");
-				h30.textContent = "Discord Webhook";
-				t3 = space();
 				label0 = element("label");
 				input0 = element("input");
-				t4 = text("\r\n    Enable Discord Webhook Alerts");
-				t5 = space();
+				t2 = text("\r\n    Enable Location Type Filter");
+				t3 = space();
 				if (if_block1) if_block1.c();
+				t4 = space();
+				label1 = element("label");
+				input1 = element("input");
+				t5 = text("\r\n    Capitals Only");
 				t6 = space();
+				label2 = element("label");
+				input2 = element("input");
+				t7 = text("\r\n    Enable Combat Label Filter");
+				t8 = space();
+				if (if_block2) if_block2.c();
+				t9 = space();
+				h30 = element("h3");
+				h30.textContent = "Discord Webhook";
+				t11 = space();
+				label3 = element("label");
+				input3 = element("input");
+				t12 = text("\r\n    Enable Discord Webhook Alerts");
+				t13 = space();
+				if (if_block3) if_block3.c();
+				t14 = space();
 				h31 = element("h3");
 				h31.textContent = "Create New Filter List";
-				t8 = space();
+				t16 = space();
 				div0 = element("div");
-				input1 = element("input");
-				t9 = space();
-				input2 = element("input");
-				t10 = space();
-				label1 = element("label");
-				input3 = element("input");
-				t11 = text("\r\n      Exclude");
-				t12 = space();
+				input4 = element("input");
+				t17 = space();
+				input5 = element("input");
+				t18 = space();
+				label4 = element("label");
+				input6 = element("input");
+				t19 = text("\r\n      Exclude");
+				t20 = space();
 				select = element("select");
 				option0 = element("option");
 				option0.textContent = "Select filter type";
@@ -7912,59 +8358,76 @@ var app = (function () {
 				option6.textContent = "Ship Type";
 				option7 = element("option");
 				option7.textContent = "Solar System";
-				t21 = space();
+				option8 = element("option");
+				option8.textContent = "Region";
+				t30 = space();
 				button = element("button");
 				button.textContent = "Create New List";
-				t23 = space();
+				t32 = space();
 				create_component(filterlistmanager.$$.fragment);
-				attr_dev(h30, "class", "svelte-gu7nlb");
-				add_location(h30, file$6, 564, 2, 15357);
 				attr_dev(input0, "type", "checkbox");
-				add_location(input0, file$6, 566, 4, 15398);
+				add_location(input0, file$6, 596, 4, 16274);
 				attr_dev(label0, "class", "svelte-gu7nlb");
-				add_location(label0, file$6, 565, 2, 15385);
-				attr_dev(h31, "class", "svelte-gu7nlb");
-				add_location(h31, file$6, 588, 2, 16018);
-				attr_dev(input1, "placeholder", "New list name");
-				add_location(input1, file$6, 590, 4, 16064);
-				attr_dev(input2, "placeholder", "Comma-separated IDs");
-				add_location(input2, file$6, 591, 4, 16132);
-				attr_dev(input3, "type", "checkbox");
-				add_location(input3, file$6, 593, 6, 16220);
+				add_location(label0, file$6, 595, 2, 16261);
+				attr_dev(input1, "type", "checkbox");
+				add_location(input1, file$6, 660, 4, 18117);
 				attr_dev(label1, "class", "svelte-gu7nlb");
-				add_location(label1, file$6, 592, 4, 16205);
+				add_location(label1, file$6, 659, 2, 18104);
+				attr_dev(input2, "type", "checkbox");
+				add_location(input2, file$6, 671, 4, 18379);
+				attr_dev(label2, "class", "svelte-gu7nlb");
+				add_location(label2, file$6, 670, 2, 18366);
+				attr_dev(h30, "class", "svelte-gu7nlb");
+				add_location(h30, file$6, 715, 2, 19583);
+				attr_dev(input3, "type", "checkbox");
+				add_location(input3, file$6, 717, 4, 19624);
+				attr_dev(label3, "class", "svelte-gu7nlb");
+				add_location(label3, file$6, 716, 2, 19611);
+				attr_dev(h31, "class", "svelte-gu7nlb");
+				add_location(h31, file$6, 739, 2, 20244);
+				attr_dev(input4, "placeholder", "New list name");
+				add_location(input4, file$6, 741, 4, 20290);
+				attr_dev(input5, "placeholder", "Comma-separated IDs");
+				add_location(input5, file$6, 742, 4, 20358);
+				attr_dev(input6, "type", "checkbox");
+				add_location(input6, file$6, 744, 6, 20446);
+				attr_dev(label4, "class", "svelte-gu7nlb");
+				add_location(label4, file$6, 743, 4, 20431);
 				option0.__value = "";
 				set_input_value(option0, option0.__value);
-				add_location(option0, file$6, 597, 6, 16359);
+				add_location(option0, file$6, 748, 6, 20585);
 				option1.__value = "attacker_alliance";
 				set_input_value(option1, option1.__value);
-				add_location(option1, file$6, 598, 6, 16411);
+				add_location(option1, file$6, 749, 6, 20637);
 				option2.__value = "attacker_corporation";
 				set_input_value(option2, option2.__value);
-				add_location(option2, file$6, 599, 6, 16479);
+				add_location(option2, file$6, 750, 6, 20705);
 				option3.__value = "attacker_ship_type";
 				set_input_value(option3, option3.__value);
-				add_location(option3, file$6, 600, 6, 16553);
+				add_location(option3, file$6, 751, 6, 20779);
 				option4.__value = "victim_alliance";
 				set_input_value(option4, option4.__value);
-				add_location(option4, file$6, 601, 6, 16623);
+				add_location(option4, file$6, 752, 6, 20849);
 				option5.__value = "victim_corporation";
 				set_input_value(option5, option5.__value);
-				add_location(option5, file$6, 602, 6, 16687);
+				add_location(option5, file$6, 753, 6, 20913);
 				option6.__value = "ship_type";
 				set_input_value(option6, option6.__value);
-				add_location(option6, file$6, 603, 6, 16757);
+				add_location(option6, file$6, 754, 6, 20983);
 				option7.__value = "solar_system";
 				set_input_value(option7, option7.__value);
-				add_location(option7, file$6, 604, 6, 16809);
+				add_location(option7, file$6, 755, 6, 21035);
+				option8.__value = "region";
+				set_input_value(option8, option8.__value);
+				add_location(option8, file$6, 756, 6, 21093);
 				attr_dev(select, "class", "svelte-gu7nlb");
-				if (/*newListFilterType*/ ctx[4] === void 0) add_render_callback(() => /*select_change_handler*/ ctx[90].call(select));
-				add_location(select, file$6, 596, 4, 16312);
+				if (/*newListFilterType*/ ctx[4] === void 0) add_render_callback(() => /*select_change_handler*/ ctx[112].call(select));
+				add_location(select, file$6, 747, 4, 20538);
 				attr_dev(button, "class", "svelte-gu7nlb");
-				add_location(button, file$6, 606, 4, 16880);
-				add_location(div0, file$6, 589, 2, 16053);
+				add_location(button, file$6, 758, 4, 21152);
+				add_location(div0, file$6, 740, 2, 20279);
 				attr_dev(div1, "class", "settings-manager svelte-gu7nlb");
-				add_location(div1, file$6, 181, 0, 5210);
+				add_location(div1, file$6, 211, 0, 6081);
 			},
 			l: function claim(nodes) {
 				throw new Error("options.hydrate only works if the component was compiled with the `hydratable: true` option");
@@ -7975,29 +8438,48 @@ var app = (function () {
 				append_dev(div1, t0);
 				if (if_block0) if_block0.m(div1, null);
 				append_dev(div1, t1);
-				append_dev(div1, h30);
-				append_dev(div1, t3);
 				append_dev(div1, label0);
 				append_dev(label0, input0);
-				input0.checked = /*localSettings*/ ctx[6].webhook_enabled;
-				append_dev(label0, t4);
-				append_dev(div1, t5);
+				input0.checked = /*localSettings*/ ctx[6].location_type_filter_enabled;
+				append_dev(label0, t2);
+				append_dev(div1, t3);
 				if (if_block1) if_block1.m(div1, null);
+				append_dev(div1, t4);
+				append_dev(div1, label1);
+				append_dev(label1, input1);
+				input1.checked = /*localSettings*/ ctx[6].capitals_only;
+				append_dev(label1, t5);
 				append_dev(div1, t6);
-				append_dev(div1, h31);
+				append_dev(div1, label2);
+				append_dev(label2, input2);
+				input2.checked = /*localSettings*/ ctx[6].combat_label_filter_enabled;
+				append_dev(label2, t7);
 				append_dev(div1, t8);
+				if (if_block2) if_block2.m(div1, null);
+				append_dev(div1, t9);
+				append_dev(div1, h30);
+				append_dev(div1, t11);
+				append_dev(div1, label3);
+				append_dev(label3, input3);
+				input3.checked = /*localSettings*/ ctx[6].webhook_enabled;
+				append_dev(label3, t12);
+				append_dev(div1, t13);
+				if (if_block3) if_block3.m(div1, null);
+				append_dev(div1, t14);
+				append_dev(div1, h31);
+				append_dev(div1, t16);
 				append_dev(div1, div0);
-				append_dev(div0, input1);
-				set_input_value(input1, /*newListName*/ ctx[1]);
-				append_dev(div0, t9);
-				append_dev(div0, input2);
-				set_input_value(input2, /*newListIds*/ ctx[2]);
-				append_dev(div0, t10);
-				append_dev(div0, label1);
-				append_dev(label1, input3);
-				input3.checked = /*newListIsExclude*/ ctx[3];
-				append_dev(label1, t11);
-				append_dev(div0, t12);
+				append_dev(div0, input4);
+				set_input_value(input4, /*newListName*/ ctx[1]);
+				append_dev(div0, t17);
+				append_dev(div0, input5);
+				set_input_value(input5, /*newListIds*/ ctx[2]);
+				append_dev(div0, t18);
+				append_dev(div0, label4);
+				append_dev(label4, input6);
+				input6.checked = /*newListIsExclude*/ ctx[3];
+				append_dev(label4, t19);
+				append_dev(div0, t20);
 				append_dev(div0, select);
 				append_dev(select, option0);
 				append_dev(select, option1);
@@ -8007,10 +8489,11 @@ var app = (function () {
 				append_dev(select, option5);
 				append_dev(select, option6);
 				append_dev(select, option7);
+				append_dev(select, option8);
 				select_option(select, /*newListFilterType*/ ctx[4], true);
-				append_dev(div0, t21);
+				append_dev(div0, t30);
 				append_dev(div0, button);
-				append_dev(div1, t23);
+				append_dev(div1, t32);
 				mount_component(filterlistmanager, div1, null);
 				current = true;
 
@@ -8018,10 +8501,16 @@ var app = (function () {
 					dispose = [
 						listen_dev(input0, "change", /*input0_change_handler_1*/ ctx[83]),
 						listen_dev(input0, "change", /*change_handler_19*/ ctx[84], false, false, false, false),
-						listen_dev(input1, "input", /*input1_input_handler_1*/ ctx[87]),
-						listen_dev(input2, "input", /*input2_input_handler*/ ctx[88]),
-						listen_dev(input3, "change", /*input3_change_handler_1*/ ctx[89]),
-						listen_dev(select, "change", /*select_change_handler*/ ctx[90]),
+						listen_dev(input1, "change", /*input1_change_handler_1*/ ctx[95]),
+						listen_dev(input1, "change", /*change_handler_25*/ ctx[96], false, false, false, false),
+						listen_dev(input2, "change", /*input2_change_handler_2*/ ctx[97]),
+						listen_dev(input2, "change", /*change_handler_26*/ ctx[98], false, false, false, false),
+						listen_dev(input3, "change", /*input3_change_handler_2*/ ctx[105]),
+						listen_dev(input3, "change", /*change_handler_30*/ ctx[106], false, false, false, false),
+						listen_dev(input4, "input", /*input4_input_handler*/ ctx[109]),
+						listen_dev(input5, "input", /*input5_input_handler_1*/ ctx[110]),
+						listen_dev(input6, "change", /*input6_change_handler*/ ctx[111]),
+						listen_dev(select, "change", /*select_change_handler*/ ctx[112]),
 						listen_dev(button, "click", /*createFilterList*/ ctx[8], false, false, false, false)
 					];
 
@@ -8044,7 +8533,7 @@ var app = (function () {
 					if (if_block0) {
 						if_block0.p(ctx, dirty);
 					} else {
-						if_block0 = create_if_block_1$4(ctx);
+						if_block0 = create_if_block_3$1(ctx);
 						if_block0.c();
 						if_block0.m(div1, t1);
 					}
@@ -8054,32 +8543,70 @@ var app = (function () {
 				}
 
 				if (dirty[0] & /*localSettings*/ 64) {
-					input0.checked = /*localSettings*/ ctx[6].webhook_enabled;
+					input0.checked = /*localSettings*/ ctx[6].location_type_filter_enabled;
 				}
 
-				if (/*localSettings*/ ctx[6].webhook_enabled) {
+				if (/*localSettings*/ ctx[6].location_type_filter_enabled) {
 					if (if_block1) {
 						if_block1.p(ctx, dirty);
 					} else {
-						if_block1 = create_if_block$5(ctx);
+						if_block1 = create_if_block_2$2(ctx);
 						if_block1.c();
-						if_block1.m(div1, t6);
+						if_block1.m(div1, t4);
 					}
 				} else if (if_block1) {
 					if_block1.d(1);
 					if_block1 = null;
 				}
 
-				if (dirty[0] & /*newListName*/ 2 && input1.value !== /*newListName*/ ctx[1]) {
-					set_input_value(input1, /*newListName*/ ctx[1]);
+				if (dirty[0] & /*localSettings*/ 64) {
+					input1.checked = /*localSettings*/ ctx[6].capitals_only;
 				}
 
-				if (dirty[0] & /*newListIds*/ 4 && input2.value !== /*newListIds*/ ctx[2]) {
-					set_input_value(input2, /*newListIds*/ ctx[2]);
+				if (dirty[0] & /*localSettings*/ 64) {
+					input2.checked = /*localSettings*/ ctx[6].combat_label_filter_enabled;
+				}
+
+				if (/*localSettings*/ ctx[6].combat_label_filter_enabled) {
+					if (if_block2) {
+						if_block2.p(ctx, dirty);
+					} else {
+						if_block2 = create_if_block_1$4(ctx);
+						if_block2.c();
+						if_block2.m(div1, t9);
+					}
+				} else if (if_block2) {
+					if_block2.d(1);
+					if_block2 = null;
+				}
+
+				if (dirty[0] & /*localSettings*/ 64) {
+					input3.checked = /*localSettings*/ ctx[6].webhook_enabled;
+				}
+
+				if (/*localSettings*/ ctx[6].webhook_enabled) {
+					if (if_block3) {
+						if_block3.p(ctx, dirty);
+					} else {
+						if_block3 = create_if_block$5(ctx);
+						if_block3.c();
+						if_block3.m(div1, t14);
+					}
+				} else if (if_block3) {
+					if_block3.d(1);
+					if_block3 = null;
+				}
+
+				if (dirty[0] & /*newListName*/ 2 && input4.value !== /*newListName*/ ctx[1]) {
+					set_input_value(input4, /*newListName*/ ctx[1]);
+				}
+
+				if (dirty[0] & /*newListIds*/ 4 && input5.value !== /*newListIds*/ ctx[2]) {
+					set_input_value(input5, /*newListIds*/ ctx[2]);
 				}
 
 				if (dirty[0] & /*newListIsExclude*/ 8) {
-					input3.checked = /*newListIsExclude*/ ctx[3];
+					input6.checked = /*newListIsExclude*/ ctx[3];
 				}
 
 				if (dirty[0] & /*newListFilterType*/ 16) {
@@ -8105,6 +8632,8 @@ var app = (function () {
 				destroy_component(profilelistmanager);
 				if (if_block0) if_block0.d();
 				if (if_block1) if_block1.d();
+				if (if_block2) if_block2.d();
+				if (if_block3) if_block3.d();
 				destroy_component(filterlistmanager);
 				mounted = false;
 				run_all(dispose);
@@ -8153,9 +8682,34 @@ var app = (function () {
 			console.log("SettingsManager.svelte - afterUpdate. Profiles:", localProfiles);
 		});
 
+		// SettingsManager.svelte
 		function updateSetting(key, value) {
-			settings.update(s => ({ ...s, [key]: value }));
-			socket.emit("updateSettings", $settings);
+			try {
+				settings.update(s => {
+					const currentSettings = s || DEFAULT_SETTINGS;
+					const updatedSettings = { ...currentSettings };
+
+					// Ensure nested objects exist
+					if (key === "location_type_filter_enabled" && !updatedSettings.location_types) {
+						updatedSettings.location_types = DEFAULT_SETTINGS.location_types;
+					}
+
+					if (key === "combat_label_filter_enabled" && !updatedSettings.combat_labels) {
+						updatedSettings.combat_labels = DEFAULT_SETTINGS.combat_labels;
+					}
+
+					// Update the setting
+					updatedSettings[key] = value;
+
+					// Emit update to server
+					socket.emit("updateSettings", updatedSettings);
+
+					return updatedSettings;
+				});
+			} catch(e) {
+				console.error("Error updating setting:", e);
+				settings.set(DEFAULT_SETTINGS);
+			}
 		}
 
 		function createFilterList() {
@@ -8547,11 +9101,88 @@ var app = (function () {
 		const input_handler_12 = () => updateSetting("solar_system_filter", localSettings.solar_system_filter);
 
 		function input0_change_handler_1() {
+			localSettings.location_type_filter_enabled = this.checked;
+			($$invalidate(6, localSettings), $$invalidate(16, $settings));
+		}
+
+		const change_handler_19 = () => updateSetting("location_type_filter_enabled", localSettings.location_type_filter_enabled);
+
+		function input0_change_handler_2() {
+			localSettings.location_types.highsec = this.checked;
+			($$invalidate(6, localSettings), $$invalidate(16, $settings));
+		}
+
+		const change_handler_20 = () => updateSetting("location_types", localSettings.location_types);
+
+		function input1_change_handler() {
+			localSettings.location_types.lowsec = this.checked;
+			($$invalidate(6, localSettings), $$invalidate(16, $settings));
+		}
+
+		const change_handler_21 = () => updateSetting("location_types", localSettings.location_types);
+
+		function input2_change_handler_1() {
+			localSettings.location_types.nullsec = this.checked;
+			($$invalidate(6, localSettings), $$invalidate(16, $settings));
+		}
+
+		const change_handler_22 = () => updateSetting("location_types", localSettings.location_types);
+
+		function input3_change_handler_1() {
+			localSettings.location_types.wspace = this.checked;
+			($$invalidate(6, localSettings), $$invalidate(16, $settings));
+		}
+
+		const change_handler_23 = () => updateSetting("location_types", localSettings.location_types);
+
+		function input4_change_handler_1() {
+			localSettings.location_types.abyssal = this.checked;
+			($$invalidate(6, localSettings), $$invalidate(16, $settings));
+		}
+
+		const change_handler_24 = () => updateSetting("location_types", localSettings.location_types);
+
+		function input1_change_handler_1() {
+			localSettings.capitals_only = this.checked;
+			($$invalidate(6, localSettings), $$invalidate(16, $settings));
+		}
+
+		const change_handler_25 = () => updateSetting("capitals_only", localSettings.capitals_only);
+
+		function input2_change_handler_2() {
+			localSettings.combat_label_filter_enabled = this.checked;
+			($$invalidate(6, localSettings), $$invalidate(16, $settings));
+		}
+
+		const change_handler_26 = () => updateSetting("combat_label_filter_enabled", localSettings.combat_label_filter_enabled);
+
+		function input0_change_handler_3() {
+			localSettings.combat_labels.ganked = this.checked;
+			($$invalidate(6, localSettings), $$invalidate(16, $settings));
+		}
+
+		const change_handler_27 = () => updateSetting("combat_labels", localSettings.combat_labels);
+
+		function input1_change_handler_2() {
+			localSettings.combat_labels.pvp = this.checked;
+			($$invalidate(6, localSettings), $$invalidate(16, $settings));
+		}
+
+		const change_handler_28 = () => updateSetting("combat_labels", localSettings.combat_labels);
+
+		function input2_change_handler_3() {
+			localSettings.combat_labels.padding = this.checked;
+			($$invalidate(6, localSettings), $$invalidate(16, $settings));
+		}
+
+		const change_handler_29 = () => updateSetting("combat_labels", localSettings.combat_labels);
+
+		function input3_change_handler_2() {
 			localSettings.webhook_enabled = this.checked;
 			($$invalidate(6, localSettings), $$invalidate(16, $settings));
 		}
 
-		const change_handler_19 = () => updateSetting("webhook_enabled", localSettings.webhook_enabled);
+		const change_handler_30 = () => updateSetting("webhook_enabled", localSettings.webhook_enabled);
 
 		function input_input_handler() {
 			localSettings.webhook_url = this.value;
@@ -8560,17 +9191,17 @@ var app = (function () {
 
 		const input_handler_13 = () => updateSetting("webhook_url", localSettings.webhook_url);
 
-		function input1_input_handler_1() {
+		function input4_input_handler() {
 			newListName = this.value;
 			$$invalidate(1, newListName);
 		}
 
-		function input2_input_handler() {
+		function input5_input_handler_1() {
 			newListIds = this.value;
 			$$invalidate(2, newListIds);
 		}
 
-		function input3_change_handler_1() {
+		function input6_change_handler() {
 			newListIsExclude = this.checked;
 			$$invalidate(3, newListIsExclude);
 		}
@@ -8736,11 +9367,33 @@ var app = (function () {
 			input_handler_12,
 			input0_change_handler_1,
 			change_handler_19,
+			input0_change_handler_2,
+			change_handler_20,
+			input1_change_handler,
+			change_handler_21,
+			input2_change_handler_1,
+			change_handler_22,
+			input3_change_handler_1,
+			change_handler_23,
+			input4_change_handler_1,
+			change_handler_24,
+			input1_change_handler_1,
+			change_handler_25,
+			input2_change_handler_2,
+			change_handler_26,
+			input0_change_handler_3,
+			change_handler_27,
+			input1_change_handler_2,
+			change_handler_28,
+			input2_change_handler_3,
+			change_handler_29,
+			input3_change_handler_2,
+			change_handler_30,
 			input_input_handler,
 			input_handler_13,
-			input1_input_handler_1,
-			input2_input_handler,
-			input3_change_handler_1,
+			input4_input_handler,
+			input5_input_handler_1,
+			input6_change_handler,
 			select_change_handler
 		];
 	}
@@ -8748,7 +9401,7 @@ var app = (function () {
 	class SettingsManager extends SvelteComponentDev {
 		constructor(options) {
 			super(options);
-			init(this, options, instance$6, create_fragment$6, safe_not_equal, { socket: 14 }, null, [-1, -1, -1]);
+			init(this, options, instance$6, create_fragment$6, safe_not_equal, { socket: 14 }, null, [-1, -1, -1, -1]);
 
 			dispatch_dev("SvelteRegisterComponent", {
 				component: this,
@@ -68261,7 +68914,7 @@ void main() {
 	const { console: console_1 } = globals;
 	const file = "src\\App.svelte";
 
-	// (71:2) {:else}
+	// (87:2) {:else}
 	function create_else_block(ctx) {
 		let div;
 		let button0;
@@ -68304,15 +68957,15 @@ void main() {
 				if_block_anchor = empty$1();
 				attr_dev(button0, "class", "svelte-d6m7ck");
 				toggle_class(button0, "active", /*currentPage*/ ctx[3] === "kills");
-				add_location(button0, file, 72, 6, 2002);
+				add_location(button0, file, 88, 6, 2503);
 				attr_dev(button1, "class", "svelte-d6m7ck");
 				toggle_class(button1, "active", /*currentPage*/ ctx[3] === "battles");
-				add_location(button1, file, 78, 6, 2156);
+				add_location(button1, file, 94, 6, 2657);
 				attr_dev(button2, "class", "svelte-d6m7ck");
 				toggle_class(button2, "active", /*currentPage*/ ctx[3] === "camps");
-				add_location(button2, file, 84, 6, 2323);
+				add_location(button2, file, 100, 6, 2824);
 				attr_dev(div, "class", "nav-tabs svelte-d6m7ck");
-				add_location(div, file, 71, 4, 1972);
+				add_location(div, file, 87, 4, 2473);
 			},
 			m: function mount(target, anchor) {
 				insert_dev(target, div, anchor);
@@ -68401,14 +69054,14 @@ void main() {
 			block,
 			id: create_else_block.name,
 			type: "else",
-			source: "(71:2) {:else}",
+			source: "(87:2) {:else}",
 			ctx
 		});
 
 		return block;
 	}
 
-	// (69:2) {#if !loggedIn}
+	// (85:2) {#if !loggedIn}
 	function create_if_block(ctx) {
 		let login;
 		let current;
@@ -68442,14 +69095,14 @@ void main() {
 			block,
 			id: create_if_block.name,
 			type: "if",
-			source: "(69:2) {#if !loggedIn}",
+			source: "(85:2) {#if !loggedIn}",
 			ctx
 		});
 
 		return block;
 	}
 
-	// (110:4) {:else}
+	// (126:4) {:else}
 	function create_else_block_1(ctx) {
 		let activecamps;
 		let current;
@@ -68482,14 +69135,14 @@ void main() {
 			block,
 			id: create_else_block_1.name,
 			type: "else",
-			source: "(110:4) {:else}",
+			source: "(126:4) {:else}",
 			ctx
 		});
 
 		return block;
 	}
 
-	// (108:40) 
+	// (124:40) 
 	function create_if_block_2(ctx) {
 		let activebattles;
 		let current;
@@ -68522,14 +69175,14 @@ void main() {
 			block,
 			id: create_if_block_2.name,
 			type: "if",
-			source: "(108:40) ",
+			source: "(124:40) ",
 			ctx
 		});
 
 		return block;
 	}
 
-	// (93:4) {#if currentPage === "kills"}
+	// (109:4) {#if currentPage === "kills"}
 	function create_if_block_1(ctx) {
 		let div2;
 		let div0;
@@ -68564,12 +69217,12 @@ void main() {
 				button = element("button");
 				button.textContent = "Clear All Kills";
 				attr_dev(div0, "class", "settings-section svelte-d6m7ck");
-				add_location(div0, file, 94, 8, 2564);
-				add_location(button, file, 99, 10, 2769);
+				add_location(div0, file, 110, 8, 3065);
+				add_location(button, file, 115, 10, 3270);
 				attr_dev(div1, "class", "killmail-section svelte-d6m7ck");
-				add_location(div1, file, 97, 8, 2697);
+				add_location(div1, file, 113, 8, 3198);
 				attr_dev(div2, "class", "dashboard svelte-d6m7ck");
-				add_location(div2, file, 93, 6, 2531);
+				add_location(div2, file, 109, 6, 3032);
 			},
 			m: function mount(target, anchor) {
 				insert_dev(target, div2, anchor);
@@ -68619,7 +69272,7 @@ void main() {
 			block,
 			id: create_if_block_1.name,
 			type: "if",
-			source: "(93:4) {#if currentPage === \\\"kills\\\"}",
+			source: "(109:4) {#if currentPage === \\\"kills\\\"}",
 			ctx
 		});
 
@@ -68647,7 +69300,7 @@ void main() {
 				main = element("main");
 				if_block.c();
 				attr_dev(main, "class", "svelte-d6m7ck");
-				add_location(main, file, 67, 0, 1892);
+				add_location(main, file, 83, 0, 2393);
 			},
 			l: function claim(nodes) {
 				throw new Error("options.hydrate only works if the component was compiled with the `hydratable: true` option");
@@ -68765,12 +69418,30 @@ void main() {
 			});
 
 			socket.on("initialData", data => {
-				console.log("App.svelte - Received initialData:", data);
-				killmails.set(data.killmails);
-				settings.set(data.settings);
-				filterLists.set(data.filterLists);
-				profiles.set(data.profiles);
-				console.log("App.svelte - Stores updated with initial data");
+				try {
+					console.log("App.svelte - Received initialData:", data);
+
+					// Initialize settings first
+					const initializedSettings = initializeSettings(data.settings);
+
+					settings.set(initializedSettings);
+
+					// Then update other stores
+					killmails.set(data.killmails || []);
+
+					filterLists.set(data.filterLists || []);
+					profiles.set(data.profiles || []);
+					console.log("App.svelte - Stores updated with initial data");
+				} catch(e) {
+					console.error("Error initializing data:", e);
+
+					// Set safe default values
+					settings.set(DEFAULT_SETTINGS);
+
+					killmails.set([]);
+					filterLists.set([]);
+					profiles.set([]);
+				}
 			});
 
 			return () => {
@@ -68814,6 +69485,7 @@ void main() {
 			Login,
 			ActiveBattles,
 			ActiveCamps,
+			initializeSettings,
 			loggedIn,
 			username,
 			settingsManagerComponent,

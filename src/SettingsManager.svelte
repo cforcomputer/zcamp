@@ -35,9 +35,39 @@
     );
   });
 
+  // SettingsManager.svelte
   function updateSetting(key, value) {
-    settings.update((s) => ({ ...s, [key]: value }));
-    socket.emit("updateSettings", $settings);
+    try {
+      settings.update((s) => {
+        const currentSettings = s || DEFAULT_SETTINGS;
+        const updatedSettings = { ...currentSettings };
+
+        // Ensure nested objects exist
+        if (
+          key === "location_type_filter_enabled" &&
+          !updatedSettings.location_types
+        ) {
+          updatedSettings.location_types = DEFAULT_SETTINGS.location_types;
+        }
+        if (
+          key === "combat_label_filter_enabled" &&
+          !updatedSettings.combat_labels
+        ) {
+          updatedSettings.combat_labels = DEFAULT_SETTINGS.combat_labels;
+        }
+
+        // Update the setting
+        updatedSettings[key] = value;
+
+        // Emit update to server
+        socket.emit("updateSettings", updatedSettings);
+
+        return updatedSettings;
+      });
+    } catch (e) {
+      console.error("Error updating setting:", e);
+      settings.set(DEFAULT_SETTINGS);
+    }
   }
 
   function createFilterList() {
@@ -562,6 +592,127 @@
     </label>
   {/if}
 
+  <!-- Location Type Filter -->
+  <label>
+    <input
+      type="checkbox"
+      bind:checked={localSettings.location_type_filter_enabled}
+      on:change={() =>
+        updateSetting(
+          "location_type_filter_enabled",
+          localSettings.location_type_filter_enabled
+        )}
+    />
+    Enable Location Type Filter
+  </label>
+
+  {#if localSettings.location_type_filter_enabled}
+    <div class="location-types">
+      <label>
+        <input
+          type="checkbox"
+          bind:checked={localSettings.location_types.highsec}
+          on:change={() =>
+            updateSetting("location_types", localSettings.location_types)}
+        />
+        High Security
+      </label>
+      <label>
+        <input
+          type="checkbox"
+          bind:checked={localSettings.location_types.lowsec}
+          on:change={() =>
+            updateSetting("location_types", localSettings.location_types)}
+        />
+        Low Security
+      </label>
+      <label>
+        <input
+          type="checkbox"
+          bind:checked={localSettings.location_types.nullsec}
+          on:change={() =>
+            updateSetting("location_types", localSettings.location_types)}
+        />
+        Null Security
+      </label>
+      <label>
+        <input
+          type="checkbox"
+          bind:checked={localSettings.location_types.wspace}
+          on:change={() =>
+            updateSetting("location_types", localSettings.location_types)}
+        />
+        Wormhole Space
+      </label>
+      <label>
+        <input
+          type="checkbox"
+          bind:checked={localSettings.location_types.abyssal}
+          on:change={() =>
+            updateSetting("location_types", localSettings.location_types)}
+        />
+        Abyssal Space
+      </label>
+    </div>
+  {/if}
+
+  <!-- Ship Category Filter -->
+  <label>
+    <input
+      type="checkbox"
+      bind:checked={localSettings.capitals_only}
+      on:change={() =>
+        updateSetting("capitals_only", localSettings.capitals_only)}
+    />
+    Capitals Only
+  </label>
+
+  <!-- Combat Type Filter -->
+  <label>
+    <input
+      type="checkbox"
+      bind:checked={localSettings.combat_label_filter_enabled}
+      on:change={() =>
+        updateSetting(
+          "combat_label_filter_enabled",
+          localSettings.combat_label_filter_enabled
+        )}
+    />
+    Enable Combat Label Filter
+  </label>
+
+  {#if localSettings.combat_label_filter_enabled}
+    <div class="combat-labels">
+      <label>
+        <input
+          type="checkbox"
+          bind:checked={localSettings.combat_labels.ganked}
+          on:change={() =>
+            updateSetting("combat_labels", localSettings.combat_labels)}
+        />
+        Ganked
+      </label>
+      <label>
+        <input
+          type="checkbox"
+          bind:checked={localSettings.combat_labels.pvp}
+          on:change={() =>
+            updateSetting("combat_labels", localSettings.combat_labels)}
+        />
+        PvP
+      </label>
+      <label>
+        <input
+          type="checkbox"
+          bind:checked={localSettings.combat_labels.padding}
+          on:change={() =>
+            updateSetting("combat_labels", localSettings.combat_labels)}
+        />
+        Padding
+      </label>
+    </div>
+  {/if}
+
   <h3>Discord Webhook</h3>
   <label>
     <input
@@ -603,6 +754,7 @@
       <option value="victim_corporation">Victim Corporation</option>
       <option value="ship_type">Ship Type</option>
       <option value="solar_system">Solar System</option>
+      <option value="region">Region</option>
     </select>
     <button on:click={createFilterList}>Create New List</button>
   </div>

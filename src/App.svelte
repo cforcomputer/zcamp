@@ -8,6 +8,7 @@
   import Login from "./Login.svelte";
   import ActiveBattles from "./ActiveBattles.svelte";
   import ActiveCamps from "./ActiveCamps.svelte";
+  import { initializeSettings } from "./store.js";
 
   let loggedIn = false;
   let username = "";
@@ -49,12 +50,27 @@
     });
 
     socket.on("initialData", (data) => {
-      console.log("App.svelte - Received initialData:", data);
-      killmails.set(data.killmails);
-      settings.set(data.settings);
-      filterLists.set(data.filterLists);
-      profiles.set(data.profiles);
-      console.log("App.svelte - Stores updated with initial data");
+      try {
+        console.log("App.svelte - Received initialData:", data);
+
+        // Initialize settings first
+        const initializedSettings = initializeSettings(data.settings);
+        settings.set(initializedSettings);
+
+        // Then update other stores
+        killmails.set(data.killmails || []);
+        filterLists.set(data.filterLists || []);
+        profiles.set(data.profiles || []);
+
+        console.log("App.svelte - Stores updated with initial data");
+      } catch (e) {
+        console.error("Error initializing data:", e);
+        // Set safe default values
+        settings.set(DEFAULT_SETTINGS);
+        killmails.set([]);
+        filterLists.set([]);
+        profiles.set([]);
+      }
     });
 
     return () => {

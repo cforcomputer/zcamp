@@ -212,28 +212,44 @@ app.post("/api/filter-list", async (req, res) => {
       });
     }
 
-    // Check if adding this list would exceed the size limit
+    // Process IDs based on filter type
+    let processedIds = ids;
+    if (filterType === "region") {
+      // Handle region IDs - ensure proper array format
+      processedIds = Array.isArray(ids)
+        ? ids.map((id) => id.toString().trim())
+        : ids.split(",").map((id) => id.toString().trim());
+    } else {
+      // For other filter types, ensure array format
+      processedIds = Array.isArray(ids)
+        ? ids
+        : ids.split(",").map((id) => id.trim());
+    }
+
+    // Check size limit
     const currentSize = await getFilterListsSize(userId);
     const newListSize = JSON.stringify({
       name,
-      ids,
+      processedIds,
       enabled,
       isExclude,
       filterType,
     }).length;
+
     if (currentSize + newListSize > 1024 * 1024) {
-      // 1MB limit
-      return res
-        .status(400)
-        .json({ success: false, message: "Filter lists size limit exceeded" });
+      return res.status(400).json({
+        success: false,
+        message: "Filter lists size limit exceeded",
+      });
     }
 
+    // Insert into database with processed IDs
     db.run(
       "INSERT INTO filter_lists (user_id, name, ids, enabled, is_exclude, filter_type) VALUES (?, ?, ?, ?, ?, ?)",
       [
         userId,
         name,
-        JSON.stringify(ids),
+        JSON.stringify(processedIds), // Store processed IDs
         enabled ? 1 : 0,
         isExclude ? 1 : 0,
         filterType || null,
@@ -241,15 +257,16 @@ app.post("/api/filter-list", async (req, res) => {
       function (err) {
         if (err) {
           console.error("Error creating filter list:", err);
-          res
-            .status(500)
-            .json({ success: false, message: "Error creating filter list" });
+          res.status(500).json({
+            success: false,
+            message: "Error creating filter list",
+          });
         } else {
           const newFilterList = {
             id: this.lastID,
             user_id: userId,
             name,
-            ids: ids,
+            ids: processedIds, // Use processed IDs in response
             enabled: Boolean(enabled),
             is_exclude: Boolean(isExclude),
             filter_type: filterType || null,
@@ -1163,10 +1180,21 @@ async function processKillmail(killmail) {
   const systemId = killmail.killmail.solar_system_id;
   const celestialData = await ensureCelestialData(systemId);
 
+  // Get the first celestial entry which contains system info
+  const systemInfo = celestialData[0];
+
   const pinpointData = calculatePinpoints(
     celestialData,
     killmail.killmail.victim.position
   );
+
+  // Attach relevant celestial data to the pinpoints
+  pinpointData.celestialData = {
+    regionid: systemInfo.regionid,
+    regionname: systemInfo.regionname,
+    solarsystemid: systemInfo.solarsystemid,
+    solarsystemname: systemInfo.solarsystemname,
+  };
 
   return {
     ...killmail,

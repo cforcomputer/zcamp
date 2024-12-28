@@ -3,7 +3,8 @@ import { writable, derived } from "svelte/store";
 export const killmails = writable([]);
 export const filterLists = writable([]);
 export const profiles = writable([]);
-export const settings = writable({
+
+const DEFAULT_SETTINGS = {
   dropped_value_enabled: false,
   total_value_enabled: false,
   points_enabled: false,
@@ -25,8 +26,23 @@ export const settings = writable({
   triangulation_filter_exclude: false,
   webhook_enabled: false,
   webhook_url: "",
-});
-
+  // location type/new filters
+  location_type_filter_enabled: false,
+  location_types: {
+    highsec: false,
+    lowsec: false,
+    nullsec: false,
+    wspace: false,
+    abyssal: false,
+  },
+  combat_label_filter_enabled: false,
+  combat_labels: {
+    ganked: false,
+    pvp: false,
+    padding: false,
+  },
+};
+export const settings = writable(DEFAULT_SETTINGS);
 export const filteredKillmails = derived(
   [killmails, settings, filterLists],
   ([$killmails, $settings, $filterLists]) => {
@@ -41,6 +57,7 @@ export const filteredKillmails = derived(
           if (!isTriangulatable) return false;
         }
       }
+
       // Apply filter lists
       for (let list of $filterLists) {
         if (!list.enabled) continue;
@@ -87,6 +104,61 @@ export const filteredKillmails = derived(
           case "solar_system":
             match = ids.includes(killmail.killmail.solar_system_id?.toString());
             break;
+          case "region": {
+            const celestialData = killmail.pinpoints?.celestialData;
+            if (!celestialData) return false;
+
+            // Debug log to verify data
+            console.log("Region Filter - Comparing:", {
+              celestialRegionId: celestialData.regionid,
+              celestialRegionName: celestialData.regionname,
+              filterIds: ids,
+            });
+
+            // Ensure ids is an array
+            const idList = Array.isArray(ids) ? ids : [ids];
+
+            // Compare both ID and name, accounting for string/number conversion
+            match = idList.some((id) => {
+              const matchesId =
+                celestialData.regionid.toString() === id.toString();
+              const matchesName =
+                celestialData.regionname.toLowerCase() ===
+                id.toString().toLowerCase();
+
+              // Debug log for each comparison
+              console.log("Comparing:", {
+                id,
+                matchesId,
+                matchesName,
+                celestialRegionId: celestialData.regionid,
+                celestialRegionName: celestialData.regionname,
+              });
+
+              return matchesId || matchesName;
+            });
+
+            break;
+          }
+          case "location_type":
+            match = killmail.zkb.labels.some((label) =>
+              ids.includes(label.replace("loc:", ""))
+            );
+            break;
+          case "ship_category":
+            match = killmail.zkb.labels.some(
+              (label) =>
+                (label.startsWith("cat:") || label === "capital") &&
+                ids.includes(label.replace("cat:", ""))
+            );
+            break;
+          case "combat_type":
+            match = killmail.zkb.labels.some(
+              (label) =>
+                ids.includes(label) &&
+                ["atShip", "ganked", "pvp", "padding"].includes(label)
+            );
+            break;
         }
 
         if (list.is_exclude && match) return false;
@@ -130,13 +202,25 @@ export const filteredKillmails = derived(
       }
 
       // Location Filter
-      if (
-        $settings.location_filter_enabled &&
-        $settings.location_filter &&
-        killmail.killmail.solar_system_id !==
-          parseInt($settings.location_filter)
-      ) {
-        return false;
+      // Location Type Filter
+      if ($settings.location_type_filter_enabled && $settings.location_types) {
+        const selectedTypes = Object.entries(
+          $settings.location_types || {
+            highsec: false,
+            lowsec: false,
+            nullsec: false,
+            wspace: false,
+            abyssal: false,
+          }
+        )
+          .filter(([_, enabled]) => enabled)
+          .map(([type, _]) => `loc:${type}`);
+        if (
+          selectedTypes.length > 0 &&
+          !killmail.zkb.labels.some((label) => selectedTypes.includes(label))
+        ) {
+          return false;
+        }
       }
 
       // Ship Type Filter
@@ -237,6 +321,44 @@ export const filteredKillmails = derived(
         return false;
       }
 
+      // Location Type Filter
+      if ($settings.location_type_filter_enabled) {
+        const selectedTypes = Object.entries(settings.location_types)
+          .filter(([_, enabled]) => enabled)
+          .map(([type, _]) => `loc:${type}`);
+        if (
+          selectedTypes.length > 0 &&
+          !killmail.zkb.labels.some((label) => selectedTypes.includes(label))
+        ) {
+          return false;
+        }
+      }
+
+      // Ship Category Filter
+      // When capitals only is enabled
+      if ($settings.capitals_only && !killmail.zkb.labels.includes("capital")) {
+        return false;
+      }
+
+      // Combat Type Filter
+      if ($settings.combat_label_filter_enabled && $settings.combat_labels) {
+        const selectedLabels = Object.entries(
+          $settings.combat_labels || {
+            ganked: false,
+            pvp: false,
+            padding: false,
+          }
+        )
+          .filter(([_, enabled]) => enabled)
+          .map(([label, _]) => label);
+        if (
+          selectedLabels.length > 0 &&
+          !killmail.zkb.labels.some((label) => selectedLabels.includes(label))
+        ) {
+          return false;
+        }
+      }
+
       return true;
     });
 
@@ -279,4 +401,29 @@ export function updateProfile(updatedProfile) {
 
 export function deleteProfile(id) {
   profiles.update((profs) => profs.filter((prof) => prof.id !== id));
+}
+
+export function initializeSettings(serverSettings) {
+  try {
+    const parsedSettings =
+      typeof serverSettings === "string"
+        ? JSON.parse(serverSettings)
+        : serverSettings;
+
+    return {
+      ...DEFAULT_SETTINGS,
+      ...parsedSettings,
+      location_types: {
+        ...DEFAULT_SETTINGS.location_types,
+        ...(parsedSettings?.location_types || {}),
+      },
+      combat_labels: {
+        ...DEFAULT_SETTINGS.combat_labels,
+        ...(parsedSettings?.combat_labels || {}),
+      },
+    };
+  } catch (e) {
+    console.error("Error initializing settings:", e);
+    return DEFAULT_SETTINGS;
+  }
 }
