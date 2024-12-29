@@ -119,9 +119,8 @@
 
       const lineHeight = this.currentSize / 3;
       const systemName =
-        this.battle.kills[0]?.pinpoints?.nearestCelestial?.name?.split(
-          " "
-        )[0] || this.battle.systemId;
+        this.battle.kills[0]?.pinpoints?.celestialData?.solarsystemname ||
+        this.battle.systemId;
 
       ctx.fillText(systemName, this.x, this.y - lineHeight);
       ctx.fillText(`${this.battle.involvedCount} pilots`, this.x, this.y);

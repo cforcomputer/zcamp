@@ -26,6 +26,34 @@
     if (minutes === 1) return "1 minute ago";
     return `${minutes} minutes ago`;
   }
+
+  function getProbabilityColor(probability) {
+    if (probability >= 80) return "#ff4444";
+    if (probability >= 60) return "#ff8c00";
+    if (probability >= 40) return "#ffd700";
+    return "#90ee90";
+  }
+
+  function getKillFrequency(kills) {
+    const timeSpan =
+      new Date(kills[kills.length - 1].killmail.killmail_time) -
+      new Date(kills[0].killmail.killmail_time);
+    const minutes = timeSpan / (1000 * 60);
+    const rate = kills.length / (minutes || 1);
+    return `${rate.toFixed(1)} kills/min`;
+  }
+
+  function hasInterdictor(kills) {
+    return kills.some((kill) =>
+      kill.killmail.attackers.some(
+        (a) =>
+          a.ship_type_id &&
+          [22456, 22464, 22452, 22460, 12013, 12017, 12021, 12025].includes(
+            a.ship_type_id
+          )
+      )
+    );
+  }
 </script>
 
 <div class="active-camps">
@@ -35,6 +63,7 @@
       <button
         class="camp-card"
         type="button"
+        style="border-color: {getProbabilityColor(camp.probability)}"
         on:click={() => {
           const latestKill = camp.kills[camp.kills.length - 1];
           if (latestKill) {
@@ -46,18 +75,56 @@
         }}
         aria-label={`View latest kill for gate camp at ${camp.stargateName}`}
       >
-        <h3>{camp.stargateName}</h3>
+        <div class="camp-header">
+          <h3>{camp.stargateName}</h3>
+          <span
+            class="probability"
+            style="background-color: {getProbabilityColor(camp.probability)}"
+          >
+            {Math.round(camp.probability)}% Confidence
+          </span>
+        </div>
+
         <div class="camp-stats">
-          <p class="system">System: {camp.systemId}</p>
-          <p class="kills">Ships Destroyed: {camp.kills.length}</p>
-          <p class="value">Total Value: {formatValue(camp.totalValue)} ISK</p>
-          <p class="attackers">
-            Campers: {camp.numAttackers} pilots from {camp.numCorps} corps
-            {#if camp.numAlliances > 0}
-              in {camp.numAlliances} alliances
-            {/if}
-          </p>
-          <p class="time">Last kill: {getTimeAgo(camp.lastKill)}</p>
+          <div class="stat-row">
+            <span class="stat-label">System:</span>
+            <span class="stat-value">{camp.systemId}</span>
+          </div>
+
+          <div class="stat-row">
+            <span class="stat-label">Activity:</span>
+            <span class="stat-value">
+              {camp.kills.length} kills ({getKillFrequency(camp.kills)})
+              {#if hasInterdictor(camp.kills)}
+                <span
+                  class="interdictor-badge"
+                  title="Interdictor/HICTOR present">⚠️</span
+                >
+              {/if}
+            </span>
+          </div>
+
+          <div class="stat-row">
+            <span class="stat-label">Value:</span>
+            <span class="stat-value value"
+              >{formatValue(camp.totalValue)} ISK</span
+            >
+          </div>
+
+          <div class="stat-row">
+            <span class="stat-label">Composition:</span>
+            <span class="stat-value">
+              {camp.numAttackers} pilots from {camp.numCorps} corps
+              {#if camp.numAlliances > 0}
+                in {camp.numAlliances} alliances
+              {/if}
+            </span>
+          </div>
+
+          <div class="stat-row">
+            <span class="stat-label">Last Activity:</span>
+            <span class="stat-value time">{getTimeAgo(camp.lastKill)}</span>
+          </div>
         </div>
       </button>
     {/each}
@@ -81,31 +148,53 @@
 
   .camp-card {
     cursor: pointer;
-    background: rgba(255, 0, 0, 0.1);
-    border: 2px solid rgba(255, 0, 0, 0.3);
+    background: rgba(0, 0, 0, 0.7);
+    border: 2px solid;
     border-radius: 8px;
     padding: 1em;
     transition: all 0.3s ease;
     width: 100%;
     text-align: left;
     font-family: inherit;
-    color: inherit;
+    color: white;
     appearance: none;
-    background: none;
     margin: 0;
   }
 
   .camp-card:hover {
     transform: scale(1.02);
-    background: rgba(255, 0, 0, 0.15);
+    filter: brightness(1.2);
+  }
+
+  .camp-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1em;
+  }
+
+  .probability {
+    padding: 0.3em 0.6em;
+    border-radius: 4px;
+    font-size: 0.9em;
+    font-weight: bold;
   }
 
   .camp-stats {
     font-size: 0.9em;
   }
 
-  .camp-stats p {
+  .stat-row {
+    display: flex;
+    justify-content: space-between;
     margin: 0.5em 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    padding-bottom: 0.3em;
+  }
+
+  .stat-label {
+    color: #888;
+    font-weight: 500;
   }
 
   .value {
@@ -114,15 +203,30 @@
   }
 
   .time {
-    color: #666;
+    color: #888;
     font-style: italic;
+  }
+
+  .interdictor-badge {
+    margin-left: 0.5em;
+    cursor: help;
   }
 
   .no-camps {
     grid-column: 1 / -1;
     text-align: center;
     padding: 2em;
-    color: #666;
+    color: #888;
     font-style: italic;
+  }
+
+  h2 {
+    color: white;
+    margin-bottom: 1em;
+  }
+
+  h3 {
+    margin: 0;
+    color: white;
   }
 </style>

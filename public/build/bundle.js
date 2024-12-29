@@ -5580,42 +5580,126 @@ var app = (function () {
 	  }
 	);
 
-	// src/campStore.js
-
 	const activeCamps = writable([]);
 
-	const CAMP_TIMEOUT = 60 * 60 * 1000; // 1 hour in milliseconds
+	// Add at top of campStore.js
+	const CAPSULE_ID = 670;
+	const INTERDICTOR_IDS = new Set([
+	  22456, // Sabre
+	  22464, // Flycatcher
+	  22452, // Heretic
+	  22460, // Eris
+	  // Add other interdictor IDs
+	]);
 
-	function isStargate(celestialName) {
-	  return celestialName?.toLowerCase().includes("stargate");
+	const HICTOR_IDS = new Set([
+	  12013, // Broadsword
+	  12017, // Onyx
+	  12021, // Phobos
+	  12025, // Devoter
+	  // Add other heavy interdictor IDs
+	]);
+
+	function calculateCampProbability(kills) {
+	  let probability = 0;
+
+	  // Ignore if only capsule kills
+	  const nonCapsuleKills = kills.filter(
+	    (k) => k.killmail.victim.ship_type_id !== CAPSULE_ID
+	  );
+
+	  if (nonCapsuleKills.length < 2) return 0;
+
+	  // Base probability starts at 30% with 2+ kills
+	  probability = 30;
+
+	  // Check time distribution
+	  const killTimes = nonCapsuleKills.map((k) =>
+	    new Date(k.killmail.killmail_time).getTime()
+	  );
+	  const timeSpan = Math.max(...killTimes) - Math.min(...killTimes);
+	  const avgTimeBetweenKills = timeSpan / (killTimes.length - 1);
+
+	  // If kills are very close together (within 2 minutes), reduce probability
+	  if (avgTimeBetweenKills < 120000) {
+	    probability -= 20;
+	  } else if (avgTimeBetweenKills > 600000) {
+	    // If spread out over 10+ minutes
+	    probability += 20;
+	  }
+
+	  // Check for interdictors/hictors
+	  const hasInterdictor = nonCapsuleKills.some((kill) =>
+	    kill.killmail.attackers.some(
+	      (a) =>
+	        INTERDICTOR_IDS.has(a.ship_type_id) || HICTOR_IDS.has(a.ship_type_id)
+	    )
+	  );
+
+	  if (hasInterdictor) {
+	    probability += 30;
+	  }
+
+	  // Check for shared attackers
+	  const attackerOverlap = getAttackerOverlap(nonCapsuleKills);
+	  if (attackerOverlap.characters > 0) {
+	    probability += 30;
+	  } else if (attackerOverlap.corporations > 0) {
+	    probability += 20;
+	  } else if (attackerOverlap.alliances > 0) {
+	    probability += 10;
+	  }
+
+	  // Cap probability at 100%
+	  return Math.min(100, Math.max(0, probability));
 	}
 
-	function getAttackerIds(attackers) {
-	  const ids = {
-	    character_ids: new Set(),
-	    corporation_ids: new Set(),
-	    alliance_ids: new Set(),
+	function getAttackerOverlap(kills) {
+	  const overlap = {
+	    characters: 0,
+	    corporations: 0,
+	    alliances: 0,
 	  };
 
-	  attackers.forEach((attacker) => {
-	    if (attacker.character_id) ids.character_ids.add(attacker.character_id);
-	    if (attacker.corporation_id)
-	      ids.corporation_ids.add(attacker.corporation_id);
-	    if (attacker.alliance_id) ids.alliance_ids.add(attacker.alliance_id);
-	  });
+	  // Create sets for first kill's attacker IDs
+	  const firstKillAttackers = {
+	    characters: new Set(
+	      kills[0].killmail.attackers.map((a) => a.character_id).filter(Boolean)
+	    ),
+	    corporations: new Set(
+	      kills[0].killmail.attackers.map((a) => a.corporation_id).filter(Boolean)
+	    ),
+	    alliances: new Set(
+	      kills[0].killmail.attackers.map((a) => a.alliance_id).filter(Boolean)
+	    ),
+	  };
 
-	  return ids;
-	}
+	  // Check other kills for overlapping IDs
+	  for (let i = 1; i < kills.length; i++) {
+	    const kill = kills[i];
+	    kill.killmail.attackers.forEach((attacker) => {
+	      if (
+	        attacker.character_id &&
+	        firstKillAttackers.characters.has(attacker.character_id)
+	      ) {
+	        overlap.characters++;
+	      }
+	      if (
+	        attacker.corporation_id &&
+	        firstKillAttackers.corporations.has(attacker.corporation_id)
+	      ) {
+	        overlap.corporations++;
+	      }
+	      if (
+	        attacker.alliance_id &&
+	        firstKillAttackers.alliances.has(attacker.alliance_id)
+	      ) {
+	        overlap.alliances++;
+	      }
+	    });
+	  }
 
-	function checkRelatedAttackers(camp, killmail) {
-	  const newIds = getAttackerIds(killmail.killmail.attackers);
-
-	  // Check for any overlapping IDs
-	  return (
-	    [...camp.character_ids].some((id) => newIds.character_ids.has(id)) ||
-	    [...camp.corporation_ids].some((id) => newIds.corporation_ids.has(id)) ||
-	    [...camp.alliance_ids].some((id) => newIds.alliance_ids.has(id))
-	  );
+	  return overlap;
 	}
 
 	function addKillmailToCamps(killmail) {
@@ -5644,18 +5728,18 @@ var app = (function () {
 	    );
 
 	    if (camp) {
-	      // Only add kill if attackers are related
-	      if (checkRelatedAttackers(camp, killmail)) {
-	        camp.kills.push(killmail);
-	        camp.lastKill = killmail.killmail.killmail_time;
-	        camp.totalValue += killmail.zkb.totalValue;
+	      camp.kills.push(killmail);
+	      camp.lastKill = killmail.killmail.killmail_time;
+	      camp.totalValue += killmail.zkb.totalValue;
 
-	        // Update attacker IDs
-	        const newIds = getAttackerIds(killmail.killmail.attackers);
-	        newIds.character_ids.forEach((id) => camp.character_ids.add(id));
-	        newIds.corporation_ids.forEach((id) => camp.corporation_ids.add(id));
-	        newIds.alliance_ids.forEach((id) => camp.alliance_ids.add(id));
-	      }
+	      // Update attacker IDs
+	      const newIds = getAttackerIds(killmail.killmail.attackers);
+	      newIds.character_ids.forEach((id) => camp.character_ids.add(id));
+	      newIds.corporation_ids.forEach((id) => camp.corporation_ids.add(id));
+	      newIds.alliance_ids.forEach((id) => camp.alliance_ids.add(id));
+
+	      // Recalculate probability
+	      camp.probability = calculateCampProbability(camp.kills);
 	    } else {
 	      // Create new camp
 	      const ids = getAttackerIds(killmail.killmail.attackers);
@@ -5668,6 +5752,7 @@ var app = (function () {
 	        character_ids: ids.character_ids,
 	        corporation_ids: ids.corporation_ids,
 	        alliance_ids: ids.alliance_ids,
+	        probability: 0, // Will be recalculated when more kills are added
 	      };
 	      camps.push(camp);
 	    }
@@ -5678,13 +5763,20 @@ var app = (function () {
 
 	const filteredCamps = derived([activeCamps], ([$activeCamps]) => {
 	  return $activeCamps
-	    .filter((camp) => camp.kills.length >= 2)
+	    .filter((camp) => {
+	      // Filter out camps with only capsule kills
+	      const nonCapsuleKills = camp.kills.filter(
+	        (k) => k.killmail.victim.ship_type_id !== CAPSULE_ID
+	      );
+	      return nonCapsuleKills.length >= 2 && camp.probability >= 30;
+	    })
 	    .map((camp) => ({
 	      ...camp,
 	      numAttackers: camp.character_ids.size,
 	      numCorps: camp.corporation_ids.size,
 	      numAlliances: camp.alliance_ids.size,
-	    }));
+	    }))
+	    .sort((a, b) => b.probability - a.probability); // Sort by probability
 	});
 
 	const killmails = writable([]);
@@ -6083,42 +6175,48 @@ var app = (function () {
 	  }
 	}
 
-	// In src/socket.js
-
 	const socket = lookup("http://localhost:3000");
 	let audio = new Audio("audio_files/alert.wav");
 
-	// Modify the newKillmail handler
 	socket.on("newKillmail", (killmail) => {
-	  console.log("Received new killmail:", killmail);
+	  console.log("Socket.js - Processing killmail:", killmail.killID);
+
 	  killmails.update((currentKillmails) => {
+	    // Ensure we have an array to work with
 	    const existingKillmails = Array.isArray(currentKillmails)
 	      ? currentKillmails
 	      : [];
 
-	    // Verify this killmail ID doesn't already exist
-	    const duplicateIndex = existingKillmails.findIndex(
+	    // Check if this killmail already exists
+	    const isDuplicate = existingKillmails.some(
 	      (km) => km.killID === killmail.killID
 	    );
 
-	    if (duplicateIndex !== -1) {
-	      console.warn(`Duplicate killmail detected - ID: ${killmail.killID}`);
+	    if (isDuplicate) {
+	      console.log("Socket.js - Duplicate killmail detected:", killmail.killID);
 	      return existingKillmails;
 	    }
 
-	    // Add new killmail and maintain chronological order
-	    const updatedKillmails = [...existingKillmails, killmail].sort(
-	      (a, b) =>
-	        new Date(b.killmail.killmail_time) - new Date(a.killmail.killmail_time)
-	    );
-
-	    // Get current filtered killmails length before update
+	    // Get current filtered length for sound alerts
 	    const prevFilteredLength = get_store_value(filteredKillmails).length;
 
-	    // Wait for next tick to let filters process
+	    // Process for battles and camps
+	    addKillmailToBattles(killmail);
+	    addKillmailToCamps(killmail);
+
+	    // Add new killmail and sort chronologically
+	    const updatedKillmails = [...existingKillmails, killmail].sort((a, b) => {
+	      const timeA = new Date(a.killmail.killmail_time).getTime();
+	      const timeB = new Date(b.killmail.killmail_time).getTime();
+	      if (timeA === timeB) {
+	        return b.killID - a.killID; // Use killID as tiebreaker
+	      }
+	      return timeB - timeA;
+	    });
+
+	    // Handle sound alerts after update
 	    setTimeout(() => {
 	      const newFilteredLength = get_store_value(filteredKillmails).length;
-	      // Only play sound if killmail passed filters (filtered length increased)
 	      if (newFilteredLength > prevFilteredLength) {
 	        const settingsValue = get_store_value(settings);
 	        if (settingsValue.audio_alerts_enabled) {
@@ -6127,18 +6225,13 @@ var app = (function () {
 	      }
 	    }, 0);
 
-	    addKillmailToBattles(killmail);
-
-	    // Check for gate camps
-	    addKillmailToCamps(killmail);
-
 	    return updatedKillmails;
 	  });
 	});
 
 	socket.on("killmailsCleared", () => {
 	  killmails.set([]);
-	  filteredKillmails.set([]); // Make sure filtered killmails are also cleared
+	  filteredKillmails.set([]);
 	});
 
 	function playSound() {
@@ -6951,7 +7044,7 @@ var app = (function () {
 	const { console: console_1$4 } = globals;
 	const file$6 = "src\\SettingsManager.svelte";
 
-	// (222:2) {#if localSettings}
+	// (224:2) {#if localSettings}
 	function create_if_block_3$1(ctx) {
 		let label0;
 		let input0;
@@ -7224,148 +7317,148 @@ var app = (function () {
 				t67 = text("Solar System ID:\r\n      ");
 				input30 = element("input");
 				attr_dev(input0, "type", "checkbox");
-				add_location(input0, file$6, 223, 6, 6392);
+				add_location(input0, file$6, 225, 6, 6483);
 				attr_dev(label0, "class", "svelte-gu7nlb");
-				add_location(label0, file$6, 222, 4, 6377);
+				add_location(label0, file$6, 224, 4, 6468);
 				attr_dev(input1, "type", "number");
 				attr_dev(input1, "class", "svelte-gu7nlb");
-				add_location(input1, file$6, 236, 6, 6746);
+				add_location(input1, file$6, 238, 6, 6837);
 				attr_dev(label1, "class", "svelte-gu7nlb");
-				add_location(label1, file$6, 234, 4, 6701);
+				add_location(label1, file$6, 236, 4, 6792);
 				attr_dev(input2, "type", "checkbox");
-				add_location(input2, file$6, 245, 6, 6969);
+				add_location(input2, file$6, 247, 6, 7060);
 				attr_dev(label2, "class", "svelte-gu7nlb");
-				add_location(label2, file$6, 244, 4, 6954);
+				add_location(label2, file$6, 246, 4, 7045);
 				attr_dev(input3, "type", "checkbox");
-				add_location(input3, file$6, 258, 6, 7287);
+				add_location(input3, file$6, 260, 6, 7378);
 				attr_dev(label3, "class", "svelte-gu7nlb");
-				add_location(label3, file$6, 257, 4, 7272);
+				add_location(label3, file$6, 259, 4, 7363);
 				attr_dev(h30, "class", "svelte-gu7nlb");
-				add_location(h30, file$6, 285, 4, 8056);
+				add_location(h30, file$6, 287, 4, 8147);
 				attr_dev(input4, "type", "checkbox");
-				add_location(input4, file$6, 287, 6, 8097);
+				add_location(input4, file$6, 289, 6, 8188);
 				attr_dev(label4, "class", "svelte-gu7nlb");
-				add_location(label4, file$6, 286, 4, 8082);
+				add_location(label4, file$6, 288, 4, 8173);
 				attr_dev(input5, "type", "number");
 				attr_dev(input5, "class", "svelte-gu7nlb");
-				add_location(input5, file$6, 300, 6, 8447);
+				add_location(input5, file$6, 302, 6, 8538);
 				attr_dev(label5, "class", "svelte-gu7nlb");
-				add_location(label5, file$6, 298, 4, 8411);
+				add_location(label5, file$6, 300, 4, 8502);
 				attr_dev(input6, "type", "number");
 				attr_dev(input6, "class", "svelte-gu7nlb");
-				add_location(input6, file$6, 310, 6, 8707);
+				add_location(input6, file$6, 312, 6, 8798);
 				attr_dev(label6, "class", "svelte-gu7nlb");
-				add_location(label6, file$6, 308, 4, 8664);
+				add_location(label6, file$6, 310, 4, 8755);
 				attr_dev(input7, "type", "checkbox");
-				add_location(input7, file$6, 318, 6, 8913);
+				add_location(input7, file$6, 320, 6, 9004);
 				attr_dev(label7, "class", "svelte-gu7nlb");
-				add_location(label7, file$6, 317, 4, 8898);
+				add_location(label7, file$6, 319, 4, 8989);
 				attr_dev(input8, "type", "number");
 				attr_dev(input8, "class", "svelte-gu7nlb");
-				add_location(input8, file$6, 328, 6, 9193);
+				add_location(input8, file$6, 330, 6, 9284);
 				attr_dev(label8, "class", "svelte-gu7nlb");
-				add_location(label8, file$6, 326, 4, 9155);
+				add_location(label8, file$6, 328, 4, 9246);
 				attr_dev(input9, "type", "checkbox");
-				add_location(input9, file$6, 336, 6, 9384);
+				add_location(input9, file$6, 338, 6, 9475);
 				attr_dev(label9, "class", "svelte-gu7nlb");
-				add_location(label9, file$6, 335, 4, 9369);
+				add_location(label9, file$6, 337, 4, 9460);
 				attr_dev(input10, "type", "checkbox");
-				add_location(input10, file$6, 345, 6, 9602);
+				add_location(input10, file$6, 347, 6, 9693);
 				attr_dev(label10, "class", "svelte-gu7nlb");
-				add_location(label10, file$6, 344, 4, 9587);
+				add_location(label10, file$6, 346, 4, 9678);
 				attr_dev(input11, "type", "checkbox");
-				add_location(input11, file$6, 354, 6, 9809);
+				add_location(input11, file$6, 356, 6, 9900);
 				attr_dev(label11, "class", "svelte-gu7nlb");
-				add_location(label11, file$6, 353, 4, 9794);
+				add_location(label11, file$6, 355, 4, 9885);
 				attr_dev(input12, "type", "checkbox");
-				add_location(input12, file$6, 363, 6, 10031);
+				add_location(input12, file$6, 365, 6, 10122);
 				attr_dev(label12, "class", "svelte-gu7nlb");
-				add_location(label12, file$6, 362, 4, 10016);
+				add_location(label12, file$6, 364, 4, 10107);
 				attr_dev(input13, "type", "number");
 				attr_dev(input13, "class", "svelte-gu7nlb");
-				add_location(input13, file$6, 376, 6, 10376);
+				add_location(input13, file$6, 378, 6, 10467);
 				attr_dev(label13, "class", "svelte-gu7nlb");
-				add_location(label13, file$6, 374, 4, 10341);
+				add_location(label13, file$6, 376, 4, 10432);
 				attr_dev(input14, "type", "checkbox");
-				add_location(input14, file$6, 385, 6, 10605);
+				add_location(input14, file$6, 387, 6, 10696);
 				attr_dev(label14, "class", "svelte-gu7nlb");
-				add_location(label14, file$6, 384, 4, 10590);
+				add_location(label14, file$6, 386, 4, 10681);
 				attr_dev(input15, "type", "number");
 				attr_dev(input15, "class", "svelte-gu7nlb");
-				add_location(input15, file$6, 398, 6, 10955);
+				add_location(input15, file$6, 400, 6, 11046);
 				attr_dev(label15, "class", "svelte-gu7nlb");
-				add_location(label15, file$6, 396, 4, 10919);
+				add_location(label15, file$6, 398, 4, 11010);
 				attr_dev(input16, "type", "checkbox");
-				add_location(input16, file$6, 407, 6, 11187);
+				add_location(input16, file$6, 409, 6, 11278);
 				attr_dev(label16, "class", "svelte-gu7nlb");
-				add_location(label16, file$6, 406, 4, 11172);
+				add_location(label16, file$6, 408, 4, 11263);
 				attr_dev(input17, "type", "number");
 				attr_dev(input17, "class", "svelte-gu7nlb");
-				add_location(input17, file$6, 420, 6, 11541);
+				add_location(input17, file$6, 422, 6, 11632);
 				attr_dev(label17, "class", "svelte-gu7nlb");
-				add_location(label17, file$6, 418, 4, 11493);
+				add_location(label17, file$6, 420, 4, 11584);
 				attr_dev(input18, "type", "checkbox");
-				add_location(input18, file$6, 429, 6, 11767);
+				add_location(input18, file$6, 431, 6, 11858);
 				attr_dev(label18, "class", "svelte-gu7nlb");
-				add_location(label18, file$6, 428, 4, 11752);
+				add_location(label18, file$6, 430, 4, 11843);
 				attr_dev(h31, "class", "svelte-gu7nlb");
-				add_location(h31, file$6, 441, 4, 12067);
+				add_location(h31, file$6, 443, 4, 12158);
 				attr_dev(input19, "type", "checkbox");
-				add_location(input19, file$6, 443, 6, 12113);
+				add_location(input19, file$6, 445, 6, 12204);
 				attr_dev(label19, "class", "svelte-gu7nlb");
-				add_location(label19, file$6, 442, 4, 12098);
+				add_location(label19, file$6, 444, 4, 12189);
 				attr_dev(input20, "type", "number");
 				attr_dev(input20, "class", "svelte-gu7nlb");
-				add_location(input20, file$6, 456, 6, 12503);
+				add_location(input20, file$6, 458, 6, 12594);
 				attr_dev(label20, "class", "svelte-gu7nlb");
-				add_location(label20, file$6, 454, 4, 12459);
+				add_location(label20, file$6, 456, 4, 12550);
 				attr_dev(input21, "type", "checkbox");
-				add_location(input21, file$6, 468, 6, 12798);
+				add_location(input21, file$6, 470, 6, 12889);
 				attr_dev(label21, "class", "svelte-gu7nlb");
-				add_location(label21, file$6, 467, 4, 12783);
+				add_location(label21, file$6, 469, 4, 12874);
 				attr_dev(input22, "type", "number");
 				attr_dev(input22, "class", "svelte-gu7nlb");
-				add_location(input22, file$6, 481, 6, 13203);
+				add_location(input22, file$6, 483, 6, 13294);
 				attr_dev(label22, "class", "svelte-gu7nlb");
-				add_location(label22, file$6, 479, 4, 13156);
+				add_location(label22, file$6, 481, 4, 13247);
 				attr_dev(input23, "type", "checkbox");
-				add_location(input23, file$6, 493, 6, 13507);
+				add_location(input23, file$6, 495, 6, 13598);
 				attr_dev(label23, "class", "svelte-gu7nlb");
-				add_location(label23, file$6, 492, 4, 13492);
+				add_location(label23, file$6, 494, 4, 13583);
 				attr_dev(input24, "type", "number");
 				attr_dev(input24, "class", "svelte-gu7nlb");
-				add_location(input24, file$6, 506, 6, 13902);
+				add_location(input24, file$6, 508, 6, 13993);
 				attr_dev(label24, "class", "svelte-gu7nlb");
-				add_location(label24, file$6, 504, 4, 13857);
+				add_location(label24, file$6, 506, 4, 13948);
 				attr_dev(h32, "class", "svelte-gu7nlb");
-				add_location(h32, file$6, 517, 4, 14185);
+				add_location(h32, file$6, 519, 4, 14276);
 				attr_dev(input25, "type", "checkbox");
-				add_location(input25, file$6, 519, 6, 14229);
+				add_location(input25, file$6, 521, 6, 14320);
 				attr_dev(label25, "class", "svelte-gu7nlb");
-				add_location(label25, file$6, 518, 4, 14214);
+				add_location(label25, file$6, 520, 4, 14305);
 				attr_dev(input26, "type", "number");
 				attr_dev(input26, "class", "svelte-gu7nlb");
-				add_location(input26, file$6, 532, 6, 14609);
+				add_location(input26, file$6, 534, 6, 14700);
 				attr_dev(label26, "class", "svelte-gu7nlb");
-				add_location(label26, file$6, 530, 4, 14567);
+				add_location(label26, file$6, 532, 4, 14658);
 				attr_dev(input27, "type", "checkbox");
-				add_location(input27, file$6, 544, 6, 14898);
+				add_location(input27, file$6, 546, 6, 14989);
 				attr_dev(label27, "class", "svelte-gu7nlb");
-				add_location(label27, file$6, 543, 4, 14883);
+				add_location(label27, file$6, 545, 4, 14974);
 				attr_dev(input28, "type", "number");
 				attr_dev(input28, "class", "svelte-gu7nlb");
-				add_location(input28, file$6, 557, 6, 15293);
+				add_location(input28, file$6, 559, 6, 15384);
 				attr_dev(label28, "class", "svelte-gu7nlb");
-				add_location(label28, file$6, 555, 4, 15248);
+				add_location(label28, file$6, 557, 4, 15339);
 				attr_dev(input29, "type", "checkbox");
-				add_location(input29, file$6, 569, 6, 15591);
+				add_location(input29, file$6, 571, 6, 15682);
 				attr_dev(label29, "class", "svelte-gu7nlb");
-				add_location(label29, file$6, 568, 4, 15576);
+				add_location(label29, file$6, 570, 4, 15667);
 				attr_dev(input30, "type", "number");
 				attr_dev(input30, "class", "svelte-gu7nlb");
-				add_location(input30, file$6, 582, 6, 15956);
+				add_location(input30, file$6, 584, 6, 16047);
 				attr_dev(label30, "class", "svelte-gu7nlb");
-				add_location(label30, file$6, 580, 4, 15917);
+				add_location(label30, file$6, 582, 4, 16008);
 			},
 			m: function mount(target, anchor) {
 				insert_dev(target, label0, anchor);
@@ -7820,14 +7913,14 @@ var app = (function () {
 			block,
 			id: create_if_block_3$1.name,
 			type: "if",
-			source: "(222:2) {#if localSettings}",
+			source: "(224:2) {#if localSettings}",
 			ctx
 		});
 
 		return block;
 	}
 
-	// (271:4) {#if localSettings.triangulation_filter_enabled}
+	// (273:4) {#if localSettings.triangulation_filter_enabled}
 	function create_if_block_4$1(ctx) {
 		let label;
 		let input;
@@ -7841,9 +7934,9 @@ var app = (function () {
 				input = element("input");
 				t = text("\r\n        Exclude Triangulatable Kills");
 				attr_dev(input, "type", "checkbox");
-				add_location(input, file$6, 272, 8, 7692);
+				add_location(input, file$6, 274, 8, 7783);
 				attr_dev(label, "class", "svelte-gu7nlb");
-				add_location(label, file$6, 271, 6, 7675);
+				add_location(label, file$6, 273, 6, 7766);
 			},
 			m: function mount(target, anchor) {
 				insert_dev(target, label, anchor);
@@ -7879,15 +7972,15 @@ var app = (function () {
 			block,
 			id: create_if_block_4$1.name,
 			type: "if",
-			source: "(271:4) {#if localSettings.triangulation_filter_enabled}",
+			source: "(273:4) {#if localSettings.triangulation_filter_enabled}",
 			ctx
 		});
 
 		return block;
 	}
 
-	// (609:2) {#if localSettings.location_type_filter_enabled}
-	function create_if_block_2$2(ctx) {
+	// (611:2) {#if localSettings.location_type_filter_enabled}
+	function create_if_block_2$3(ctx) {
 		let div;
 		let label0;
 		let input0;
@@ -7934,27 +8027,27 @@ var app = (function () {
 				input4 = element("input");
 				t8 = text("\r\n        Abyssal Space");
 				attr_dev(input0, "type", "checkbox");
-				add_location(input0, file$6, 611, 8, 16691);
+				add_location(input0, file$6, 613, 8, 16782);
 				attr_dev(label0, "class", "svelte-gu7nlb");
-				add_location(label0, file$6, 610, 6, 16674);
+				add_location(label0, file$6, 612, 6, 16765);
 				attr_dev(input1, "type", "checkbox");
-				add_location(input1, file$6, 620, 8, 16967);
+				add_location(input1, file$6, 622, 8, 17058);
 				attr_dev(label1, "class", "svelte-gu7nlb");
-				add_location(label1, file$6, 619, 6, 16950);
+				add_location(label1, file$6, 621, 6, 17041);
 				attr_dev(input2, "type", "checkbox");
-				add_location(input2, file$6, 629, 8, 17241);
+				add_location(input2, file$6, 631, 8, 17332);
 				attr_dev(label2, "class", "svelte-gu7nlb");
-				add_location(label2, file$6, 628, 6, 17224);
+				add_location(label2, file$6, 630, 6, 17315);
 				attr_dev(input3, "type", "checkbox");
-				add_location(input3, file$6, 638, 8, 17517);
+				add_location(input3, file$6, 640, 8, 17608);
 				attr_dev(label3, "class", "svelte-gu7nlb");
-				add_location(label3, file$6, 637, 6, 17500);
+				add_location(label3, file$6, 639, 6, 17591);
 				attr_dev(input4, "type", "checkbox");
-				add_location(input4, file$6, 647, 8, 17793);
+				add_location(input4, file$6, 649, 8, 17884);
 				attr_dev(label4, "class", "svelte-gu7nlb");
-				add_location(label4, file$6, 646, 6, 17776);
+				add_location(label4, file$6, 648, 6, 17867);
 				attr_dev(div, "class", "location-types");
-				add_location(div, file$6, 609, 4, 16638);
+				add_location(div, file$6, 611, 4, 16729);
 			},
 			m: function mount(target, anchor) {
 				insert_dev(target, div, anchor);
@@ -8033,16 +8126,16 @@ var app = (function () {
 
 		dispatch_dev("SvelteRegisterBlock", {
 			block,
-			id: create_if_block_2$2.name,
+			id: create_if_block_2$3.name,
 			type: "if",
-			source: "(609:2) {#if localSettings.location_type_filter_enabled}",
+			source: "(611:2) {#if localSettings.location_type_filter_enabled}",
 			ctx
 		});
 
 		return block;
 	}
 
-	// (684:2) {#if localSettings.combat_label_filter_enabled}
+	// (686:2) {#if localSettings.combat_label_filter_enabled}
 	function create_if_block_1$4(ctx) {
 		let div;
 		let label0;
@@ -8074,19 +8167,19 @@ var app = (function () {
 				input2 = element("input");
 				t4 = text("\r\n        Padding");
 				attr_dev(input0, "type", "checkbox");
-				add_location(input0, file$6, 686, 8, 18790);
+				add_location(input0, file$6, 688, 8, 18881);
 				attr_dev(label0, "class", "svelte-gu7nlb");
-				add_location(label0, file$6, 685, 6, 18773);
+				add_location(label0, file$6, 687, 6, 18864);
 				attr_dev(input1, "type", "checkbox");
-				add_location(input1, file$6, 695, 8, 19055);
+				add_location(input1, file$6, 697, 8, 19146);
 				attr_dev(label1, "class", "svelte-gu7nlb");
-				add_location(label1, file$6, 694, 6, 19038);
+				add_location(label1, file$6, 696, 6, 19129);
 				attr_dev(input2, "type", "checkbox");
-				add_location(input2, file$6, 704, 8, 19314);
+				add_location(input2, file$6, 706, 8, 19405);
 				attr_dev(label2, "class", "svelte-gu7nlb");
-				add_location(label2, file$6, 703, 6, 19297);
+				add_location(label2, file$6, 705, 6, 19388);
 				attr_dev(div, "class", "combat-labels");
-				add_location(div, file$6, 684, 4, 18738);
+				add_location(div, file$6, 686, 4, 18829);
 			},
 			m: function mount(target, anchor) {
 				insert_dev(target, div, anchor);
@@ -8145,14 +8238,14 @@ var app = (function () {
 			block,
 			id: create_if_block_1$4.name,
 			type: "if",
-			source: "(684:2) {#if localSettings.combat_label_filter_enabled}",
+			source: "(686:2) {#if localSettings.combat_label_filter_enabled}",
 			ctx
 		});
 
 		return block;
 	}
 
-	// (727:2) {#if localSettings.webhook_enabled}
+	// (729:2) {#if localSettings.webhook_enabled}
 	function create_if_block$5(ctx) {
 		let label;
 		let t;
@@ -8169,9 +8262,9 @@ var app = (function () {
 				attr_dev(input, "placeholder", "https://discord.com/api/webhooks/...");
 				set_style(input, "width", "100%");
 				set_style(input, "max-width", "500px");
-				add_location(input, file$6, 729, 6, 19940);
+				add_location(input, file$6, 731, 6, 20031);
 				attr_dev(label, "class", "svelte-gu7nlb");
-				add_location(label, file$6, 727, 4, 19905);
+				add_location(label, file$6, 729, 4, 19996);
 			},
 			m: function mount(target, anchor) {
 				insert_dev(target, label, anchor);
@@ -8207,7 +8300,7 @@ var app = (function () {
 			block,
 			id: create_if_block$5.name,
 			type: "if",
-			source: "(727:2) {#if localSettings.webhook_enabled}",
+			source: "(729:2) {#if localSettings.webhook_enabled}",
 			ctx
 		});
 
@@ -8291,7 +8384,7 @@ var app = (function () {
 		profilelistmanager.$on("fetchProfiles", /*fetchProfiles*/ ctx[13]);
 		profilelistmanager.$on("deleteProfile", /*deleteProfile*/ ctx[12]);
 		let if_block0 = /*localSettings*/ ctx[6] && create_if_block_3$1(ctx);
-		let if_block1 = /*localSettings*/ ctx[6].location_type_filter_enabled && create_if_block_2$2(ctx);
+		let if_block1 = /*localSettings*/ ctx[6].location_type_filter_enabled && create_if_block_2$3(ctx);
 		let if_block2 = /*localSettings*/ ctx[6].combat_label_filter_enabled && create_if_block_1$4(ctx);
 		let if_block3 = /*localSettings*/ ctx[6].webhook_enabled && create_if_block$5(ctx);
 		filterlistmanager = new FilterListManager({ $$inline: true });
@@ -8366,68 +8459,68 @@ var app = (function () {
 				t32 = space();
 				create_component(filterlistmanager.$$.fragment);
 				attr_dev(input0, "type", "checkbox");
-				add_location(input0, file$6, 596, 4, 16274);
+				add_location(input0, file$6, 598, 4, 16365);
 				attr_dev(label0, "class", "svelte-gu7nlb");
-				add_location(label0, file$6, 595, 2, 16261);
+				add_location(label0, file$6, 597, 2, 16352);
 				attr_dev(input1, "type", "checkbox");
-				add_location(input1, file$6, 660, 4, 18117);
+				add_location(input1, file$6, 662, 4, 18208);
 				attr_dev(label1, "class", "svelte-gu7nlb");
-				add_location(label1, file$6, 659, 2, 18104);
+				add_location(label1, file$6, 661, 2, 18195);
 				attr_dev(input2, "type", "checkbox");
-				add_location(input2, file$6, 671, 4, 18379);
+				add_location(input2, file$6, 673, 4, 18470);
 				attr_dev(label2, "class", "svelte-gu7nlb");
-				add_location(label2, file$6, 670, 2, 18366);
+				add_location(label2, file$6, 672, 2, 18457);
 				attr_dev(h30, "class", "svelte-gu7nlb");
-				add_location(h30, file$6, 715, 2, 19583);
+				add_location(h30, file$6, 717, 2, 19674);
 				attr_dev(input3, "type", "checkbox");
-				add_location(input3, file$6, 717, 4, 19624);
+				add_location(input3, file$6, 719, 4, 19715);
 				attr_dev(label3, "class", "svelte-gu7nlb");
-				add_location(label3, file$6, 716, 2, 19611);
+				add_location(label3, file$6, 718, 2, 19702);
 				attr_dev(h31, "class", "svelte-gu7nlb");
-				add_location(h31, file$6, 739, 2, 20244);
+				add_location(h31, file$6, 741, 2, 20335);
 				attr_dev(input4, "placeholder", "New list name");
-				add_location(input4, file$6, 741, 4, 20290);
+				add_location(input4, file$6, 743, 4, 20381);
 				attr_dev(input5, "placeholder", "Comma-separated IDs");
-				add_location(input5, file$6, 742, 4, 20358);
+				add_location(input5, file$6, 744, 4, 20449);
 				attr_dev(input6, "type", "checkbox");
-				add_location(input6, file$6, 744, 6, 20446);
+				add_location(input6, file$6, 746, 6, 20537);
 				attr_dev(label4, "class", "svelte-gu7nlb");
-				add_location(label4, file$6, 743, 4, 20431);
+				add_location(label4, file$6, 745, 4, 20522);
 				option0.__value = "";
 				set_input_value(option0, option0.__value);
-				add_location(option0, file$6, 748, 6, 20585);
+				add_location(option0, file$6, 750, 6, 20676);
 				option1.__value = "attacker_alliance";
 				set_input_value(option1, option1.__value);
-				add_location(option1, file$6, 749, 6, 20637);
+				add_location(option1, file$6, 751, 6, 20728);
 				option2.__value = "attacker_corporation";
 				set_input_value(option2, option2.__value);
-				add_location(option2, file$6, 750, 6, 20705);
+				add_location(option2, file$6, 752, 6, 20796);
 				option3.__value = "attacker_ship_type";
 				set_input_value(option3, option3.__value);
-				add_location(option3, file$6, 751, 6, 20779);
+				add_location(option3, file$6, 753, 6, 20870);
 				option4.__value = "victim_alliance";
 				set_input_value(option4, option4.__value);
-				add_location(option4, file$6, 752, 6, 20849);
+				add_location(option4, file$6, 754, 6, 20940);
 				option5.__value = "victim_corporation";
 				set_input_value(option5, option5.__value);
-				add_location(option5, file$6, 753, 6, 20913);
+				add_location(option5, file$6, 755, 6, 21004);
 				option6.__value = "ship_type";
 				set_input_value(option6, option6.__value);
-				add_location(option6, file$6, 754, 6, 20983);
+				add_location(option6, file$6, 756, 6, 21074);
 				option7.__value = "solar_system";
 				set_input_value(option7, option7.__value);
-				add_location(option7, file$6, 755, 6, 21035);
+				add_location(option7, file$6, 757, 6, 21126);
 				option8.__value = "region";
 				set_input_value(option8, option8.__value);
-				add_location(option8, file$6, 756, 6, 21093);
+				add_location(option8, file$6, 758, 6, 21184);
 				attr_dev(select, "class", "svelte-gu7nlb");
 				if (/*newListFilterType*/ ctx[4] === void 0) add_render_callback(() => /*select_change_handler*/ ctx[112].call(select));
-				add_location(select, file$6, 747, 4, 20538);
+				add_location(select, file$6, 749, 4, 20629);
 				attr_dev(button, "class", "svelte-gu7nlb");
-				add_location(button, file$6, 758, 4, 21152);
-				add_location(div0, file$6, 740, 2, 20279);
+				add_location(button, file$6, 760, 4, 21243);
+				add_location(div0, file$6, 742, 2, 20370);
 				attr_dev(div1, "class", "settings-manager svelte-gu7nlb");
-				add_location(div1, file$6, 211, 0, 6081);
+				add_location(div1, file$6, 213, 0, 6172);
 			},
 			l: function claim(nodes) {
 				throw new Error("options.hydrate only works if the component was compiled with the `hydratable: true` option");
@@ -8550,7 +8643,7 @@ var app = (function () {
 					if (if_block1) {
 						if_block1.p(ctx, dirty);
 					} else {
-						if_block1 = create_if_block_2$2(ctx);
+						if_block1 = create_if_block_2$3(ctx);
 						if_block1.c();
 						if_block1.m(div1, t4);
 					}
@@ -8686,29 +8779,29 @@ var app = (function () {
 		function updateSetting(key, value) {
 			try {
 				settings.update(s => {
-					const currentSettings = s || DEFAULT_SETTINGS;
-					const updatedSettings = { ...currentSettings };
+					// Ensure we always have valid settings object
+					const currentSettings = s ? { ...s } : { ...DEFAULT_SETTINGS };
 
-					// Ensure nested objects exist
-					if (key === "location_type_filter_enabled" && !updatedSettings.location_types) {
-						updatedSettings.location_types = DEFAULT_SETTINGS.location_types;
+					// Handle nested settings
+					if (key === "location_type_filter_enabled" && !currentSettings.location_types) {
+						currentSettings.location_types = { ...DEFAULT_SETTINGS.location_types };
 					}
 
-					if (key === "combat_label_filter_enabled" && !updatedSettings.combat_labels) {
-						updatedSettings.combat_labels = DEFAULT_SETTINGS.combat_labels;
+					if (key === "combat_label_filter_enabled" && !currentSettings.combat_labels) {
+						currentSettings.combat_labels = { ...DEFAULT_SETTINGS.combat_labels };
 					}
 
 					// Update the setting
-					updatedSettings[key] = value;
+					currentSettings[key] = value;
 
 					// Emit update to server
-					socket.emit("updateSettings", updatedSettings);
+					socket.emit("updateSettings", currentSettings);
 
-					return updatedSettings;
+					return currentSettings;
 				});
 			} catch(e) {
 				console.error("Error updating setting:", e);
-				settings.set(DEFAULT_SETTINGS);
+				settings.set({ ...DEFAULT_SETTINGS }); // Set to default if error occurs
 			}
 		}
 
@@ -65467,7 +65560,7 @@ void main() {
 	}
 
 	// (1128:82) 
-	function create_if_block_2$1(ctx) {
+	function create_if_block_2$2(ctx) {
 		let p0;
 		let t0;
 		let t1_value = /*kill*/ ctx[0].pinpoints.points[0].name + "";
@@ -65596,7 +65689,7 @@ void main() {
 
 		dispatch_dev("SvelteRegisterBlock", {
 			block,
-			id: create_if_block_2$1.name,
+			id: create_if_block_2$2.name,
 			type: "if",
 			source: "(1128:82) ",
 			ctx
@@ -65716,7 +65809,7 @@ void main() {
 		function select_block_type_1(ctx, dirty) {
 			if (/*kill*/ ctx[0].pinpoints?.atCelestial) return create_if_block$4;
 			if (/*kill*/ ctx[0].pinpoints?.nearestCelestial && /*kill*/ ctx[0].pinpoints?.triangulationPossible) return create_if_block_1$3;
-			if (/*kill*/ ctx[0].pinpoints?.hasTetrahedron && /*kill*/ ctx[0].pinpoints.points.length >= 4) return create_if_block_2$1;
+			if (/*kill*/ ctx[0].pinpoints?.hasTetrahedron && /*kill*/ ctx[0].pinpoints.points.length >= 4) return create_if_block_2$2;
 			if (/*kill*/ ctx[0].pinpoints?.triangulationPossible && /*kill*/ ctx[0].pinpoints?.nearestCelestial) return create_if_block_3;
 			return create_else_block$1;
 		}
@@ -68021,15 +68114,15 @@ void main() {
 				attr_dev(input, "max", "20");
 				attr_dev(input, "step", "1");
 				attr_dev(input, "class", "svelte-a4u9nx");
-				add_location(input, file$2, 313, 6, 9062);
+				add_location(input, file$2, 312, 6, 9042);
 				attr_dev(label, "class", "svelte-a4u9nx");
-				add_location(label, file$2, 311, 4, 9001);
+				add_location(label, file$2, 310, 4, 8981);
 				attr_dev(div0, "class", "controls svelte-a4u9nx");
-				add_location(div0, file$2, 310, 2, 8973);
+				add_location(div0, file$2, 309, 2, 8953);
 				attr_dev(canvas_1, "class", "svelte-a4u9nx");
-				add_location(canvas_1, file$2, 317, 2, 9165);
+				add_location(canvas_1, file$2, 316, 2, 9145);
 				attr_dev(div1, "class", "active-battles svelte-a4u9nx");
-				add_location(div1, file$2, 309, 0, 8941);
+				add_location(div1, file$2, 308, 0, 8921);
 			},
 			l: function claim(nodes) {
 				throw new Error("options.hydrate only works if the component was compiled with the `hydratable: true` option");
@@ -68205,7 +68298,7 @@ void main() {
 				ctx.textAlign = "center";
 				ctx.textBaseline = "middle";
 				const lineHeight = this.currentSize / 3;
-				const systemName = this.battle.kills[0]?.pinpoints?.nearestCelestial?.name?.split(" ")[0] || this.battle.systemId;
+				const systemName = this.battle.kills[0]?.pinpoints?.celestialData?.solarsystemname || this.battle.systemId;
 				ctx.fillText(systemName, this.x, this.y - lineHeight);
 				ctx.fillText(`${this.battle.involvedCount} pilots`, this.x, this.y);
 				ctx.fillText(`${formatValue$1(this.battle.totalValue)} ISK`, this.x, this.y + lineHeight);
@@ -68462,7 +68555,40 @@ void main() {
 		return child_ctx;
 	}
 
-	// (56:12) {#if camp.numAlliances > 0}
+	// (98:14) {#if hasInterdictor(camp.kills)}
+	function create_if_block_2$1(ctx) {
+		let span;
+
+		const block = {
+			c: function create() {
+				span = element("span");
+				span.textContent = "⚠️";
+				attr_dev(span, "class", "interdictor-badge svelte-1m3hpql");
+				attr_dev(span, "title", "Interdictor/HICTOR present");
+				add_location(span, file$1, 98, 16, 3004);
+			},
+			m: function mount(target, anchor) {
+				insert_dev(target, span, anchor);
+			},
+			d: function destroy(detaching) {
+				if (detaching) {
+					detach_dev(span);
+				}
+			}
+		};
+
+		dispatch_dev("SvelteRegisterBlock", {
+			block,
+			id: create_if_block_2$1.name,
+			type: "if",
+			source: "(98:14) {#if hasInterdictor(camp.kills)}",
+			ctx
+		});
+
+		return block;
+	}
+
+	// (118:14) {#if camp.numAlliances > 0}
 	function create_if_block_1$1(ctx) {
 		let t0;
 		let t1_value = /*camp*/ ctx[3].numAlliances + "";
@@ -68496,54 +68622,76 @@ void main() {
 			block,
 			id: create_if_block_1$1.name,
 			type: "if",
-			source: "(56:12) {#if camp.numAlliances > 0}",
+			source: "(118:14) {#if camp.numAlliances > 0}",
 			ctx
 		});
 
 		return block;
 	}
 
-	// (34:4) {#each camps as camp}
+	// (62:4) {#each camps as camp}
 	function create_each_block(ctx) {
 		let button;
+		let div0;
 		let h3;
 		let t0_value = /*camp*/ ctx[3].stargateName + "";
 		let t0;
 		let t1;
-		let div;
-		let p0;
+		let span0;
+		let t2_value = Math.round(/*camp*/ ctx[3].probability) + "";
 		let t2;
-		let t3_value = /*camp*/ ctx[3].systemId + "";
 		let t3;
 		let t4;
-		let p1;
-		let t5;
-		let t6_value = /*camp*/ ctx[3].kills.length + "";
+		let div6;
+		let div1;
+		let span1;
 		let t6;
+		let span2;
+		let t7_value = /*camp*/ ctx[3].systemId + "";
 		let t7;
-		let p2;
 		let t8;
-		let t9_value = formatValue(/*camp*/ ctx[3].totalValue) + "";
-		let t9;
+		let div2;
+		let span3;
 		let t10;
+		let span4;
+		let t11_value = /*camp*/ ctx[3].kills.length + "";
 		let t11;
-		let p3;
 		let t12;
-		let t13_value = /*camp*/ ctx[3].numAttackers + "";
+		let t13_value = getKillFrequency(/*camp*/ ctx[3].kills) + "";
 		let t13;
 		let t14;
-		let t15_value = /*camp*/ ctx[3].numCorps + "";
+		let show_if = hasInterdictor(/*camp*/ ctx[3].kills);
 		let t15;
-		let t16;
+		let div3;
+		let span5;
 		let t17;
-		let p4;
+		let span6;
+		let t18_value = formatValue(/*camp*/ ctx[3].totalValue) + "";
 		let t18;
-		let t19_value = getTimeAgo(/*camp*/ ctx[3].lastKill) + "";
 		let t19;
+		let t20;
+		let div4;
+		let span7;
+		let t22;
+		let span8;
+		let t23_value = /*camp*/ ctx[3].numAttackers + "";
+		let t23;
+		let t24;
+		let t25_value = /*camp*/ ctx[3].numCorps + "";
+		let t25;
+		let t26;
+		let t27;
+		let div5;
+		let span9;
+		let t29;
+		let span10;
+		let t30_value = getTimeAgo(/*camp*/ ctx[3].lastKill) + "";
+		let t30;
 		let button_aria_label_value;
 		let mounted;
 		let dispose;
-		let if_block = /*camp*/ ctx[3].numAlliances > 0 && create_if_block_1$1(ctx);
+		let if_block0 = show_if && create_if_block_2$1(ctx);
+		let if_block1 = /*camp*/ ctx[3].numAlliances > 0 && create_if_block_1$1(ctx);
 
 		function click_handler() {
 			return /*click_handler*/ ctx[2](/*camp*/ ctx[3]);
@@ -68552,82 +68700,152 @@ void main() {
 		const block = {
 			c: function create() {
 				button = element("button");
+				div0 = element("div");
 				h3 = element("h3");
 				t0 = text(t0_value);
 				t1 = space();
-				div = element("div");
-				p0 = element("p");
-				t2 = text("System: ");
-				t3 = text(t3_value);
+				span0 = element("span");
+				t2 = text(t2_value);
+				t3 = text("% Confidence");
 				t4 = space();
-				p1 = element("p");
-				t5 = text("Ships Destroyed: ");
-				t6 = text(t6_value);
-				t7 = space();
-				p2 = element("p");
-				t8 = text("Total Value: ");
-				t9 = text(t9_value);
-				t10 = text(" ISK");
-				t11 = space();
-				p3 = element("p");
-				t12 = text("Campers: ");
+				div6 = element("div");
+				div1 = element("div");
+				span1 = element("span");
+				span1.textContent = "System:";
+				t6 = space();
+				span2 = element("span");
+				t7 = text(t7_value);
+				t8 = space();
+				div2 = element("div");
+				span3 = element("span");
+				span3.textContent = "Activity:";
+				t10 = space();
+				span4 = element("span");
+				t11 = text(t11_value);
+				t12 = text(" kills (");
 				t13 = text(t13_value);
-				t14 = text(" pilots from ");
-				t15 = text(t15_value);
-				t16 = text(" corps\r\n            ");
-				if (if_block) if_block.c();
+				t14 = text(")\r\n              ");
+				if (if_block0) if_block0.c();
+				t15 = space();
+				div3 = element("div");
+				span5 = element("span");
+				span5.textContent = "Value:";
 				t17 = space();
-				p4 = element("p");
-				t18 = text("Last kill: ");
-				t19 = text(t19_value);
-				add_location(h3, file$1, 48, 8, 1333);
-				attr_dev(p0, "class", "system svelte-lufc5h");
-				add_location(p0, file$1, 50, 10, 1407);
-				attr_dev(p1, "class", "kills svelte-lufc5h");
-				add_location(p1, file$1, 51, 10, 1464);
-				attr_dev(p2, "class", "value svelte-lufc5h");
-				add_location(p2, file$1, 52, 10, 1533);
-				attr_dev(p3, "class", "attackers svelte-lufc5h");
-				add_location(p3, file$1, 53, 10, 1613);
-				attr_dev(p4, "class", "time svelte-lufc5h");
-				add_location(p4, file$1, 59, 10, 1846);
-				attr_dev(div, "class", "camp-stats svelte-lufc5h");
-				add_location(div, file$1, 49, 8, 1371);
-				attr_dev(button, "class", "camp-card svelte-lufc5h");
+				span6 = element("span");
+				t18 = text(t18_value);
+				t19 = text(" ISK");
+				t20 = space();
+				div4 = element("div");
+				span7 = element("span");
+				span7.textContent = "Composition:";
+				t22 = space();
+				span8 = element("span");
+				t23 = text(t23_value);
+				t24 = text(" pilots from ");
+				t25 = text(t25_value);
+				t26 = text(" corps\r\n              ");
+				if (if_block1) if_block1.c();
+				t27 = space();
+				div5 = element("div");
+				span9 = element("span");
+				span9.textContent = "Last Activity:";
+				t29 = space();
+				span10 = element("span");
+				t30 = text(t30_value);
+				attr_dev(h3, "class", "svelte-1m3hpql");
+				add_location(h3, file$1, 78, 10, 2271);
+				attr_dev(span0, "class", "probability svelte-1m3hpql");
+				set_style(span0, "background-color", getProbabilityColor(/*camp*/ ctx[3].probability));
+				add_location(span0, file$1, 79, 10, 2311);
+				attr_dev(div0, "class", "camp-header svelte-1m3hpql");
+				add_location(div0, file$1, 77, 8, 2234);
+				attr_dev(span1, "class", "stat-label svelte-1m3hpql");
+				add_location(span1, file$1, 89, 12, 2616);
+				attr_dev(span2, "class", "stat-value");
+				add_location(span2, file$1, 90, 12, 2669);
+				attr_dev(div1, "class", "stat-row svelte-1m3hpql");
+				add_location(div1, file$1, 88, 10, 2580);
+				attr_dev(span3, "class", "stat-label svelte-1m3hpql");
+				add_location(span3, file$1, 94, 12, 2784);
+				attr_dev(span4, "class", "stat-value");
+				add_location(span4, file$1, 95, 12, 2839);
+				attr_dev(div2, "class", "stat-row svelte-1m3hpql");
+				add_location(div2, file$1, 93, 10, 2748);
+				attr_dev(span5, "class", "stat-label svelte-1m3hpql");
+				add_location(span5, file$1, 107, 12, 3246);
+				attr_dev(span6, "class", "stat-value value svelte-1m3hpql");
+				add_location(span6, file$1, 108, 12, 3298);
+				attr_dev(div3, "class", "stat-row svelte-1m3hpql");
+				add_location(div3, file$1, 106, 10, 3210);
+				attr_dev(span7, "class", "stat-label svelte-1m3hpql");
+				add_location(span7, file$1, 114, 12, 3468);
+				attr_dev(span8, "class", "stat-value");
+				add_location(span8, file$1, 115, 12, 3526);
+				attr_dev(div4, "class", "stat-row svelte-1m3hpql");
+				add_location(div4, file$1, 113, 10, 3432);
+				attr_dev(span9, "class", "stat-label svelte-1m3hpql");
+				add_location(span9, file$1, 124, 12, 3823);
+				attr_dev(span10, "class", "stat-value time svelte-1m3hpql");
+				add_location(span10, file$1, 125, 12, 3883);
+				attr_dev(div5, "class", "stat-row svelte-1m3hpql");
+				add_location(div5, file$1, 123, 10, 3787);
+				attr_dev(div6, "class", "camp-stats svelte-1m3hpql");
+				add_location(div6, file$1, 87, 8, 2544);
+				attr_dev(button, "class", "camp-card svelte-1m3hpql");
 				attr_dev(button, "type", "button");
+				set_style(button, "border-color", getProbabilityColor(/*camp*/ ctx[3].probability));
 				attr_dev(button, "aria-label", button_aria_label_value = `View latest kill for gate camp at ${/*camp*/ ctx[3].stargateName}`);
-				add_location(button, file$1, 34, 6, 898);
+				add_location(button, file$1, 62, 6, 1728);
 			},
 			m: function mount(target, anchor) {
 				insert_dev(target, button, anchor);
-				append_dev(button, h3);
+				append_dev(button, div0);
+				append_dev(div0, h3);
 				append_dev(h3, t0);
-				append_dev(button, t1);
-				append_dev(button, div);
-				append_dev(div, p0);
-				append_dev(p0, t2);
-				append_dev(p0, t3);
-				append_dev(div, t4);
-				append_dev(div, p1);
-				append_dev(p1, t5);
-				append_dev(p1, t6);
-				append_dev(div, t7);
-				append_dev(div, p2);
-				append_dev(p2, t8);
-				append_dev(p2, t9);
-				append_dev(p2, t10);
-				append_dev(div, t11);
-				append_dev(div, p3);
-				append_dev(p3, t12);
-				append_dev(p3, t13);
-				append_dev(p3, t14);
-				append_dev(p3, t15);
-				append_dev(p3, t16);
-				if (if_block) if_block.m(p3, null);
-				append_dev(div, t17);
-				append_dev(div, p4);
-				append_dev(p4, t18);
-				append_dev(p4, t19);
+				append_dev(div0, t1);
+				append_dev(div0, span0);
+				append_dev(span0, t2);
+				append_dev(span0, t3);
+				append_dev(button, t4);
+				append_dev(button, div6);
+				append_dev(div6, div1);
+				append_dev(div1, span1);
+				append_dev(div1, t6);
+				append_dev(div1, span2);
+				append_dev(span2, t7);
+				append_dev(div6, t8);
+				append_dev(div6, div2);
+				append_dev(div2, span3);
+				append_dev(div2, t10);
+				append_dev(div2, span4);
+				append_dev(span4, t11);
+				append_dev(span4, t12);
+				append_dev(span4, t13);
+				append_dev(span4, t14);
+				if (if_block0) if_block0.m(span4, null);
+				append_dev(div6, t15);
+				append_dev(div6, div3);
+				append_dev(div3, span5);
+				append_dev(div3, t17);
+				append_dev(div3, span6);
+				append_dev(span6, t18);
+				append_dev(span6, t19);
+				append_dev(div6, t20);
+				append_dev(div6, div4);
+				append_dev(div4, span7);
+				append_dev(div4, t22);
+				append_dev(div4, span8);
+				append_dev(span8, t23);
+				append_dev(span8, t24);
+				append_dev(span8, t25);
+				append_dev(span8, t26);
+				if (if_block1) if_block1.m(span8, null);
+				append_dev(div6, t27);
+				append_dev(div6, div5);
+				append_dev(div5, span9);
+				append_dev(div5, t29);
+				append_dev(div5, span10);
+				append_dev(span10, t30);
 
 				if (!mounted) {
 					dispose = listen_dev(button, "click", click_handler, false, false, false, false);
@@ -68637,26 +68855,50 @@ void main() {
 			p: function update(new_ctx, dirty) {
 				ctx = new_ctx;
 				if (dirty & /*camps*/ 1 && t0_value !== (t0_value = /*camp*/ ctx[3].stargateName + "")) set_data_dev(t0, t0_value);
-				if (dirty & /*camps*/ 1 && t3_value !== (t3_value = /*camp*/ ctx[3].systemId + "")) set_data_dev(t3, t3_value);
-				if (dirty & /*camps*/ 1 && t6_value !== (t6_value = /*camp*/ ctx[3].kills.length + "")) set_data_dev(t6, t6_value);
-				if (dirty & /*camps*/ 1 && t9_value !== (t9_value = formatValue(/*camp*/ ctx[3].totalValue) + "")) set_data_dev(t9, t9_value);
-				if (dirty & /*camps*/ 1 && t13_value !== (t13_value = /*camp*/ ctx[3].numAttackers + "")) set_data_dev(t13, t13_value);
-				if (dirty & /*camps*/ 1 && t15_value !== (t15_value = /*camp*/ ctx[3].numCorps + "")) set_data_dev(t15, t15_value);
+				if (dirty & /*camps*/ 1 && t2_value !== (t2_value = Math.round(/*camp*/ ctx[3].probability) + "")) set_data_dev(t2, t2_value);
 
-				if (/*camp*/ ctx[3].numAlliances > 0) {
-					if (if_block) {
-						if_block.p(ctx, dirty);
-					} else {
-						if_block = create_if_block_1$1(ctx);
-						if_block.c();
-						if_block.m(p3, null);
-					}
-				} else if (if_block) {
-					if_block.d(1);
-					if_block = null;
+				if (dirty & /*camps*/ 1) {
+					set_style(span0, "background-color", getProbabilityColor(/*camp*/ ctx[3].probability));
 				}
 
-				if (dirty & /*camps*/ 1 && t19_value !== (t19_value = getTimeAgo(/*camp*/ ctx[3].lastKill) + "")) set_data_dev(t19, t19_value);
+				if (dirty & /*camps*/ 1 && t7_value !== (t7_value = /*camp*/ ctx[3].systemId + "")) set_data_dev(t7, t7_value);
+				if (dirty & /*camps*/ 1 && t11_value !== (t11_value = /*camp*/ ctx[3].kills.length + "")) set_data_dev(t11, t11_value);
+				if (dirty & /*camps*/ 1 && t13_value !== (t13_value = getKillFrequency(/*camp*/ ctx[3].kills) + "")) set_data_dev(t13, t13_value);
+				if (dirty & /*camps*/ 1) show_if = hasInterdictor(/*camp*/ ctx[3].kills);
+
+				if (show_if) {
+					if (if_block0) ; else {
+						if_block0 = create_if_block_2$1(ctx);
+						if_block0.c();
+						if_block0.m(span4, null);
+					}
+				} else if (if_block0) {
+					if_block0.d(1);
+					if_block0 = null;
+				}
+
+				if (dirty & /*camps*/ 1 && t18_value !== (t18_value = formatValue(/*camp*/ ctx[3].totalValue) + "")) set_data_dev(t18, t18_value);
+				if (dirty & /*camps*/ 1 && t23_value !== (t23_value = /*camp*/ ctx[3].numAttackers + "")) set_data_dev(t23, t23_value);
+				if (dirty & /*camps*/ 1 && t25_value !== (t25_value = /*camp*/ ctx[3].numCorps + "")) set_data_dev(t25, t25_value);
+
+				if (/*camp*/ ctx[3].numAlliances > 0) {
+					if (if_block1) {
+						if_block1.p(ctx, dirty);
+					} else {
+						if_block1 = create_if_block_1$1(ctx);
+						if_block1.c();
+						if_block1.m(span8, null);
+					}
+				} else if (if_block1) {
+					if_block1.d(1);
+					if_block1 = null;
+				}
+
+				if (dirty & /*camps*/ 1 && t30_value !== (t30_value = getTimeAgo(/*camp*/ ctx[3].lastKill) + "")) set_data_dev(t30, t30_value);
+
+				if (dirty & /*camps*/ 1) {
+					set_style(button, "border-color", getProbabilityColor(/*camp*/ ctx[3].probability));
+				}
 
 				if (dirty & /*camps*/ 1 && button_aria_label_value !== (button_aria_label_value = `View latest kill for gate camp at ${/*camp*/ ctx[3].stargateName}`)) {
 					attr_dev(button, "aria-label", button_aria_label_value);
@@ -68667,7 +68909,8 @@ void main() {
 					detach_dev(button);
 				}
 
-				if (if_block) if_block.d();
+				if (if_block0) if_block0.d();
+				if (if_block1) if_block1.d();
 				mounted = false;
 				dispose();
 			}
@@ -68677,14 +68920,14 @@ void main() {
 			block,
 			id: create_each_block.name,
 			type: "each",
-			source: "(34:4) {#each camps as camp}",
+			source: "(62:4) {#each camps as camp}",
 			ctx
 		});
 
 		return block;
 	}
 
-	// (65:4) {#if camps.length === 0}
+	// (132:4) {#if camps.length === 0}
 	function create_if_block$1(ctx) {
 		let p;
 
@@ -68692,8 +68935,8 @@ void main() {
 			c: function create() {
 				p = element("p");
 				p.textContent = "No active gate camps detected";
-				attr_dev(p, "class", "no-camps svelte-lufc5h");
-				add_location(p, file$1, 65, 6, 1990);
+				attr_dev(p, "class", "no-camps svelte-1m3hpql");
+				add_location(p, file$1, 132, 6, 4051);
 			},
 			m: function mount(target, anchor) {
 				insert_dev(target, p, anchor);
@@ -68709,7 +68952,7 @@ void main() {
 			block,
 			id: create_if_block$1.name,
 			type: "if",
-			source: "(65:4) {#if camps.length === 0}",
+			source: "(132:4) {#if camps.length === 0}",
 			ctx
 		});
 
@@ -68745,11 +68988,12 @@ void main() {
 
 				t2 = space();
 				if (if_block) if_block.c();
-				add_location(h2, file$1, 31, 2, 810);
-				attr_dev(div0, "class", "camp-grid svelte-lufc5h");
-				add_location(div0, file$1, 32, 2, 840);
-				attr_dev(div1, "class", "active-camps svelte-lufc5h");
-				add_location(div1, file$1, 30, 0, 780);
+				attr_dev(h2, "class", "svelte-1m3hpql");
+				add_location(h2, file$1, 59, 2, 1640);
+				attr_dev(div0, "class", "camp-grid svelte-1m3hpql");
+				add_location(div0, file$1, 60, 2, 1670);
+				attr_dev(div1, "class", "active-camps svelte-1m3hpql");
+				add_location(div1, file$1, 58, 0, 1610);
 			},
 			l: function claim(nodes) {
 				throw new Error("options.hydrate only works if the component was compiled with the `hydratable: true` option");
@@ -68770,7 +69014,7 @@ void main() {
 				if (if_block) if_block.m(div0, null);
 			},
 			p: function update(ctx, [dirty]) {
-				if (dirty & /*camps, window, getTimeAgo, formatValue*/ 1) {
+				if (dirty & /*getProbabilityColor, camps, window, getTimeAgo, formatValue, hasInterdictor, getKillFrequency, Math*/ 1) {
 					each_value = ensure_array_like_dev(/*camps*/ ctx[0]);
 					let i;
 
@@ -68848,6 +69092,24 @@ void main() {
 		return `${minutes} minutes ago`;
 	}
 
+	function getProbabilityColor(probability) {
+		if (probability >= 80) return "#ff4444";
+		if (probability >= 60) return "#ff8c00";
+		if (probability >= 40) return "#ffd700";
+		return "#90ee90";
+	}
+
+	function getKillFrequency(kills) {
+		const timeSpan = new Date(kills[kills.length - 1].killmail.killmail_time) - new Date(kills[0].killmail.killmail_time);
+		const minutes = timeSpan / (1000 * 60);
+		const rate = kills.length / (minutes || 1);
+		return `${rate.toFixed(1)} kills/min`;
+	}
+
+	function hasInterdictor(kills) {
+		return kills.some(kill => kill.killmail.attackers.some(a => a.ship_type_id && [22456, 22464, 22452, 22460, 12013, 12017, 12021, 12025].includes(a.ship_type_id)));
+	}
+
 	function instance$1($$self, $$props, $$invalidate) {
 		let $filteredCamps;
 		validate_store(filteredCamps, 'filteredCamps');
@@ -68875,6 +69137,9 @@ void main() {
 			camps,
 			formatValue,
 			getTimeAgo,
+			getProbabilityColor,
+			getKillFrequency,
+			hasInterdictor,
 			$filteredCamps
 		});
 
@@ -68914,7 +69179,7 @@ void main() {
 	const { console: console_1 } = globals;
 	const file = "src\\App.svelte";
 
-	// (87:2) {:else}
+	// (83:2) {:else}
 	function create_else_block(ctx) {
 		let div;
 		let button0;
@@ -68957,15 +69222,15 @@ void main() {
 				if_block_anchor = empty$1();
 				attr_dev(button0, "class", "svelte-d6m7ck");
 				toggle_class(button0, "active", /*currentPage*/ ctx[3] === "kills");
-				add_location(button0, file, 88, 6, 2503);
+				add_location(button0, file, 84, 6, 2482);
 				attr_dev(button1, "class", "svelte-d6m7ck");
 				toggle_class(button1, "active", /*currentPage*/ ctx[3] === "battles");
-				add_location(button1, file, 94, 6, 2657);
+				add_location(button1, file, 90, 6, 2636);
 				attr_dev(button2, "class", "svelte-d6m7ck");
 				toggle_class(button2, "active", /*currentPage*/ ctx[3] === "camps");
-				add_location(button2, file, 100, 6, 2824);
+				add_location(button2, file, 96, 6, 2803);
 				attr_dev(div, "class", "nav-tabs svelte-d6m7ck");
-				add_location(div, file, 87, 4, 2473);
+				add_location(div, file, 83, 4, 2452);
 			},
 			m: function mount(target, anchor) {
 				insert_dev(target, div, anchor);
@@ -69054,14 +69319,14 @@ void main() {
 			block,
 			id: create_else_block.name,
 			type: "else",
-			source: "(87:2) {:else}",
+			source: "(83:2) {:else}",
 			ctx
 		});
 
 		return block;
 	}
 
-	// (85:2) {#if !loggedIn}
+	// (81:2) {#if !loggedIn}
 	function create_if_block(ctx) {
 		let login;
 		let current;
@@ -69095,14 +69360,14 @@ void main() {
 			block,
 			id: create_if_block.name,
 			type: "if",
-			source: "(85:2) {#if !loggedIn}",
+			source: "(81:2) {#if !loggedIn}",
 			ctx
 		});
 
 		return block;
 	}
 
-	// (126:4) {:else}
+	// (122:4) {:else}
 	function create_else_block_1(ctx) {
 		let activecamps;
 		let current;
@@ -69135,14 +69400,14 @@ void main() {
 			block,
 			id: create_else_block_1.name,
 			type: "else",
-			source: "(126:4) {:else}",
+			source: "(122:4) {:else}",
 			ctx
 		});
 
 		return block;
 	}
 
-	// (124:40) 
+	// (120:40) 
 	function create_if_block_2(ctx) {
 		let activebattles;
 		let current;
@@ -69175,14 +69440,14 @@ void main() {
 			block,
 			id: create_if_block_2.name,
 			type: "if",
-			source: "(124:40) ",
+			source: "(120:40) ",
 			ctx
 		});
 
 		return block;
 	}
 
-	// (109:4) {#if currentPage === "kills"}
+	// (105:4) {#if currentPage === "kills"}
 	function create_if_block_1(ctx) {
 		let div2;
 		let div0;
@@ -69217,12 +69482,12 @@ void main() {
 				button = element("button");
 				button.textContent = "Clear All Kills";
 				attr_dev(div0, "class", "settings-section svelte-d6m7ck");
-				add_location(div0, file, 110, 8, 3065);
-				add_location(button, file, 115, 10, 3270);
+				add_location(div0, file, 106, 8, 3044);
+				add_location(button, file, 111, 10, 3249);
 				attr_dev(div1, "class", "killmail-section svelte-d6m7ck");
-				add_location(div1, file, 113, 8, 3198);
+				add_location(div1, file, 109, 8, 3177);
 				attr_dev(div2, "class", "dashboard svelte-d6m7ck");
-				add_location(div2, file, 109, 6, 3032);
+				add_location(div2, file, 105, 6, 3011);
 			},
 			m: function mount(target, anchor) {
 				insert_dev(target, div2, anchor);
@@ -69272,7 +69537,7 @@ void main() {
 			block,
 			id: create_if_block_1.name,
 			type: "if",
-			source: "(109:4) {#if currentPage === \\\"kills\\\"}",
+			source: "(105:4) {#if currentPage === \\\"kills\\\"}",
 			ctx
 		});
 
@@ -69300,7 +69565,7 @@ void main() {
 				main = element("main");
 				if_block.c();
 				attr_dev(main, "class", "svelte-d6m7ck");
-				add_location(main, file, 83, 0, 2393);
+				add_location(main, file, 79, 0, 2372);
 			},
 			l: function claim(nodes) {
 				throw new Error("options.hydrate only works if the component was compiled with the `hydratable: true` option");
@@ -69409,6 +69674,7 @@ void main() {
 		onMount(() => {
 			console.log("App.svelte - onMount");
 
+			// Only handle connection events here
 			socket.on("connect", () => {
 				console.log("App.svelte - Connected to server");
 			});
@@ -69417,27 +69683,19 @@ void main() {
 				console.log("App.svelte - Disconnected from server");
 			});
 
+			// This is the only place we should initialize stores
 			socket.on("initialData", data => {
 				try {
 					console.log("App.svelte - Received initialData:", data);
-
-					// Initialize settings first
 					const initializedSettings = initializeSettings(data.settings);
-
 					settings.set(initializedSettings);
-
-					// Then update other stores
-					killmails.set(data.killmails || []);
-
+					killmails.set([]); // Start with empty array
 					filterLists.set(data.filterLists || []);
 					profiles.set(data.profiles || []);
-					console.log("App.svelte - Stores updated with initial data");
+					console.log("App.svelte - Stores initialized");
 				} catch(e) {
 					console.error("Error initializing data:", e);
-
-					// Set safe default values
 					settings.set(DEFAULT_SETTINGS);
-
 					killmails.set([]);
 					filterLists.set([]);
 					profiles.set([]);

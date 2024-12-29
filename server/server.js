@@ -213,12 +213,13 @@ app.post("/api/filter-list", async (req, res) => {
     }
 
     // Process IDs based on filter type
-    let processedIds = ids;
+    let processedIds;
     if (filterType === "region") {
-      // Handle region IDs - ensure proper array format
-      processedIds = Array.isArray(ids)
-        ? ids.map((id) => id.toString().trim())
-        : ids.split(",").map((id) => id.toString().trim());
+      // Handle region IDs - ensure proper array format without extra escaping
+      processedIds = Array.isArray(ids) ? ids : ids.split(",");
+
+      // Clean up the array elements
+      processedIds = processedIds.map((id) => id.trim());
     } else {
       // For other filter types, ensure array format
       processedIds = Array.isArray(ids)
@@ -249,7 +250,7 @@ app.post("/api/filter-list", async (req, res) => {
       [
         userId,
         name,
-        JSON.stringify(processedIds), // Store processed IDs
+        JSON.stringify(processedIds), // Single JSON.stringify for all types
         enabled ? 1 : 0,
         isExclude ? 1 : 0,
         filterType || null,
@@ -266,7 +267,7 @@ app.post("/api/filter-list", async (req, res) => {
             id: this.lastID,
             user_id: userId,
             name,
-            ids: processedIds, // Use processed IDs in response
+            ids: processedIds, // Use the processed array directly in response
             enabled: Boolean(enabled),
             is_exclude: Boolean(isExclude),
             filter_type: filterType || null,
@@ -1181,20 +1182,30 @@ async function processKillmail(killmail) {
   const celestialData = await ensureCelestialData(systemId);
 
   // Get the first celestial entry which contains system info
-  const systemInfo = celestialData[0];
+  const systemInfo = celestialData?.[0]; // Add optional chaining
 
   const pinpointData = calculatePinpoints(
     celestialData,
     killmail.killmail.victim.position
   );
 
+  // Add null check and provide default values
+  const celestialInfo = systemInfo
+    ? {
+        regionid: systemInfo.regionid,
+        regionname: systemInfo.regionname,
+        solarsystemid: systemInfo.solarsystemid,
+        solarsystemname: systemInfo.solarsystemname,
+      }
+    : {
+        regionid: null,
+        regionname: null,
+        solarsystemid: systemId, // We at least know the system ID from the killmail
+        solarsystemname: null,
+      };
+
   // Attach relevant celestial data to the pinpoints
-  pinpointData.celestialData = {
-    regionid: systemInfo.regionid,
-    regionname: systemInfo.regionname,
-    solarsystemid: systemInfo.solarsystemid,
-    solarsystemname: systemInfo.solarsystemname,
-  };
+  pinpointData.celestialData = celestialInfo;
 
   return {
     ...killmail,
@@ -1256,20 +1267,21 @@ async function pollRedisQ() {
     if (response.status === 200 && response.data.package) {
       const killmail = response.data.package;
 
+      // Check if we already have this killmail
+      const isDuplicate = killmails.some((km) => km.killID === killmail.killID);
+      if (isDuplicate) {
+        console.log(`Skipping duplicate killmail: ${killmail.killID}`);
+        return;
+      }
+
       if (isWithinLast24Hours(killmail.killmail.killmail_time)) {
         try {
           const processedKillmail = await processKillmail(killmail);
-          console.log("Processed killmail with pinpoints:", processedKillmail);
           killmails.push(processedKillmail);
           io.emit("newKillmail", processedKillmail);
         } catch (error) {
-          console.error("Error processing killmail:", error);
-          // Still emit the original killmail if processing fails
-          killmails.push(killmail);
-          io.emit("newKillmail", killmail);
+          console.error("Failed to process killmail:", error);
         }
-      } else {
-        console.log("Received killmail older than 24 hours, discarding");
       }
     }
   } catch (error) {

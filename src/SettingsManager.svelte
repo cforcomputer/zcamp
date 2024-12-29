@@ -39,34 +39,36 @@
   function updateSetting(key, value) {
     try {
       settings.update((s) => {
-        const currentSettings = s || DEFAULT_SETTINGS;
-        const updatedSettings = { ...currentSettings };
+        // Ensure we always have valid settings object
+        const currentSettings = s ? { ...s } : { ...DEFAULT_SETTINGS };
 
-        // Ensure nested objects exist
+        // Handle nested settings
         if (
           key === "location_type_filter_enabled" &&
-          !updatedSettings.location_types
+          !currentSettings.location_types
         ) {
-          updatedSettings.location_types = DEFAULT_SETTINGS.location_types;
+          currentSettings.location_types = {
+            ...DEFAULT_SETTINGS.location_types,
+          };
         }
         if (
           key === "combat_label_filter_enabled" &&
-          !updatedSettings.combat_labels
+          !currentSettings.combat_labels
         ) {
-          updatedSettings.combat_labels = DEFAULT_SETTINGS.combat_labels;
+          currentSettings.combat_labels = { ...DEFAULT_SETTINGS.combat_labels };
         }
 
         // Update the setting
-        updatedSettings[key] = value;
+        currentSettings[key] = value;
 
         // Emit update to server
-        socket.emit("updateSettings", updatedSettings);
+        socket.emit("updateSettings", currentSettings);
 
-        return updatedSettings;
+        return currentSettings;
       });
     } catch (e) {
       console.error("Error updating setting:", e);
-      settings.set(DEFAULT_SETTINGS);
+      settings.set({ ...DEFAULT_SETTINGS }); // Set to default if error occurs
     }
   }
 

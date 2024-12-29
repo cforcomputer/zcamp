@@ -41,6 +41,7 @@
   onMount(() => {
     console.log("App.svelte - onMount");
 
+    // Only handle connection events here
     socket.on("connect", () => {
       console.log("App.svelte - Connected to server");
     });
@@ -49,23 +50,18 @@
       console.log("App.svelte - Disconnected from server");
     });
 
+    // This is the only place we should initialize stores
     socket.on("initialData", (data) => {
       try {
         console.log("App.svelte - Received initialData:", data);
-
-        // Initialize settings first
         const initializedSettings = initializeSettings(data.settings);
         settings.set(initializedSettings);
-
-        // Then update other stores
-        killmails.set(data.killmails || []);
+        killmails.set([]); // Start with empty array
         filterLists.set(data.filterLists || []);
         profiles.set(data.profiles || []);
-
-        console.log("App.svelte - Stores updated with initial data");
+        console.log("App.svelte - Stores initialized");
       } catch (e) {
         console.error("Error initializing data:", e);
-        // Set safe default values
         settings.set(DEFAULT_SETTINGS);
         killmails.set([]);
         filterLists.set([]);
