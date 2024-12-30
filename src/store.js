@@ -106,14 +106,38 @@ export const filteredKillmails = derived(
             break;
           case "region": {
             const celestialData = killmail.pinpoints?.celestialData;
+            if (!celestialData) return false;
+
+            // Debug log to verify data
+            // console.log("Region Filter - Comparing:", {
+            //   celestialRegionId: celestialData.regionid,
+            //   celestialRegionName: celestialData.regionname,
+            //   filterIds: ids,
+            // });
+
+            // Ensure ids is an array
             const idList = Array.isArray(ids) ? ids : [ids];
 
-            match = idList.some(
-              (id) =>
-                celestialData.regionid.toString() === id.toString() ||
+            // Compare both ID and name, accounting for string/number conversion
+            match = idList.some((id) => {
+              const matchesId =
+                celestialData.regionid.toString() === id.toString();
+              const matchesName =
                 celestialData.regionname.toLowerCase() ===
-                  id.toString().toLowerCase()
-            );
+                id.toString().toLowerCase();
+
+              // Debug log for each comparison
+              console.log("Comparing:", {
+                id,
+                matchesId,
+                matchesName,
+                celestialRegionId: celestialData.regionid,
+                celestialRegionName: celestialData.regionname,
+              });
+
+              return matchesId || matchesName;
+            });
+
             break;
           }
           case "location_type":

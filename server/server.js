@@ -574,7 +574,8 @@ app.get("/api/filter-lists/:userId", (req, res) => {
       } else {
         const filterLists = rows.map((row) => ({
           ...row,
-          ids: JSON.parse(row.ids),
+          // Safely parse the IDs
+          ids: JSON.parse(row.ids || "[]"),
           enabled: Boolean(row.enabled),
           is_exclude: Boolean(row.is_exclude),
           filter_type: row.filter_type || null,
