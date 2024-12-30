@@ -5582,29 +5582,15 @@ var app = (function () {
 
 	const activeCamps = writable([]);
 
-	const CAMP_TIMEOUT = 15 * 60 * 1000; // 15 minutes in milliseconds
-	// Add at top of campStore.js
+	const CAMP_TIMEOUT = 60 * 60 * 1000; // 1 hour in milliseconds
 	const CAPSULE_ID = 670;
-	const INTERDICTOR_IDS = new Set([
-	  22456, // Sabre
-	  22464, // Flycatcher
-	  22452, // Heretic
-	  22460, // Eris
-	  // Add other interdictor IDs
-	]);
 
-	const HICTOR_IDS = new Set([
-	  12013, // Broadsword
-	  12017, // Onyx
-	  12021, // Phobos
-	  12025, // Devoter
-	  // Add other heavy interdictor IDs
+	const PERMANENTLY_CAMPED_SYSTEMS = new Set([
+	  30002813, 30005196, 30002718, 30002647,
 	]);
 
 	function isStargate(name) {
 	  if (!name) return false;
-
-	  // Common patterns for stargate names
 	  return (
 	    name.toLowerCase().includes("stargate") ||
 	    name.toLowerCase().includes("gate to") ||
@@ -5612,57 +5598,82 @@ var app = (function () {
 	  );
 	}
 
-	function calculateCampProbability(kills) {
+	function calculateCampProbability(kills, systemId) {
 	  let probability = 0;
+	  const now = new Date().getTime();
+	  const lastKillTime = new Date(
+	    kills[kills.length - 1].killmail.killmail_time
+	  ).getTime();
+	  const timeSinceLastKill = now - lastKillTime;
 
-	  // Ignore if only capsule kills
+	  if (kills.every((k) => k.zkb.npc)) return 0;
+
 	  const nonCapsuleKills = kills.filter(
 	    (k) => k.killmail.victim.ship_type_id !== CAPSULE_ID
 	  );
-
 	  if (nonCapsuleKills.length < 2) return 0;
 
-	  // Base probability starts at 30% with 2+ kills
-	  probability = 30;
+	  if (PERMANENTLY_CAMPED_SYSTEMS.has(systemId)) {
+	    if (timeSinceLastKill <= 45 * 60 * 1000) {
+	      return 100;
+	    }
+	    return 30;
+	  }
 
-	  // Check time distribution
-	  const killTimes = nonCapsuleKills.map((k) =>
-	    new Date(k.killmail.killmail_time).getTime()
+	  // Check for industrial victims
+	  const hasIndustrialVictims = kills.some(
+	    (kill) => kill.shipCategories?.victim === "industrial"
 	  );
-	  const timeSpan = Math.max(...killTimes) - Math.min(...killTimes);
-	  const avgTimeBetweenKills = timeSpan / (killTimes.length - 1);
-
-	  // If kills are very close together (within 2 minutes), reduce probability
-	  if (avgTimeBetweenKills < 120000) {
-	    probability -= 20;
-	  } else if (avgTimeBetweenKills > 600000) {
-	    // If spread out over 10+ minutes
+	  if (hasIndustrialVictims) {
 	    probability += 20;
 	  }
 
-	  // Check for interdictors/hictors
-	  const hasInterdictor = nonCapsuleKills.some((kill) =>
-	    kill.killmail.attackers.some(
-	      (a) =>
-	        INTERDICTOR_IDS.has(a.ship_type_id) || HICTOR_IDS.has(a.ship_type_id)
-	    )
+	  // Check for capital victims
+	  const hasCapitalVictims = kills.some(
+	    (kill) => kill.shipCategories?.victim === "capital"
 	  );
-
-	  if (hasInterdictor) {
+	  if (hasCapitalVictims) {
 	    probability += 30;
+	  }
+
+	  // Analyze attacker compositions
+	  kills.forEach((kill) => {
+	    const attackerCategories = kill.shipCategories?.attackers || [];
+
+	    // Check for capital support
+	    const hasCapitalSupport = attackerCategories.some(
+	      (attacker) => attacker.category === "capital"
+	    );
+	    if (hasCapitalSupport) {
+	      probability += 25;
+	    }
+
+	    // Check for combat ship concentration
+	    const combatShips = attackerCategories.filter(
+	      (attacker) => attacker.category === "combat"
+	    );
+	    if (combatShips.length >= 3) {
+	      probability += 15;
+	    }
+	  });
+
+	  // Time-based probability adjustment
+	  if (probability >= 60) {
+	    if (timeSinceLastKill > 40 * 60 * 1000) {
+	      const decayFactor = Math.min(
+	        1,
+	        (timeSinceLastKill - 40 * 60 * 1000) / (20 * 60 * 1000)
+	      );
+	      probability = Math.max(30, probability * (1 - decayFactor));
+	    }
 	  }
 
 	  // Check for shared attackers
-	  const attackerOverlap = getAttackerOverlap(nonCapsuleKills);
-	  if (attackerOverlap.characters > 0) {
-	    probability += 30;
-	  } else if (attackerOverlap.corporations > 0) {
-	    probability += 20;
-	  } else if (attackerOverlap.alliances > 0) {
-	    probability += 10;
-	  }
+	  const attackerOverlap = getAttackerOverlap(kills);
+	  if (attackerOverlap.characters > 0) probability += 30;
+	  else if (attackerOverlap.corporations > 0) probability += 20;
+	  else if (attackerOverlap.alliances > 0) probability += 10;
 
-	  // Cap probability at 100%
 	  return Math.min(100, Math.max(0, probability));
 	}
 
@@ -5673,7 +5684,6 @@ var app = (function () {
 	    alliances: 0,
 	  };
 
-	  // Create sets for first kill's attacker IDs
 	  const firstKillAttackers = {
 	    characters: new Set(
 	      kills[0].killmail.attackers.map((a) => a.character_id).filter(Boolean)
@@ -5686,10 +5696,8 @@ var app = (function () {
 	    ),
 	  };
 
-	  // Check other kills for overlapping IDs
 	  for (let i = 1; i < kills.length; i++) {
-	    const kill = kills[i];
-	    kill.killmail.attackers.forEach((attacker) => {
+	    kills[i].killmail.attackers.forEach((attacker) => {
 	      if (
 	        attacker.character_id &&
 	        firstKillAttackers.characters.has(attacker.character_id)
@@ -5726,37 +5734,19 @@ var app = (function () {
 	  };
 	}
 
-	// In campStore.js
 	function addKillmailToCamps(killmail) {
-	  if (!killmail.pinpoints?.nearestCelestial) {
-	    return;
-	  }
-
-	  if (!isStargate(killmail.pinpoints.nearestCelestial.name)) {
-	    return;
-	  }
+	  if (!killmail.pinpoints?.nearestCelestial) return;
+	  if (!isStargate(killmail.pinpoints.nearestCelestial.name)) return;
 
 	  activeCamps.update((camps) => {
 	    const now = new Date().getTime();
-
-	    // Remove old camps
 	    const oldCamps = camps.filter((camp) => {
 	      const age = now - new Date(camp.lastKill).getTime();
-	      const isOld = age >= CAMP_TIMEOUT;
-	      if (isOld) {
-	        console.log("Removing old camp:", {
-	          systemId: camp.systemId,
-	          stargateName: camp.stargateName,
-	          age: Math.floor(age / 1000) + "s",
-	        });
-	      }
-	      return !isOld;
+	      return age < CAMP_TIMEOUT;
 	    });
 
 	    const systemId = killmail.killmail.solar_system_id;
 	    const stargateName = killmail.pinpoints.nearestCelestial.name;
-
-	    // Find existing camp
 	    let camp = oldCamps.find(
 	      (c) => c.systemId === systemId && c.stargateName === stargateName
 	    );
@@ -5771,7 +5761,7 @@ var app = (function () {
 	      newIds.corporation_ids.forEach((id) => camp.corporation_ids.add(id));
 	      newIds.alliance_ids.forEach((id) => camp.alliance_ids.add(id));
 
-	      camp.probability = calculateCampProbability(camp.kills);
+	      camp.probability = calculateCampProbability(camp.kills, systemId);
 	    } else {
 	      const ids = getAttackerIds(killmail.killmail.attackers);
 	      camp = {
@@ -5793,28 +5783,12 @@ var app = (function () {
 	}
 
 	const filteredCamps = derived([activeCamps], ([$activeCamps]) => {
-	  console.log("Filtering camps. Total camps:", $activeCamps.length);
-
-	  const filtered = $activeCamps
+	  return $activeCamps
 	    .filter((camp) => {
-	      // Filter out camps with only capsule kills
 	      const nonCapsuleKills = camp.kills.filter(
 	        (k) => k.killmail.victim.ship_type_id !== CAPSULE_ID
 	      );
-
-	      const hasEnoughKills = nonCapsuleKills.length >= 2;
-	      const hasHighEnoughProbability = camp.probability >= 30;
-
-	      console.log("Camp evaluation:", {
-	        systemId: camp.systemId,
-	        stargateName: camp.stargateName,
-	        totalKills: camp.kills.length,
-	        nonCapsuleKills: nonCapsuleKills.length,
-	        probability: camp.probability,
-	        passed: hasEnoughKills && hasHighEnoughProbability,
-	      });
-
-	      return hasEnoughKills && hasHighEnoughProbability;
+	      return nonCapsuleKills.length >= 2 && camp.probability >= 30;
 	    })
 	    .map((camp) => ({
 	      ...camp,
@@ -5823,9 +5797,6 @@ var app = (function () {
 	      numAlliances: camp.alliance_ids.size,
 	    }))
 	    .sort((a, b) => b.probability - a.probability);
-
-	  console.log("Filtered camps:", filtered.length);
-	  return filtered;
 	});
 
 	const killmails = writable([]);
@@ -68794,7 +68765,7 @@ void main() {
 		return child_ctx;
 	}
 
-	// (98:14) {#if hasInterdictor(camp.kills)}
+	// (102:14) {#if hasInterdictor(camp.kills)}
 	function create_if_block_2$1(ctx) {
 		let span;
 
@@ -68804,7 +68775,7 @@ void main() {
 				span.textContent = "⚠️";
 				attr_dev(span, "class", "interdictor-badge svelte-1m3hpql");
 				attr_dev(span, "title", "Interdictor/HICTOR present");
-				add_location(span, file$1, 98, 16, 3004);
+				add_location(span, file$1, 102, 16, 3395);
 			},
 			m: function mount(target, anchor) {
 				insert_dev(target, span, anchor);
@@ -68820,14 +68791,14 @@ void main() {
 			block,
 			id: create_if_block_2$1.name,
 			type: "if",
-			source: "(98:14) {#if hasInterdictor(camp.kills)}",
+			source: "(102:14) {#if hasInterdictor(camp.kills)}",
 			ctx
 		});
 
 		return block;
 	}
 
-	// (118:14) {#if camp.numAlliances > 0}
+	// (122:14) {#if camp.numAlliances > 0}
 	function create_if_block_1$1(ctx) {
 		let t0;
 		let t1_value = /*camp*/ ctx[3].numAlliances + "";
@@ -68861,7 +68832,7 @@ void main() {
 			block,
 			id: create_if_block_1$1.name,
 			type: "if",
-			source: "(118:14) {#if camp.numAlliances > 0}",
+			source: "(122:14) {#if camp.numAlliances > 0}",
 			ctx
 		});
 
@@ -68886,7 +68857,7 @@ void main() {
 		let span1;
 		let t6;
 		let span2;
-		let t7_value = /*camp*/ ctx[3].systemId + "";
+		let t7_value = (/*camp*/ ctx[3].kills[0]?.pinpoints?.celestialData?.solarsystemname || /*camp*/ ctx[3].systemId) + "";
 		let t7;
 		let t8;
 		let div2;
@@ -68926,7 +68897,6 @@ void main() {
 		let span10;
 		let t30_value = getTimeAgo(/*camp*/ ctx[3].lastKill) + "";
 		let t30;
-		let button_aria_label_value;
 		let mounted;
 		let dispose;
 		let if_block0 = show_if && create_if_block_2$1(ctx);
@@ -68992,48 +68962,47 @@ void main() {
 				span10 = element("span");
 				t30 = text(t30_value);
 				attr_dev(h3, "class", "svelte-1m3hpql");
-				add_location(h3, file$1, 78, 10, 2271);
+				add_location(h3, file$1, 79, 10, 2555);
 				attr_dev(span0, "class", "probability svelte-1m3hpql");
 				set_style(span0, "background-color", getProbabilityColor(/*camp*/ ctx[3].probability));
-				add_location(span0, file$1, 79, 10, 2311);
+				add_location(span0, file$1, 80, 10, 2595);
 				attr_dev(div0, "class", "camp-header svelte-1m3hpql");
-				add_location(div0, file$1, 77, 8, 2234);
+				add_location(div0, file$1, 78, 8, 2518);
 				attr_dev(span1, "class", "stat-label svelte-1m3hpql");
-				add_location(span1, file$1, 89, 12, 2616);
+				add_location(span1, file$1, 90, 12, 2900);
 				attr_dev(span2, "class", "stat-value");
-				add_location(span2, file$1, 90, 12, 2669);
+				add_location(span2, file$1, 91, 12, 2953);
 				attr_dev(div1, "class", "stat-row svelte-1m3hpql");
-				add_location(div1, file$1, 88, 10, 2580);
+				add_location(div1, file$1, 89, 10, 2864);
 				attr_dev(span3, "class", "stat-label svelte-1m3hpql");
-				add_location(span3, file$1, 94, 12, 2784);
+				add_location(span3, file$1, 98, 12, 3175);
 				attr_dev(span4, "class", "stat-value");
-				add_location(span4, file$1, 95, 12, 2839);
+				add_location(span4, file$1, 99, 12, 3230);
 				attr_dev(div2, "class", "stat-row svelte-1m3hpql");
-				add_location(div2, file$1, 93, 10, 2748);
+				add_location(div2, file$1, 97, 10, 3139);
 				attr_dev(span5, "class", "stat-label svelte-1m3hpql");
-				add_location(span5, file$1, 107, 12, 3246);
+				add_location(span5, file$1, 111, 12, 3637);
 				attr_dev(span6, "class", "stat-value value svelte-1m3hpql");
-				add_location(span6, file$1, 108, 12, 3298);
+				add_location(span6, file$1, 112, 12, 3689);
 				attr_dev(div3, "class", "stat-row svelte-1m3hpql");
-				add_location(div3, file$1, 106, 10, 3210);
+				add_location(div3, file$1, 110, 10, 3601);
 				attr_dev(span7, "class", "stat-label svelte-1m3hpql");
-				add_location(span7, file$1, 114, 12, 3468);
+				add_location(span7, file$1, 118, 12, 3859);
 				attr_dev(span8, "class", "stat-value");
-				add_location(span8, file$1, 115, 12, 3526);
+				add_location(span8, file$1, 119, 12, 3917);
 				attr_dev(div4, "class", "stat-row svelte-1m3hpql");
-				add_location(div4, file$1, 113, 10, 3432);
+				add_location(div4, file$1, 117, 10, 3823);
 				attr_dev(span9, "class", "stat-label svelte-1m3hpql");
-				add_location(span9, file$1, 124, 12, 3823);
+				add_location(span9, file$1, 128, 12, 4214);
 				attr_dev(span10, "class", "stat-value time svelte-1m3hpql");
-				add_location(span10, file$1, 125, 12, 3883);
+				add_location(span10, file$1, 129, 12, 4274);
 				attr_dev(div5, "class", "stat-row svelte-1m3hpql");
-				add_location(div5, file$1, 123, 10, 3787);
+				add_location(div5, file$1, 127, 10, 4178);
 				attr_dev(div6, "class", "camp-stats svelte-1m3hpql");
-				add_location(div6, file$1, 87, 8, 2544);
+				add_location(div6, file$1, 88, 8, 2828);
 				attr_dev(button, "class", "camp-card svelte-1m3hpql");
 				attr_dev(button, "type", "button");
 				set_style(button, "border-color", getProbabilityColor(/*camp*/ ctx[3].probability));
-				attr_dev(button, "aria-label", button_aria_label_value = `View latest kill for gate camp at ${/*camp*/ ctx[3].stargateName}`);
 				add_location(button, file$1, 62, 6, 1728);
 			},
 			m: function mount(target, anchor) {
@@ -69100,7 +69069,7 @@ void main() {
 					set_style(span0, "background-color", getProbabilityColor(/*camp*/ ctx[3].probability));
 				}
 
-				if (dirty & /*camps*/ 1 && t7_value !== (t7_value = /*camp*/ ctx[3].systemId + "")) set_data_dev(t7, t7_value);
+				if (dirty & /*camps*/ 1 && t7_value !== (t7_value = (/*camp*/ ctx[3].kills[0]?.pinpoints?.celestialData?.solarsystemname || /*camp*/ ctx[3].systemId) + "")) set_data_dev(t7, t7_value);
 				if (dirty & /*camps*/ 1 && t11_value !== (t11_value = /*camp*/ ctx[3].kills.length + "")) set_data_dev(t11, t11_value);
 				if (dirty & /*camps*/ 1 && t13_value !== (t13_value = getKillFrequency(/*camp*/ ctx[3].kills) + "")) set_data_dev(t13, t13_value);
 				if (dirty & /*camps*/ 1) show_if = hasInterdictor(/*camp*/ ctx[3].kills);
@@ -69138,10 +69107,6 @@ void main() {
 				if (dirty & /*camps*/ 1) {
 					set_style(button, "border-color", getProbabilityColor(/*camp*/ ctx[3].probability));
 				}
-
-				if (dirty & /*camps*/ 1 && button_aria_label_value !== (button_aria_label_value = `View latest kill for gate camp at ${/*camp*/ ctx[3].stargateName}`)) {
-					attr_dev(button, "aria-label", button_aria_label_value);
-				}
 			},
 			d: function destroy(detaching) {
 				if (detaching) {
@@ -69166,7 +69131,7 @@ void main() {
 		return block;
 	}
 
-	// (132:4) {#if camps.length === 0}
+	// (136:4) {#if camps.length === 0}
 	function create_if_block$1(ctx) {
 		let p;
 
@@ -69175,7 +69140,7 @@ void main() {
 				p = element("p");
 				p.textContent = "No active gate camps detected";
 				attr_dev(p, "class", "no-camps svelte-1m3hpql");
-				add_location(p, file$1, 132, 6, 4051);
+				add_location(p, file$1, 136, 6, 4442);
 			},
 			m: function mount(target, anchor) {
 				insert_dev(target, p, anchor);
@@ -69191,7 +69156,7 @@ void main() {
 			block,
 			id: create_if_block$1.name,
 			type: "if",
-			source: "(132:4) {#if camps.length === 0}",
+			source: "(136:4) {#if camps.length === 0}",
 			ctx
 		});
 
@@ -69253,7 +69218,7 @@ void main() {
 				if (if_block) if_block.m(div0, null);
 			},
 			p: function update(ctx, [dirty]) {
-				if (dirty & /*getProbabilityColor, camps, window, getTimeAgo, formatValue, hasInterdictor, getKillFrequency, Math*/ 1) {
+				if (dirty & /*getProbabilityColor, camps, Date, String, window, getTimeAgo, formatValue, hasInterdictor, getKillFrequency, Math*/ 1) {
 					each_value = ensure_array_like_dev(/*camps*/ ctx[0]);
 					let i;
 
@@ -69366,7 +69331,9 @@ void main() {
 			const latestKill = camp.kills[camp.kills.length - 1];
 
 			if (latestKill) {
-				window.open(`https://zkillboard.com/kill/${latestKill.killID}/`, "_blank");
+				const killTime = new Date(latestKill.killmail.killmail_time);
+				const formattedTime = `${killTime.getUTCFullYear()}${String(killTime.getUTCMonth() + 1).padStart(2, "0")}${String(killTime.getUTCDate()).padStart(2, "0")}${String(killTime.getUTCHours()).padStart(2, "0")}${String(killTime.getUTCMinutes()).padStart(2, "0")}`;
+				window.open(`https://zkillboard.com/related/${camp.systemId}/${formattedTime}/`, "_blank");
 			}
 		};
 

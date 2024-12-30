@@ -67,13 +67,14 @@
         on:click={() => {
           const latestKill = camp.kills[camp.kills.length - 1];
           if (latestKill) {
+            const killTime = new Date(latestKill.killmail.killmail_time);
+            const formattedTime = `${killTime.getUTCFullYear()}${String(killTime.getUTCMonth() + 1).padStart(2, "0")}${String(killTime.getUTCDate()).padStart(2, "0")}${String(killTime.getUTCHours()).padStart(2, "0")}${String(killTime.getUTCMinutes()).padStart(2, "0")}`;
             window.open(
-              `https://zkillboard.com/kill/${latestKill.killID}/`,
+              `https://zkillboard.com/related/${camp.systemId}/${formattedTime}/`,
               "_blank"
             );
           }
         }}
-        aria-label={`View latest kill for gate camp at ${camp.stargateName}`}
       >
         <div class="camp-header">
           <h3>{camp.stargateName}</h3>
@@ -88,7 +89,10 @@
         <div class="camp-stats">
           <div class="stat-row">
             <span class="stat-label">System:</span>
-            <span class="stat-value">{camp.systemId}</span>
+            <span class="stat-value"
+              >{camp.kills[0]?.pinpoints?.celestialData?.solarsystemname ||
+                camp.systemId}</span
+            >
           </div>
 
           <div class="stat-row">

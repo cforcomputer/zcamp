@@ -1,30 +1,39 @@
-import { writable, derived } from "svelte/store"; // Add derived here
+import { writable, derived } from "svelte/store";
 
 export const activeCamps = writable([]);
 
-const CAMP_TIMEOUT = 15 * 60 * 1000; // 15 minutes in milliseconds
-// Add at top of campStore.js
+const CAMP_TIMEOUT = 60 * 60 * 1000; // 1 hour in milliseconds
 const CAPSULE_ID = 670;
-const INTERDICTOR_IDS = new Set([
-  22456, // Sabre
-  22464, // Flycatcher
-  22452, // Heretic
-  22460, // Eris
-  // Add other interdictor IDs
+
+const PERMANENTLY_CAMPED_SYSTEMS = new Set([
+  30002813, 30005196, 30002718, 30002647,
 ]);
 
-const HICTOR_IDS = new Set([
-  12013, // Broadsword
-  12017, // Onyx
-  12021, // Phobos
-  12025, // Devoter
-  // Add other heavy interdictor IDs
+const SHIP_IDS = {
+  INTERDICTORS: new Set([22456, 22464, 22452, 22460]), // Sabre, Flycatcher, Heretic, Eris
+  HICTORS: new Set([12013, 12017, 12021, 12025]), // Broadsword, Onyx, Phobos, Devoter
+  FORCE_RECON: new Set([11963, 11961]), // Rapier, Lachesis
+  T3_CRUISERS: {
+    LOKI: 29990,
+    PROTEUS: 29988,
+  },
+  CURSE: 11965,
+  INTERCEPTORS: new Set([11375, 11379, 11377, 11381]),
+  LOGISTICS: new Set([11985, 11987, 11989, 11978]),
+  TACTICAL_DESTROYERS: new Set([34317, 34828]), // Hecate, Jackdaw
+};
+
+const INDUSTRIAL_CATEGORIES = new Set([
+  "Industrial",
+  "Industrial Command Ship",
+  "Deep Space Transport",
+  "Blockade Runner",
+  "Freighter",
+  "Jump Freighter",
 ]);
 
 function isStargate(name) {
   if (!name) return false;
-
-  // Common patterns for stargate names
   return (
     name.toLowerCase().includes("stargate") ||
     name.toLowerCase().includes("gate to") ||
@@ -32,57 +41,82 @@ function isStargate(name) {
   );
 }
 
-function calculateCampProbability(kills) {
+function calculateCampProbability(kills, systemId) {
   let probability = 0;
+  const now = new Date().getTime();
+  const lastKillTime = new Date(
+    kills[kills.length - 1].killmail.killmail_time
+  ).getTime();
+  const timeSinceLastKill = now - lastKillTime;
 
-  // Ignore if only capsule kills
+  if (kills.every((k) => k.zkb.npc)) return 0;
+
   const nonCapsuleKills = kills.filter(
     (k) => k.killmail.victim.ship_type_id !== CAPSULE_ID
   );
-
   if (nonCapsuleKills.length < 2) return 0;
 
-  // Base probability starts at 30% with 2+ kills
-  probability = 30;
+  if (PERMANENTLY_CAMPED_SYSTEMS.has(systemId)) {
+    if (timeSinceLastKill <= 45 * 60 * 1000) {
+      return 100;
+    }
+    return 30;
+  }
 
-  // Check time distribution
-  const killTimes = nonCapsuleKills.map((k) =>
-    new Date(k.killmail.killmail_time).getTime()
+  // Check for industrial victims
+  const hasIndustrialVictims = kills.some(
+    (kill) => kill.shipCategories?.victim === "industrial"
   );
-  const timeSpan = Math.max(...killTimes) - Math.min(...killTimes);
-  const avgTimeBetweenKills = timeSpan / (killTimes.length - 1);
-
-  // If kills are very close together (within 2 minutes), reduce probability
-  if (avgTimeBetweenKills < 120000) {
-    probability -= 20;
-  } else if (avgTimeBetweenKills > 600000) {
-    // If spread out over 10+ minutes
+  if (hasIndustrialVictims) {
     probability += 20;
   }
 
-  // Check for interdictors/hictors
-  const hasInterdictor = nonCapsuleKills.some((kill) =>
-    kill.killmail.attackers.some(
-      (a) =>
-        INTERDICTOR_IDS.has(a.ship_type_id) || HICTOR_IDS.has(a.ship_type_id)
-    )
+  // Check for capital victims
+  const hasCapitalVictims = kills.some(
+    (kill) => kill.shipCategories?.victim === "capital"
   );
-
-  if (hasInterdictor) {
+  if (hasCapitalVictims) {
     probability += 30;
+  }
+
+  // Analyze attacker compositions
+  kills.forEach((kill) => {
+    const attackerCategories = kill.shipCategories?.attackers || [];
+
+    // Check for capital support
+    const hasCapitalSupport = attackerCategories.some(
+      (attacker) => attacker.category === "capital"
+    );
+    if (hasCapitalSupport) {
+      probability += 25;
+    }
+
+    // Check for combat ship concentration
+    const combatShips = attackerCategories.filter(
+      (attacker) => attacker.category === "combat"
+    );
+    if (combatShips.length >= 3) {
+      probability += 15;
+    }
+  });
+
+  // Time-based probability adjustment
+  if (probability >= 60) {
+    if (timeSinceLastKill > 40 * 60 * 1000) {
+      const decayFactor = Math.min(
+        1,
+        (timeSinceLastKill - 40 * 60 * 1000) / (20 * 60 * 1000)
+      );
+      probability = Math.max(30, probability * (1 - decayFactor));
+    }
   }
 
   // Check for shared attackers
-  const attackerOverlap = getAttackerOverlap(nonCapsuleKills);
-  if (attackerOverlap.characters > 0) {
-    probability += 30;
-  } else if (attackerOverlap.corporations > 0) {
-    probability += 20;
-  } else if (attackerOverlap.alliances > 0) {
-    probability += 10;
-  }
+  const attackerOverlap = getAttackerOverlap(kills);
+  if (attackerOverlap.characters > 0) probability += 30;
+  else if (attackerOverlap.corporations > 0) probability += 20;
+  else if (attackerOverlap.alliances > 0) probability += 10;
 
-  // Cap probability at 100%
   return Math.min(100, Math.max(0, probability));
 }
 
@@ -93,7 +127,6 @@ function getAttackerOverlap(kills) {
     alliances: 0,
   };
 
-  // Create sets for first kill's attacker IDs
   const firstKillAttackers = {
     characters: new Set(
       kills[0].killmail.attackers.map((a) => a.character_id).filter(Boolean)
@@ -106,10 +139,8 @@ function getAttackerOverlap(kills) {
     ),
   };
 
-  // Check other kills for overlapping IDs
   for (let i = 1; i < kills.length; i++) {
-    const kill = kills[i];
-    kill.killmail.attackers.forEach((attacker) => {
+    kills[i].killmail.attackers.forEach((attacker) => {
       if (
         attacker.character_id &&
         firstKillAttackers.characters.has(attacker.character_id)
@@ -146,37 +177,19 @@ function getAttackerIds(attackers) {
   };
 }
 
-// In campStore.js
 export function addKillmailToCamps(killmail) {
-  if (!killmail.pinpoints?.nearestCelestial) {
-    return;
-  }
-
-  if (!isStargate(killmail.pinpoints.nearestCelestial.name)) {
-    return;
-  }
+  if (!killmail.pinpoints?.nearestCelestial) return;
+  if (!isStargate(killmail.pinpoints.nearestCelestial.name)) return;
 
   activeCamps.update((camps) => {
     const now = new Date().getTime();
-
-    // Remove old camps
     const oldCamps = camps.filter((camp) => {
       const age = now - new Date(camp.lastKill).getTime();
-      const isOld = age >= CAMP_TIMEOUT;
-      if (isOld) {
-        console.log("Removing old camp:", {
-          systemId: camp.systemId,
-          stargateName: camp.stargateName,
-          age: Math.floor(age / 1000) + "s",
-        });
-      }
-      return !isOld;
+      return age < CAMP_TIMEOUT;
     });
 
     const systemId = killmail.killmail.solar_system_id;
     const stargateName = killmail.pinpoints.nearestCelestial.name;
-
-    // Find existing camp
     let camp = oldCamps.find(
       (c) => c.systemId === systemId && c.stargateName === stargateName
     );
@@ -191,7 +204,7 @@ export function addKillmailToCamps(killmail) {
       newIds.corporation_ids.forEach((id) => camp.corporation_ids.add(id));
       newIds.alliance_ids.forEach((id) => camp.alliance_ids.add(id));
 
-      camp.probability = calculateCampProbability(camp.kills);
+      camp.probability = calculateCampProbability(camp.kills, systemId);
     } else {
       const ids = getAttackerIds(killmail.killmail.attackers);
       camp = {
@@ -213,28 +226,12 @@ export function addKillmailToCamps(killmail) {
 }
 
 export const filteredCamps = derived([activeCamps], ([$activeCamps]) => {
-  console.log("Filtering camps. Total camps:", $activeCamps.length);
-
-  const filtered = $activeCamps
+  return $activeCamps
     .filter((camp) => {
-      // Filter out camps with only capsule kills
       const nonCapsuleKills = camp.kills.filter(
         (k) => k.killmail.victim.ship_type_id !== CAPSULE_ID
       );
-
-      const hasEnoughKills = nonCapsuleKills.length >= 2;
-      const hasHighEnoughProbability = camp.probability >= 30;
-
-      console.log("Camp evaluation:", {
-        systemId: camp.systemId,
-        stargateName: camp.stargateName,
-        totalKills: camp.kills.length,
-        nonCapsuleKills: nonCapsuleKills.length,
-        probability: camp.probability,
-        passed: hasEnoughKills && hasHighEnoughProbability,
-      });
-
-      return hasEnoughKills && hasHighEnoughProbability;
+      return nonCapsuleKills.length >= 2 && camp.probability >= 30;
     })
     .map((camp) => ({
       ...camp,
@@ -243,7 +240,4 @@ export const filteredCamps = derived([activeCamps], ([$activeCamps]) => {
       numAlliances: camp.alliance_ids.size,
     }))
     .sort((a, b) => b.probability - a.probability);
-
-  console.log("Filtered camps:", filtered.length);
-  return filtered;
 });

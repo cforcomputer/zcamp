@@ -54,6 +54,11 @@ const db = new sqlite3.Database("./km_hunter.db", (err) => {
       celestial_data TEXT,
       last_updated DATETIME DEFAULT CURRENT_TIMESTAMP
     )`);
+    db.run(`CREATE TABLE IF NOT EXISTS ship_types (
+    ship_type_id INTEGER PRIMARY KEY,
+    category TEXT NOT NULL,
+    last_updated DATETIME DEFAULT CURRENT_TIMESTAMP
+    )`);
   }
 });
 
@@ -63,6 +68,151 @@ function isWithinLast24Hours(killmailTime) {
   const killTime = new Date(killmailTime);
   const timeDiff = now - killTime;
   return timeDiff <= 24 * 60 * 60 * 1000; // 24 hours in milliseconds
+}
+
+async function getShipCategoryFromDb(shipTypeId) {
+  return new Promise((resolve, reject) => {
+    db.get(
+      "SELECT category FROM ship_types WHERE ship_type_id = ?",
+      [shipTypeId],
+      (err, row) => {
+        if (err) {
+          console.error(
+            `Database error fetching ship type ${shipTypeId}:`,
+            err
+          );
+          reject(err);
+        } else {
+          resolve(row?.category);
+        }
+      }
+    );
+  });
+}
+
+async function storeShipCategory(shipTypeId, category) {
+  return new Promise((resolve, reject) => {
+    db.run(
+      `INSERT OR REPLACE INTO ship_types (ship_type_id, category, last_updated) 
+           VALUES (?, ?, CURRENT_TIMESTAMP)`,
+      [shipTypeId, category],
+      (err) => {
+        if (err) {
+          console.error(`Database error storing ship type ${shipTypeId}:`, err);
+          reject(err);
+        } else {
+          resolve();
+        }
+      }
+    );
+  });
+}
+
+async function isCapitalShip(marketGroupId) {
+  try {
+    while (marketGroupId) {
+      const marketResponse = await axios.get(
+        `https://esi.evetech.net/latest/markets/groups/${marketGroupId}/`
+      );
+
+      // Check if this is a capital ships parent group
+      if (marketGroupId === 1381 || marketGroupId === 2288) {
+        return true;
+      }
+
+      marketGroupId = marketResponse.data.parent_group_id;
+      if (!marketGroupId) break;
+    }
+    return false;
+  } catch (error) {
+    console.error(
+      `Error checking market group ${marketGroupId}:`,
+      error.message
+    );
+    return false;
+  }
+}
+
+async function determineShipCategory(typeId) {
+  try {
+    const response = await axios.get(
+      `https://esi.evetech.net/latest/universe/types/${typeId}/`
+    );
+
+    const marketGroupId = response.data.market_group_id;
+    const isCapital = await isCapitalShip(marketGroupId);
+
+    let category = "unknown";
+
+    if (isCapital) {
+      category = "capital";
+    } else if (response.data.group_id) {
+      if ([28, 380, 463, 543, 941].includes(response.data.group_id)) {
+        category = "industrial";
+      } else {
+        category = "combat";
+      }
+    }
+
+    return category;
+  } catch (error) {
+    console.error(`Error determining category for ship type ${typeId}:`, error);
+    return "unknown";
+  }
+}
+
+async function getShipCategory(shipTypeId) {
+  if (!shipTypeId) return null;
+
+  try {
+    // First check database with await
+    let category = await getShipCategoryFromDb(shipTypeId);
+
+    // If not in database, determine category and store it
+    if (!category) {
+      category = await determineShipCategory(shipTypeId);
+      // Ensure we wait for the storage operation to complete
+      await storeShipCategory(shipTypeId, category);
+      console.log(`Stored new ship category for ${shipTypeId}: ${category}`);
+    }
+
+    return category;
+  } catch (error) {
+    console.error(`Error getting ship category for ${shipTypeId}:`, error);
+    return null;
+  }
+}
+
+async function addShipCategoriesToKillmail(killmail) {
+  try {
+    // Get victim ship category - ensure we await the full process
+    const victimCategory = await getShipCategory(
+      killmail.killmail.victim.ship_type_id
+    );
+
+    // Initialize categories object
+    killmail.shipCategories = {
+      victim: victimCategory,
+      attackers: [],
+    };
+
+    // Process attacker ships sequentially to avoid race conditions
+    for (const attacker of killmail.killmail.attackers) {
+      if (attacker.ship_type_id) {
+        const category = await getShipCategory(attacker.ship_type_id);
+        killmail.shipCategories.attackers.push({
+          attackerId: attacker.character_id,
+          shipTypeId: attacker.ship_type_id,
+          category: category,
+        });
+      }
+    }
+
+    return killmail;
+  } catch (error) {
+    console.error("Error adding ship categories to killmail:", error);
+    return killmail;
+  }
 }
 
 // Function to get the total size of a user's filter lists
@@ -1284,9 +1434,17 @@ async function pollRedisQ() {
 
       if (isWithinLast24Hours(killmail.killmail.killmail_time)) {
         try {
+          // Process the killmail with celestial data
           const processedKillmail = await processKillmail(killmail);
-          killmails.push(processedKillmail);
-          io.emit("newKillmail", processedKillmail);
+
+          // Add ship categories
+          const enrichedKillmail = await addShipCategoriesToKillmail(
+            processedKillmail
+          );
+
+          // Store and emit the enriched killmail
+          killmails.push(enrichedKillmail);
+          io.emit("newKillmail", enrichedKillmail);
         } catch (error) {
           console.error("Failed to process killmail:", error);
         }
