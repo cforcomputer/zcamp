@@ -331,103 +331,118 @@ function calculatePinpoints(celestials, killPosition) {
   // Constants
   const KM_PER_AU = 149597870.7;
   const THRESHOLDS = {
-    AT_CELESTIAL: 10000,
-    NEAR_CELESTIAL: 10000000,
+    AT_CELESTIAL: 10000, // 10km
+    NEAR_CELESTIAL: 10000000, // 10,000km
     MAX_BOX_SIZE: KM_PER_AU * 100,
   };
 
-  // Initialize all variables at the start with proper scope
+  // Early validation
+  if (!killPosition?.x || !killPosition?.y || !killPosition?.z) {
+    console.error("Invalid kill position:", killPosition);
+    return {
+      hasTetrahedron: false,
+      points: [],
+      atCelestial: false,
+      nearestCelestial: null,
+      triangulationPossible: false,
+    };
+  }
+
+  // Find nearest celestial
+  let nearest = null;
+  let minDistance = Infinity;
   let bestPoints = [];
   let minVolume = Infinity;
-  let nearestCelestial = null;
-  let celestialPositions = [];
-  let killPos = { x: 0, y: 0, z: 0 };
 
-  // Early return for invalid input
-  if (!killPosition || !Array.isArray(celestials)) {
+  celestials.forEach((celestial) => {
+    if (celestial.id === "killmail" || !celestial.itemname) return;
+
+    const distance = Math.sqrt(
+      Math.pow(celestial.x - killPosition.x, 2) +
+        Math.pow(celestial.y - killPosition.y, 2) +
+        Math.pow(celestial.z - killPosition.z, 2)
+    );
+
+    if (distance < minDistance) {
+      minDistance = distance;
+      nearest = {
+        name: celestial.itemname,
+        distance: distance,
+        position: {
+          x: celestial.x,
+          y: celestial.y,
+          z: celestial.z,
+        },
+      };
+    }
+  });
+
+  // If we're at or very near a celestial, no need for tetrahedron
+  if (nearest && minDistance <= THRESHOLDS.AT_CELESTIAL) {
+    return {
+      hasTetrahedron: false,
+      points: [],
+      atCelestial: true,
+      nearestCelestial: nearest,
+      triangulationPossible: true,
+    };
+  }
+
+  if (nearest && minDistance <= THRESHOLDS.NEAR_CELESTIAL) {
     return {
       hasTetrahedron: false,
       points: [],
       atCelestial: false,
-      nearestCelestial: null,
-      triangulationPossible: false,
+      nearestCelestial: nearest,
+      triangulationPossible: true,
     };
   }
 
-  // Set kill position
-  killPos = {
-    x: killPosition.x,
-    y: killPosition.y,
-    z: killPosition.z,
-  };
+  // Process celestials for tetrahedron calculation
+  const validCelestials = celestials.filter(
+    (cel) =>
+      cel.id !== "killmail" &&
+      cel.x !== undefined &&
+      cel.y !== undefined &&
+      cel.z !== undefined
+  );
 
-  // Process celestials
-  celestialPositions = celestials
-    .filter(
-      (cel) =>
-        cel.id !== "killmail" &&
-        cel.x !== undefined &&
-        cel.y !== undefined &&
-        cel.z !== undefined
-    )
-    .map((cel) => ({
-      position: { x: cel.x, y: cel.y, z: cel.z },
-      distance: Math.sqrt(
-        Math.pow(cel.x - killPos.x, 2) +
-          Math.pow(cel.y - killPos.y, 2) +
-          Math.pow(cel.z - killPos.z, 2)
-      ),
-      name: cel.itemname,
-    }))
-    .sort((a, b) => a.distance - b.distance);
-
-  nearestCelestial = celestialPositions[0] || null;
-
-  if (!killPosition || !Array.isArray(celestials)) {
-    return {
-      hasTetrahedron: false,
-      points: [],
-      atCelestial: false,
-      nearestCelestial: null,
-      triangulationPossible: false,
-    };
-  }
-
-  // Process celestials and find tetrahedron containing kill point
-  if (celestialPositions.length >= 4) {
-    for (let i = 0; i < Math.min(celestialPositions.length - 3, 10); i++) {
-      for (
-        let j = i + 1;
-        j < Math.min(celestialPositions.length - 2, 11);
-        j++
-      ) {
-        for (
-          let k = j + 1;
-          k < Math.min(celestialPositions.length - 1, 12);
-          k++
-        ) {
-          for (
-            let l = k + 1;
-            l < Math.min(celestialPositions.length, 13);
-            l++
-          ) {
+  // Need at least 4 celestials for tetrahedron
+  if (validCelestials.length >= 4) {
+    // Try to find tetrahedron containing kill point
+    for (let i = 0; i < Math.min(validCelestials.length - 3, 10); i++) {
+      for (let j = i + 1; j < Math.min(validCelestials.length - 2, 11); j++) {
+        for (let k = j + 1; k < Math.min(validCelestials.length - 1, 12); k++) {
+          for (let l = k + 1; l < Math.min(validCelestials.length, 13); l++) {
             const tetraPoints = [
-              celestialPositions[i].position,
-              celestialPositions[j].position,
-              celestialPositions[k].position,
-              celestialPositions[l].position,
+              validCelestials[i],
+              validCelestials[j],
+              validCelestials[k],
+              validCelestials[l],
             ];
 
-            if (isPointInTetrahedron(killPos, tetraPoints)) {
-              const volume = calculateTetrahedronVolume(tetraPoints);
-              if (volume < minVolume) {
+            const tetraVectors = tetraPoints.map((p) => ({
+              position: { x: p.x, y: p.y, z: p.z },
+              name: p.itemname,
+              distance: Math.sqrt(
+                Math.pow(p.x - killPosition.x, 2) +
+                  Math.pow(p.y - killPosition.y, 2) +
+                  Math.pow(p.z - killPosition.z, 2)
+              ),
+            }));
+
+            if (
+              isPointInTetrahedron(
+                killPosition,
+                tetraPoints.map((p) => ({ x: p.x, y: p.y, z: p.z }))
+              )
+            ) {
+              const volume = calculateTetrahedronVolume(
+                tetraPoints.map((p) => ({ x: p.x, y: p.y, z: p.z }))
+              );
+              if (volume < minVolume && volume < THRESHOLDS.MAX_BOX_SIZE) {
                 minVolume = volume;
-                bestPoints = [
-                  celestialPositions[i],
-                  celestialPositions[j],
-                  celestialPositions[k],
-                  celestialPositions[l],
-                ];
+                bestPoints = tetraVectors;
               }
             }
           }
@@ -438,59 +453,39 @@ function calculatePinpoints(celestials, killPosition) {
     if (bestPoints.length === 4) {
       return {
         hasTetrahedron: true,
-        points: bestPoints,
+        points: bestPoints.map((point) => ({
+          name: point.name,
+          distance: point.distance,
+          position: {
+            x: parseFloat(point.position.x),
+            y: parseFloat(point.position.y),
+            z: parseFloat(point.position.z),
+          },
+        })),
         atCelestial: false,
-        nearestCelestial: null,
+        nearestCelestial: nearest,
         triangulationPossible: true,
       };
     }
   }
 
-  if (
-    nearestCelestial &&
-    nearestCelestial.distance <= THRESHOLDS.AT_CELESTIAL
-  ) {
-    return {
-      hasTetrahedron: false,
-      points: [nearestCelestial],
-      atCelestial: true,
-      nearestCelestial,
-      triangulationPossible: true,
-    };
-  }
-
-  if (
-    nearestCelestial &&
-    nearestCelestial.distance <= THRESHOLDS.NEAR_CELESTIAL
-  ) {
-    return {
-      hasTetrahedron: false,
-      points: [],
-      atCelestial: false,
-      nearestCelestial,
-      triangulationPossible: true,
-    };
-  }
-
+  // Default case when no triangulation is possible
   return {
     hasTetrahedron: false,
     points: [],
     atCelestial: false,
-    nearestCelestial: nearestCelestial || null,
-    triangulationPossible: false,
+    nearestCelestial: nearest,
+    triangulationPossible: nearest && minDistance <= THRESHOLDS.NEAR_CELESTIAL,
   };
 }
 
 function calculateTetrahedronVolume(points) {
   const [a, b, c, d] = points;
 
-  // Calculate vectors from point a to others
   const ab = subtractVectors(b, a);
   const ac = subtractVectors(c, a);
   const ad = subtractVectors(d, a);
 
-  // Calculate volume using triple product formula
-  // V = (1/6)|((b-a)×(c-a))·(d-a)|
   const crossProduct = {
     x: ab.y * ac.z - ab.z * ac.y,
     y: ab.z * ac.x - ab.x * ac.z,
@@ -508,14 +503,12 @@ function calculateTetrahedronVolume(points) {
 function isPointInTetrahedron(point, tetraPoints) {
   const [a, b, c, d] = tetraPoints;
 
-  // Convert string coordinates to numbers if needed
   const p = {
     x: parseFloat(point.x),
     y: parseFloat(point.y),
     z: parseFloat(point.z),
   };
 
-  // Calculate barycentric coordinates
   const vap = subtractVectors(p, a);
   const vbp = subtractVectors(p, b);
   const vcp = subtractVectors(p, c);
@@ -525,17 +518,15 @@ function isPointInTetrahedron(point, tetraPoints) {
   const vac = subtractVectors(c, a);
   const vad = subtractVectors(d, a);
 
-  const va6 = calculateTetrahedronVolume([a, b, c, d]); // Total volume * 6
-  const v1 = dotProduct(crossProduct(vab, vac), vad); // Reference volume * 6
+  const va6 = calculateTetrahedronVolume([a, b, c, d]);
+  const v1 = dotProduct(crossProduct(vab, vac), vad);
 
-  // Calculate barycentric coordinates
   const v2 = dotProduct(crossProduct(vap, vcp), vdp) / v1;
   const v3 = dotProduct(crossProduct(vab, vap), vdp) / v1;
   const v4 = dotProduct(crossProduct(vap, vac), vbp) / v1;
   const v5 = 1 - v2 - v3 - v4;
 
-  // Point is inside if all coordinates are between 0 and 1
-  const epsilon = 0.0001; // Account for floating point precision
+  const epsilon = 0.0001;
   return (
     v2 >= -epsilon &&
     v2 <= 1 + epsilon &&
@@ -1148,14 +1139,19 @@ async function ensureCelestialData(systemId) {
       [systemId],
       async (err, row) => {
         if (err) {
+          console.error("Error fetching celestial data:", err);
           reject(err);
           return;
         }
 
         if (!row) {
           try {
+            console.log(`Fetching new celestial data for system ${systemId}`);
             const celestialData = await fetchCelestialData(systemId);
             if (!celestialData) {
+              console.error(
+                `Failed to fetch celestial data for system ${systemId}`
+              );
               reject(
                 new Error(
                   `Failed to fetch celestial data for system ${systemId}`
@@ -1165,12 +1161,16 @@ async function ensureCelestialData(systemId) {
             }
 
             await storeCelestialData(systemId, celestialData);
+            console.log("Stored celestial data:", celestialData[0]);
             resolve(celestialData);
           } catch (error) {
+            console.error("Error in ensureCelestialData:", error);
             reject(error);
           }
         } else {
-          resolve(JSON.parse(row.celestial_data));
+          const celestialData = JSON.parse(row.celestial_data);
+          console.log("Retrieved cached celestial data:", celestialData[0]);
+          resolve(celestialData);
         }
       }
     );
@@ -1181,15 +1181,15 @@ async function processKillmail(killmail) {
   const systemId = killmail.killmail.solar_system_id;
   const celestialData = await ensureCelestialData(systemId);
 
-  // Get the first celestial entry which contains system info
-  const systemInfo = celestialData?.[0]; // Add optional chaining
-
+  // Calculate pinpoint data including nearest celestial
   const pinpointData = calculatePinpoints(
     celestialData,
     killmail.killmail.victim.position
   );
 
-  // Add null check and provide default values
+  // Get the first celestial entry which contains system info
+  const systemInfo = celestialData?.[0];
+
   const celestialInfo = systemInfo
     ? {
         regionid: systemInfo.regionid,
@@ -1200,11 +1200,10 @@ async function processKillmail(killmail) {
     : {
         regionid: null,
         regionname: null,
-        solarsystemid: systemId, // We at least know the system ID from the killmail
+        solarsystemid: systemId,
         solarsystemname: null,
       };
 
-  // Attach relevant celestial data to the pinpoints
   pinpointData.celestialData = celestialInfo;
 
   return {
@@ -1213,51 +1212,51 @@ async function processKillmail(killmail) {
   };
 }
 
-async function sendWebhookNotification(killmail, webhookUrl) {
-  try {
-    const zkillUrl = `https://zkillboard.com/kill/${killmail.killID}/`;
+// async function sendWebhookNotification(killmail, webhookUrl) {
+//   try {
+//     const zkillUrl = `https://zkillboard.com/kill/${killmail.killID}/`;
 
-    const embed = {
-      title: "New Kill Detected",
-      url: zkillUrl,
-      color: 16711680, // Red
-      fields: [
-        {
-          name: "Ship Type",
-          value: `ID: ${killmail.killmail.victim.ship_type_id}`,
-          inline: true,
-        },
-        {
-          name: "Total Value",
-          value: `${(killmail.zkb.totalValue / 1000000).toFixed(2)}M ISK`,
-          inline: true,
-        },
-        {
-          name: "System",
-          value: `ID: ${killmail.killmail.solar_system_id}`,
-          inline: true,
-        },
-      ],
-      timestamp: killmail.killmail.killmail_time,
-    };
+//     const embed = {
+//       title: "New Kill Detected",
+//       url: zkillUrl,
+//       color: 16711680, // Red
+//       fields: [
+//         {
+//           name: "Ship Type",
+//           value: `ID: ${killmail.killmail.victim.ship_type_id}`,
+//           inline: true,
+//         },
+//         {
+//           name: "Total Value",
+//           value: `${(killmail.zkb.totalValue / 1000000).toFixed(2)}M ISK`,
+//           inline: true,
+//         },
+//         {
+//           name: "System",
+//           value: `ID: ${killmail.killmail.solar_system_id}`,
+//           inline: true,
+//         },
+//       ],
+//       timestamp: killmail.killmail.killmail_time,
+//     };
 
-    const response = await fetch(webhookUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        embeds: [embed],
-      }),
-    });
+//     const response = await fetch(webhookUrl, {
+//       method: "POST",
+//       headers: {
+//         "Content-Type": "application/json",
+//       },
+//       body: JSON.stringify({
+//         embeds: [embed],
+//       }),
+//     });
 
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
-  } catch (error) {
-    console.error("Error sending webhook notification:", error);
-  }
-}
+//     if (!response.ok) {
+//       throw new Error(`HTTP error! status: ${response.status}`);
+//     }
+//   } catch (error) {
+//     console.error("Error sending webhook notification:", error);
+//   }
+// }
 
 // Function to poll for new killmails from RedisQ
 // Modify the polling function to use processKillmail

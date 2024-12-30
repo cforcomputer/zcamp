@@ -15,7 +15,6 @@
   let pinpointLines = null;
   let container;
   let scene, camera, renderer, controls;
-  let compass;
   let error = null;
 
   let loading = true;
@@ -630,39 +629,45 @@
     });
   }
 
+  // function findClosestCelestial(celestials, killPosition) {
+  //   if (!killPosition?.x || !killPosition?.y || !killPosition?.z) {
+  //     console.error("Invalid kill position:", killPosition);
+  //     return "Unknown";
+  //   }
+
+  //   const killPos = new THREE.Vector3(
+  //     killPosition.x,
+  //     killPosition.y,
+  //     killPosition.z
+  //   );
+
+  //   let closest = null;
+  //   let minDistance = Infinity;
+
+  //   celestials.forEach((celestial) => {
+  //     if (celestial.id === "killmail" || !celestial.itemname) return;
+
+  //     const celestialPos = new THREE.Vector3(
+  //       celestial.x || 0,
+  //       celestial.y || 0,
+  //       celestial.z || 0
+  //     );
+  //     const distance = celestialPos.distanceTo(killPos);
+
+  //     if (distance < minDistance) {
+  //       minDistance = distance;
+  //       closest = celestial;
+  //     }
+  //   });
+
+  //   return closest
+  //     ? `${closest.itemname} (${formatDistance(minDistance)})`
+  //     : "Unknown";
+  // }
+
   function findClosestCelestial(celestials, killPosition) {
-    if (!killPosition?.x || !killPosition?.y || !killPosition?.z) {
-      console.error("Invalid kill position:", killPosition);
-      return "Unknown";
-    }
-
-    const killPos = new THREE.Vector3(
-      killPosition.x,
-      killPosition.y,
-      killPosition.z
-    );
-
-    let closest = null;
-    let minDistance = Infinity;
-
-    celestials.forEach((celestial) => {
-      if (celestial.id === "killmail" || !celestial.itemname) return;
-
-      const celestialPos = new THREE.Vector3(
-        celestial.x || 0,
-        celestial.y || 0,
-        celestial.z || 0
-      );
-      const distance = celestialPos.distanceTo(killPos);
-
-      if (distance < minDistance) {
-        minDistance = distance;
-        closest = celestial;
-      }
-    });
-
-    return closest
-      ? `${closest.itemname} (${formatDistance(minDistance)})`
+    return kill.pinpoints.nearestCelestial
+      ? `${kill.pinpoints.nearestCelestial.name} (${formatDistance(kill.pinpoints.nearestCelestial.distance)})`
       : "Unknown";
   }
 
@@ -1118,10 +1123,10 @@
     <p>System name: {systemName}</p>
     <p>Closest Celestial: {closestCelestial}</p>
     {#if kill.pinpoints?.atCelestial}
-      <p>Triangulation possible - At celestial</p>
+      <p>At celestial: {kill.pinpoints.nearestCelestial.name}</p>
     {:else if kill.pinpoints?.nearestCelestial && kill.pinpoints?.triangulationPossible}
       <p>
-        Triangulation possible - Near celestial ({(
+        Near celestial: {kill.pinpoints.nearestCelestial.name} ({(
           kill.pinpoints.nearestCelestial.distance / 1000
         ).toFixed(2)} km)
       </p>

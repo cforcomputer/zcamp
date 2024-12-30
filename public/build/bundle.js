@@ -5582,6 +5582,7 @@ var app = (function () {
 
 	const activeCamps = writable([]);
 
+	const CAMP_TIMEOUT = 15 * 60 * 1000; // 15 minutes in milliseconds
 	// Add at top of campStore.js
 	const CAPSULE_ID = 670;
 	const INTERDICTOR_IDS = new Set([
@@ -5599,6 +5600,17 @@ var app = (function () {
 	  12025, // Devoter
 	  // Add other heavy interdictor IDs
 	]);
+
+	function isStargate(name) {
+	  if (!name) return false;
+
+	  // Common patterns for stargate names
+	  return (
+	    name.toLowerCase().includes("stargate") ||
+	    name.toLowerCase().includes("gate to") ||
+	    name.toLowerCase().includes("jump gate")
+	  );
+	}
 
 	function calculateCampProbability(kills) {
 	  let probability = 0;
@@ -5702,11 +5714,25 @@ var app = (function () {
 	  return overlap;
 	}
 
+	function getAttackerIds(attackers) {
+	  return {
+	    character_ids: new Set(
+	      attackers.map((a) => a.character_id).filter(Boolean)
+	    ),
+	    corporation_ids: new Set(
+	      attackers.map((a) => a.corporation_id).filter(Boolean)
+	    ),
+	    alliance_ids: new Set(attackers.map((a) => a.alliance_id).filter(Boolean)),
+	  };
+	}
+
+	// In campStore.js
 	function addKillmailToCamps(killmail) {
-	  if (
-	    !killmail.pinpoints?.nearestCelestial ||
-	    !isStargate(killmail.pinpoints.nearestCelestial.name)
-	  ) {
+	  if (!killmail.pinpoints?.nearestCelestial) {
+	    return;
+	  }
+
+	  if (!isStargate(killmail.pinpoints.nearestCelestial.name)) {
 	    return;
 	  }
 
@@ -5714,16 +5740,24 @@ var app = (function () {
 	    const now = new Date().getTime();
 
 	    // Remove old camps
-	    camps = camps.filter((camp) => {
+	    const oldCamps = camps.filter((camp) => {
 	      const age = now - new Date(camp.lastKill).getTime();
-	      return age < CAMP_TIMEOUT;
+	      const isOld = age >= CAMP_TIMEOUT;
+	      if (isOld) {
+	        console.log("Removing old camp:", {
+	          systemId: camp.systemId,
+	          stargateName: camp.stargateName,
+	          age: Math.floor(age / 1000) + "s",
+	        });
+	      }
+	      return !isOld;
 	    });
 
 	    const systemId = killmail.killmail.solar_system_id;
 	    const stargateName = killmail.pinpoints.nearestCelestial.name;
 
 	    // Find existing camp
-	    let camp = camps.find(
+	    let camp = oldCamps.find(
 	      (c) => c.systemId === systemId && c.stargateName === stargateName
 	    );
 
@@ -5732,16 +5766,13 @@ var app = (function () {
 	      camp.lastKill = killmail.killmail.killmail_time;
 	      camp.totalValue += killmail.zkb.totalValue;
 
-	      // Update attacker IDs
 	      const newIds = getAttackerIds(killmail.killmail.attackers);
 	      newIds.character_ids.forEach((id) => camp.character_ids.add(id));
 	      newIds.corporation_ids.forEach((id) => camp.corporation_ids.add(id));
 	      newIds.alliance_ids.forEach((id) => camp.alliance_ids.add(id));
 
-	      // Recalculate probability
 	      camp.probability = calculateCampProbability(camp.kills);
 	    } else {
-	      // Create new camp
 	      const ids = getAttackerIds(killmail.killmail.attackers);
 	      camp = {
 	        systemId,
@@ -5752,23 +5783,38 @@ var app = (function () {
 	        character_ids: ids.character_ids,
 	        corporation_ids: ids.corporation_ids,
 	        alliance_ids: ids.alliance_ids,
-	        probability: 0, // Will be recalculated when more kills are added
+	        probability: 0,
 	      };
-	      camps.push(camp);
+	      oldCamps.push(camp);
 	    }
 
-	    return camps;
+	    return oldCamps;
 	  });
 	}
 
 	const filteredCamps = derived([activeCamps], ([$activeCamps]) => {
-	  return $activeCamps
+	  console.log("Filtering camps. Total camps:", $activeCamps.length);
+
+	  const filtered = $activeCamps
 	    .filter((camp) => {
 	      // Filter out camps with only capsule kills
 	      const nonCapsuleKills = camp.kills.filter(
 	        (k) => k.killmail.victim.ship_type_id !== CAPSULE_ID
 	      );
-	      return nonCapsuleKills.length >= 2 && camp.probability >= 30;
+
+	      const hasEnoughKills = nonCapsuleKills.length >= 2;
+	      const hasHighEnoughProbability = camp.probability >= 30;
+
+	      console.log("Camp evaluation:", {
+	        systemId: camp.systemId,
+	        stargateName: camp.stargateName,
+	        totalKills: camp.kills.length,
+	        nonCapsuleKills: nonCapsuleKills.length,
+	        probability: camp.probability,
+	        passed: hasEnoughKills && hasHighEnoughProbability,
+	      });
+
+	      return hasEnoughKills && hasHighEnoughProbability;
 	    })
 	    .map((camp) => ({
 	      ...camp,
@@ -5776,7 +5822,10 @@ var app = (function () {
 	      numCorps: camp.corporation_ids.size,
 	      numAlliances: camp.alliance_ids.size,
 	    }))
-	    .sort((a, b) => b.probability - a.probability); // Sort by probability
+	    .sort((a, b) => b.probability - a.probability);
+
+	  console.log("Filtered camps:", filtered.length);
+	  return filtered;
 	});
 
 	const killmails = writable([]);
@@ -5885,38 +5934,14 @@ var app = (function () {
 	            break;
 	          case "region": {
 	            const celestialData = killmail.pinpoints?.celestialData;
-	            if (!celestialData) return false;
-
-	            // Debug log to verify data
-	            console.log("Region Filter - Comparing:", {
-	              celestialRegionId: celestialData.regionid,
-	              celestialRegionName: celestialData.regionname,
-	              filterIds: ids,
-	            });
-
-	            // Ensure ids is an array
 	            const idList = Array.isArray(ids) ? ids : [ids];
 
-	            // Compare both ID and name, accounting for string/number conversion
-	            match = idList.some((id) => {
-	              const matchesId =
-	                celestialData.regionid.toString() === id.toString();
-	              const matchesName =
+	            match = idList.some(
+	              (id) =>
+	                celestialData.regionid.toString() === id.toString() ||
 	                celestialData.regionname.toLowerCase() ===
-	                id.toString().toLowerCase();
-
-	              // Debug log for each comparison
-	              console.log("Comparing:", {
-	                id,
-	                matchesId,
-	                matchesName,
-	                celestialRegionId: celestialData.regionid,
-	                celestialRegionName: celestialData.regionname,
-	              });
-
-	              return matchesId || matchesName;
-	            });
-
+	                  id.toString().toLowerCase()
+	            );
 	            break;
 	          }
 	          case "location_type":
@@ -65363,10 +65388,10 @@ void main() {
 
 	/* src\MapVisualization.svelte generated by Svelte v4.2.19 */
 
-	const { Error: Error_1, Object: Object_1, console: console_1$3 } = globals;
+	const { Error: Error_1$1, Object: Object_1, console: console_1$3 } = globals;
 	const file$5 = "src\\MapVisualization.svelte";
 
-	// (1109:20) 
+	// (1114:20) 
 	function create_if_block_6(ctx) {
 		let div;
 		let t;
@@ -65376,7 +65401,7 @@ void main() {
 				div = element("div");
 				t = text(/*error*/ ctx[2]);
 				attr_dev(div, "class", "status-message error svelte-ur9yx9");
-				add_location(div, file$5, 1109, 6, 32999);
+				add_location(div, file$5, 1114, 6, 33315);
 			},
 			m: function mount(target, anchor) {
 				insert_dev(target, div, anchor);
@@ -65396,14 +65421,14 @@ void main() {
 			block,
 			id: create_if_block_6.name,
 			type: "if",
-			source: "(1109:20) ",
+			source: "(1114:20) ",
 			ctx
 		});
 
 		return block;
 	}
 
-	// (1107:4) {#if loading}
+	// (1112:4) {#if loading}
 	function create_if_block_5(ctx) {
 		let div;
 
@@ -65412,7 +65437,7 @@ void main() {
 				div = element("div");
 				div.textContent = "Loading map...";
 				attr_dev(div, "class", "status-message svelte-ur9yx9");
-				add_location(div, file$5, 1107, 6, 32921);
+				add_location(div, file$5, 1112, 6, 33237);
 			},
 			m: function mount(target, anchor) {
 				insert_dev(target, div, anchor);
@@ -65429,14 +65454,14 @@ void main() {
 			block,
 			id: create_if_block_5.name,
 			type: "if",
-			source: "(1107:4) {#if loading}",
+			source: "(1112:4) {#if loading}",
 			ctx
 		});
 
 		return block;
 	}
 
-	// (1115:4) {#if kill.pinpoints}
+	// (1120:4) {#if kill.pinpoints}
 	function create_if_block_4(ctx) {
 		let pre;
 		let t_value = JSON.stringify(/*kill*/ ctx[0].pinpoints, null, 2) + "";
@@ -65447,7 +65472,7 @@ void main() {
 				pre = element("pre");
 				t = text(t_value);
 				set_style(pre, "display", "none");
-				add_location(pre, file$5, 1115, 6, 33131);
+				add_location(pre, file$5, 1120, 6, 33447);
 			},
 			m: function mount(target, anchor) {
 				insert_dev(target, pre, anchor);
@@ -65467,14 +65492,14 @@ void main() {
 			block,
 			id: create_if_block_4.name,
 			type: "if",
-			source: "(1115:4) {#if kill.pinpoints}",
+			source: "(1120:4) {#if kill.pinpoints}",
 			ctx
 		});
 
 		return block;
 	}
 
-	// (1155:4) {:else}
+	// (1160:4) {:else}
 	function create_else_block$1(ctx) {
 		let p;
 
@@ -65483,7 +65508,7 @@ void main() {
 				p = element("p");
 				p.textContent = "Wreck triangulation not possible";
 				attr_dev(p, "class", "svelte-ur9yx9");
-				add_location(p, file$5, 1155, 6, 34658);
+				add_location(p, file$5, 1160, 6, 35004);
 			},
 			m: function mount(target, anchor) {
 				insert_dev(target, p, anchor);
@@ -65500,14 +65525,14 @@ void main() {
 			block,
 			id: create_else_block$1.name,
 			type: "else",
-			source: "(1155:4) {:else}",
+			source: "(1160:4) {:else}",
 			ctx
 		});
 
 		return block;
 	}
 
-	// (1149:88) 
+	// (1154:88) 
 	function create_if_block_3(ctx) {
 		let p;
 		let t0;
@@ -65527,7 +65552,7 @@ void main() {
 				t3 = text(t3_value);
 				t4 = text(" km)");
 				attr_dev(p, "class", "svelte-ur9yx9");
-				add_location(p, file$5, 1149, 6, 34465);
+				add_location(p, file$5, 1154, 6, 34811);
 			},
 			m: function mount(target, anchor) {
 				insert_dev(target, p, anchor);
@@ -65552,14 +65577,14 @@ void main() {
 			block,
 			id: create_if_block_3.name,
 			type: "if",
-			source: "(1149:88) ",
+			source: "(1154:88) ",
 			ctx
 		});
 
 		return block;
 	}
 
-	// (1128:82) 
+	// (1133:82) 
 	function create_if_block_2$2(ctx) {
 		let p0;
 		let t0;
@@ -65627,13 +65652,13 @@ void main() {
 				t21 = text(t21_value);
 				t22 = text(" km)");
 				attr_dev(p0, "class", "svelte-ur9yx9");
-				add_location(p0, file$5, 1128, 6, 33739);
+				add_location(p0, file$5, 1133, 6, 34085);
 				attr_dev(p1, "class", "svelte-ur9yx9");
-				add_location(p1, file$5, 1133, 6, 33898);
+				add_location(p1, file$5, 1138, 6, 34244);
 				attr_dev(p2, "class", "svelte-ur9yx9");
-				add_location(p2, file$5, 1138, 6, 34057);
+				add_location(p2, file$5, 1143, 6, 34403);
 				attr_dev(p3, "class", "svelte-ur9yx9");
-				add_location(p3, file$5, 1143, 6, 34216);
+				add_location(p3, file$5, 1148, 6, 34562);
 			},
 			m: function mount(target, anchor) {
 				insert_dev(target, p0, anchor);
@@ -65691,38 +65716,46 @@ void main() {
 			block,
 			id: create_if_block_2$2.name,
 			type: "if",
-			source: "(1128:82) ",
+			source: "(1133:82) ",
 			ctx
 		});
 
 		return block;
 	}
 
-	// (1122:88) 
+	// (1127:88) 
 	function create_if_block_1$3(ctx) {
 		let p;
 		let t0;
-		let t1_value = (/*kill*/ ctx[0].pinpoints.nearestCelestial.distance / 1000).toFixed(2) + "";
+		let t1_value = /*kill*/ ctx[0].pinpoints.nearestCelestial.name + "";
 		let t1;
 		let t2;
+		let t3_value = (/*kill*/ ctx[0].pinpoints.nearestCelestial.distance / 1000).toFixed(2) + "";
+		let t3;
+		let t4;
 
 		const block = {
 			c: function create() {
 				p = element("p");
-				t0 = text("Triangulation possible - Near celestial (");
+				t0 = text("Near celestial: ");
 				t1 = text(t1_value);
-				t2 = text(" km)");
+				t2 = text(" (");
+				t3 = text(t3_value);
+				t4 = text(" km)");
 				attr_dev(p, "class", "svelte-ur9yx9");
-				add_location(p, file$5, 1122, 6, 33493);
+				add_location(p, file$5, 1127, 6, 33824);
 			},
 			m: function mount(target, anchor) {
 				insert_dev(target, p, anchor);
 				append_dev(p, t0);
 				append_dev(p, t1);
 				append_dev(p, t2);
+				append_dev(p, t3);
+				append_dev(p, t4);
 			},
 			p: function update(ctx, dirty) {
-				if (dirty[0] & /*kill*/ 1 && t1_value !== (t1_value = (/*kill*/ ctx[0].pinpoints.nearestCelestial.distance / 1000).toFixed(2) + "")) set_data_dev(t1, t1_value);
+				if (dirty[0] & /*kill*/ 1 && t1_value !== (t1_value = /*kill*/ ctx[0].pinpoints.nearestCelestial.name + "")) set_data_dev(t1, t1_value);
+				if (dirty[0] & /*kill*/ 1 && t3_value !== (t3_value = (/*kill*/ ctx[0].pinpoints.nearestCelestial.distance / 1000).toFixed(2) + "")) set_data_dev(t3, t3_value);
 			},
 			d: function destroy(detaching) {
 				if (detaching) {
@@ -65735,28 +65768,36 @@ void main() {
 			block,
 			id: create_if_block_1$3.name,
 			type: "if",
-			source: "(1122:88) ",
+			source: "(1127:88) ",
 			ctx
 		});
 
 		return block;
 	}
 
-	// (1120:4) {#if kill.pinpoints?.atCelestial}
+	// (1125:4) {#if kill.pinpoints?.atCelestial}
 	function create_if_block$4(ctx) {
 		let p;
+		let t0;
+		let t1_value = /*kill*/ ctx[0].pinpoints.nearestCelestial.name + "";
+		let t1;
 
 		const block = {
 			c: function create() {
 				p = element("p");
-				p.textContent = "Triangulation possible - At celestial";
+				t0 = text("At celestial: ");
+				t1 = text(t1_value);
 				attr_dev(p, "class", "svelte-ur9yx9");
-				add_location(p, file$5, 1120, 6, 33351);
+				add_location(p, file$5, 1125, 6, 33667);
 			},
 			m: function mount(target, anchor) {
 				insert_dev(target, p, anchor);
+				append_dev(p, t0);
+				append_dev(p, t1);
 			},
-			p: noop,
+			p: function update(ctx, dirty) {
+				if (dirty[0] & /*kill*/ 1 && t1_value !== (t1_value = /*kill*/ ctx[0].pinpoints.nearestCelestial.name + "")) set_data_dev(t1, t1_value);
+			},
 			d: function destroy(detaching) {
 				if (detaching) {
 					detach_dev(p);
@@ -65768,7 +65809,7 @@ void main() {
 			block,
 			id: create_if_block$4.name,
 			type: "if",
-			source: "(1120:4) {#if kill.pinpoints?.atCelestial}",
+			source: "(1125:4) {#if kill.pinpoints?.atCelestial}",
 			ctx
 		});
 
@@ -65843,24 +65884,24 @@ void main() {
 				t11 = space();
 				if_block2.c();
 				attr_dev(button0, "class", "focus-sun svelte-ur9yx9");
-				add_location(button0, file$5, 1091, 4, 32444);
+				add_location(button0, file$5, 1096, 4, 32760);
 				attr_dev(button1, "class", "focus-kill svelte-ur9yx9");
-				add_location(button1, file$5, 1092, 4, 32516);
+				add_location(button1, file$5, 1097, 4, 32832);
 				attr_dev(div0, "class", "controls svelte-ur9yx9");
-				add_location(div0, file$5, 1090, 2, 32416);
+				add_location(div0, file$5, 1095, 2, 32732);
 				attr_dev(div1, "class", "map-container svelte-ur9yx9");
-				add_location(div1, file$5, 1105, 2, 32845);
+				add_location(div1, file$5, 1110, 2, 33161);
 				attr_dev(p0, "class", "svelte-ur9yx9");
-				add_location(p0, file$5, 1117, 4, 33222);
+				add_location(p0, file$5, 1122, 4, 33538);
 				attr_dev(p1, "class", "svelte-ur9yx9");
-				add_location(p1, file$5, 1118, 4, 33260);
+				add_location(p1, file$5, 1123, 4, 33576);
 				attr_dev(div2, "class", "info-panel svelte-ur9yx9");
-				add_location(div2, file$5, 1113, 2, 33073);
+				add_location(div2, file$5, 1118, 2, 33389);
 				attr_dev(div3, "class", "visualization-container svelte-ur9yx9");
-				add_location(div3, file$5, 1089, 0, 32375);
+				add_location(div3, file$5, 1094, 0, 32691);
 			},
 			l: function claim(nodes) {
-				throw new Error_1("options.hydrate only works if the component was compiled with the `hydratable: true` option");
+				throw new Error_1$1("options.hydrate only works if the component was compiled with the `hydratable: true` option");
 			},
 			m: function mount(target, anchor) {
 				insert_dev(target, div3, anchor);
@@ -66075,7 +66116,6 @@ void main() {
 		let pinpointLines = null;
 		let container;
 		let scene, camera, renderer, controls;
-		let compass;
 		let error = null;
 		let loading = true;
 		let systemName = "";
@@ -66532,29 +66572,38 @@ void main() {
 			});
 		}
 
+		// function findClosestCelestial(celestials, killPosition) {
+		//   if (!killPosition?.x || !killPosition?.y || !killPosition?.z) {
+		//     console.error("Invalid kill position:", killPosition);
+		//     return "Unknown";
+		//   }
+		//   const killPos = new THREE.Vector3(
+		//     killPosition.x,
+		//     killPosition.y,
+		//     killPosition.z
+		//   );
+		//   let closest = null;
+		//   let minDistance = Infinity;
+		//   celestials.forEach((celestial) => {
+		//     if (celestial.id === "killmail" || !celestial.itemname) return;
+		//     const celestialPos = new THREE.Vector3(
+		//       celestial.x || 0,
+		//       celestial.y || 0,
+		//       celestial.z || 0
+		//     );
+		//     const distance = celestialPos.distanceTo(killPos);
+		//     if (distance < minDistance) {
+		//       minDistance = distance;
+		//       closest = celestial;
+		//     }
+		//   });
+		//   return closest
+		//     ? `${closest.itemname} (${formatDistance(minDistance)})`
+		//     : "Unknown";
+		// }
 		function findClosestCelestial(celestials, killPosition) {
-			if (!killPosition?.x || !killPosition?.y || !killPosition?.z) {
-				console.error("Invalid kill position:", killPosition);
-				return "Unknown";
-			}
-
-			const killPos = new Vector3(killPosition.x, killPosition.y, killPosition.z);
-			let closest = null;
-			let minDistance = Infinity;
-
-			celestials.forEach(celestial => {
-				if (celestial.id === "killmail" || !celestial.itemname) return;
-				const celestialPos = new Vector3(celestial.x || 0, celestial.y || 0, celestial.z || 0);
-				const distance = celestialPos.distanceTo(killPos);
-
-				if (distance < minDistance) {
-					minDistance = distance;
-					closest = celestial;
-				}
-			});
-
-			return closest
-			? `${closest.itemname} (${formatDistance(minDistance)})`
+			return kill.pinpoints.nearestCelestial
+			? `${kill.pinpoints.nearestCelestial.name} (${formatDistance(kill.pinpoints.nearestCelestial.distance)})`
 			: "Unknown";
 		}
 
@@ -66964,7 +67013,6 @@ void main() {
 			camera,
 			renderer,
 			controls,
-			compass,
 			error,
 			loading,
 			systemName,
@@ -67018,7 +67066,6 @@ void main() {
 			if ('camera' in $$props) camera = $$props.camera;
 			if ('renderer' in $$props) renderer = $$props.renderer;
 			if ('controls' in $$props) controls = $$props.controls;
-			if ('compass' in $$props) compass = $$props.compass;
 			if ('error' in $$props) $$invalidate(2, error = $$props.error);
 			if ('loading' in $$props) $$invalidate(3, loading = $$props.loading);
 			if ('systemName' in $$props) $$invalidate(4, systemName = $$props.systemName);
@@ -67085,19 +67132,19 @@ void main() {
 		}
 
 		get killmailId() {
-			throw new Error_1("<MapVisualization>: Props cannot be read directly from the component instance unless compiling with 'accessors: true' or '<svelte:options accessors/>'");
+			throw new Error_1$1("<MapVisualization>: Props cannot be read directly from the component instance unless compiling with 'accessors: true' or '<svelte:options accessors/>'");
 		}
 
 		set killmailId(value) {
-			throw new Error_1("<MapVisualization>: Props cannot be set directly on the component instance unless compiling with 'accessors: true' or '<svelte:options accessors/>'");
+			throw new Error_1$1("<MapVisualization>: Props cannot be set directly on the component instance unless compiling with 'accessors: true' or '<svelte:options accessors/>'");
 		}
 
 		get kill() {
-			throw new Error_1("<MapVisualization>: Props cannot be read directly from the component instance unless compiling with 'accessors: true' or '<svelte:options accessors/>'");
+			throw new Error_1$1("<MapVisualization>: Props cannot be read directly from the component instance unless compiling with 'accessors: true' or '<svelte:options accessors/>'");
 		}
 
 		set kill(value) {
-			throw new Error_1("<MapVisualization>: Props cannot be set directly on the component instance unless compiling with 'accessors: true' or '<svelte:options accessors/>'");
+			throw new Error_1$1("<MapVisualization>: Props cannot be set directly on the component instance unless compiling with 'accessors: true' or '<svelte:options accessors/>'");
 		}
 	}
 
@@ -68082,7 +68129,7 @@ void main() {
 
 	/* src\ActiveBattles.svelte generated by Svelte v4.2.19 */
 
-	const { console: console_1$1 } = globals;
+	const { Error: Error_1, console: console_1$1 } = globals;
 	const file$2 = "src\\ActiveBattles.svelte";
 
 	function create_fragment$2(ctx) {
@@ -68114,18 +68161,18 @@ void main() {
 				attr_dev(input, "max", "20");
 				attr_dev(input, "step", "1");
 				attr_dev(input, "class", "svelte-a4u9nx");
-				add_location(input, file$2, 312, 6, 9042);
+				add_location(input, file$2, 393, 6, 11898);
 				attr_dev(label, "class", "svelte-a4u9nx");
-				add_location(label, file$2, 310, 4, 8981);
+				add_location(label, file$2, 391, 4, 11837);
 				attr_dev(div0, "class", "controls svelte-a4u9nx");
-				add_location(div0, file$2, 309, 2, 8953);
+				add_location(div0, file$2, 390, 2, 11809);
 				attr_dev(canvas_1, "class", "svelte-a4u9nx");
-				add_location(canvas_1, file$2, 316, 2, 9145);
+				add_location(canvas_1, file$2, 397, 2, 12001);
 				attr_dev(div1, "class", "active-battles svelte-a4u9nx");
-				add_location(div1, file$2, 308, 0, 8921);
+				add_location(div1, file$2, 389, 0, 11777);
 			},
 			l: function claim(nodes) {
-				throw new Error("options.hydrate only works if the component was compiled with the `hydratable: true` option");
+				throw new Error_1("options.hydrate only works if the component was compiled with the `hydratable: true` option");
 			},
 			m: function mount(target, anchor) {
 				insert_dev(target, div1, anchor);
@@ -68209,26 +68256,90 @@ void main() {
 		let bubbles = new Map();
 		let animationFrame;
 		let defaultSize = 40; // Default size when canvas isn't ready
+		const BATTLE_TIMEOUT = 5 * 60 * 1000; // 5 minutes in milliseconds
 
 		class Bubble {
 			constructor(battle) {
+				if (!battle) {
+					throw new Error("Battle data is required for Bubble construction");
+				}
+
 				this.battle = battle;
 				this.id = battle.battleId || `${battle.systemId}-${battle.kills[0]?.killmail_id}`;
 
-				// Use default center position if canvas isn't ready
+				// Position properties
 				this.x = (canvas?.width) ? canvas.width / 2 : 0;
 
 				this.y = (canvas?.height) ? canvas.height / 2 : 0;
+
+				// Velocity properties
 				this.vx = (Math.random() - 0.5) * 0.1;
+
 				this.vy = (Math.random() - 0.5) * 0.1;
-				this.lastValue = this.currentValue || battle.totalValue;
+
+				// Size properties
+				this.lastValue = battle.totalValue;
+
 				this.currentValue = battle.totalValue;
 				this.targetSize = this.calculateSize();
 				this.currentSize = 0;
+
+				// Animation properties
 				this.flashTime = Date.now();
 
-				// Flag to indicate bubble needs positioning
 				this.needsPositioning = true;
+			}
+
+			update(bubbles) {
+				this.currentSize += (this.targetSize - this.currentSize) * 0.1;
+
+				// Strong repulsion between bubbles to prevent overlap
+				bubbles.forEach(other => {
+					if (other === this) return;
+					const dx = other.x - this.x;
+					const dy = other.y - this.y;
+					const distance = Math.sqrt(dx * dx + dy * dy);
+					const minDist = (this.currentSize + other.currentSize) * 1.2; // 20% buffer between bubbles
+
+					if (distance < minDist) {
+						const angle = Math.atan2(dy, dx);
+						const force = (minDist - distance) * 0.2; // Increased force for stronger separation
+						const fx = Math.cos(angle) * force;
+						const fy = Math.sin(angle) * force;
+
+						// Apply stronger repulsion when bubbles are very close
+						const repulsionMultiplier = Math.min(2, minDist / (distance + 1));
+
+						this.vx -= fx * repulsionMultiplier;
+						this.vy -= fy * repulsionMultiplier;
+						other.vx += fx * repulsionMultiplier;
+						other.vy += fy * repulsionMultiplier;
+					}
+				});
+
+				// Add boundary checking to keep bubbles in view
+				const margin = this.currentSize;
+
+				const boundsForce = 0.1;
+				if (this.x < margin) this.vx += boundsForce;
+				if (this.x > canvas.width - margin) this.vx -= boundsForce;
+				if (this.y < margin) this.vy += boundsForce;
+				if (this.y > canvas.height - margin) this.vy -= boundsForce;
+
+				// Update position with improved damping
+				this.x += this.vx;
+
+				this.y += this.vy;
+				this.vx *= 0.95;
+				this.vy *= 0.95;
+
+				// Add slight gravitational pull to center to prevent bubbles from drifting too far
+				const centerX = canvas.width / 2;
+
+				const centerY = canvas.height / 2;
+				const pullStrength = 0.001;
+				this.vx += (centerX - this.x) * pullStrength;
+				this.vy += (centerY - this.y) * pullStrength;
 			}
 
 			calculateSize() {
@@ -68237,70 +68348,83 @@ void main() {
 				return Math.max(40, participantFactor + valueFactor);
 			}
 
-			update(bubbles) {
-				this.currentSize += (this.targetSize - this.currentSize) * 0.1;
+			calculateSize() {
+				// Base size for minimum visibility
+				const baseSize = 30;
 
-				// Strong center gravity
-				const dx = canvas.width / 2 - this.x;
+				// Scale based on number of involved participants (logarithmic)
+				const participantFactor = Math.log10(this.battle.involvedCount + 1) * 15;
 
-				const dy = canvas.height / 2 - this.y;
-				const centerForce = 0.02;
-				this.vx += dx * centerForce;
-				this.vy += dy * centerForce;
+				// Scale based on total value (logarithmic)
+				// Add 1 to avoid log(0), scale down large values
+				const valueFactor = Math.log10(Math.max(1, this.battle.totalValue / 1000000)) * 10;
 
-				// Update position
-				this.x += this.vx;
+				// Combine factors with base size
+				const finalSize = baseSize + participantFactor + valueFactor;
 
-				this.y += this.vy;
-				this.vx *= 0.95;
-				this.vy *= 0.95;
+				// Cap minimum and maximum sizes
+				return Math.min(Math.max(30, finalSize), 120);
+			}
 
-				// Strong repulsion between bubbles
-				bubbles.forEach(other => {
-					if (other === this) return;
-					const dx = other.x - this.x;
-					const dy = other.y - this.y;
-					const distance = Math.sqrt(dx * dx + dy * dy);
-					const minDist = (this.currentSize + other.currentSize) * 1.1;
+			calculateTimeBasedColor() {
+				const now = new Date().getTime();
+				const battleAge = now - new Date(this.battle.lastKill).getTime();
+				const timeRatio = battleAge / BATTLE_TIMEOUT;
 
-					if (distance < minDist) {
-						const angle = Math.atan2(dy, dx);
-						const force = (minDist - distance) * 0.1;
-						const fx = Math.cos(angle) * force;
-						const fy = Math.sin(angle) * force;
-						this.vx -= fx;
-						this.vy -= fy;
-						other.vx += fx;
-						other.vy += fy;
-					}
-				});
+				// Start with yellow (most time left), transition to orange, then red (about to pop)
+				const r = Math.min(255, Math.floor(255 * (0.5 + timeRatio * 0.5)));
+
+				const g = Math.max(0, Math.floor(255 * (1 - timeRatio)));
+				const b = 0;
+				return { r, g, b };
 			}
 
 			draw(ctx) {
+				// Calculate time-based color
+				const color = this.calculateTimeBasedColor();
+
+				// Create gradient for main bubble
 				const gradient = ctx.createRadialGradient(this.x - this.currentSize * 0.3, this.y - this.currentSize * 0.3, 0, this.x, this.y, this.currentSize);
 
-				const flashProgress = this.flashTime
-				? (Date.now() - this.flashTime) / FLASH_DURATION
-				: 1;
+				// Add gradient stops with time-based color
+				gradient.addColorStop(0, `rgba(${color.r}, ${color.g}, ${color.b}, 0.9)`);
 
-				const flash = Math.max(0, 1 - flashProgress);
-				gradient.addColorStop(0, `rgba(255, ${50 + 150 * flash}, ${50 + 150 * flash}, 0.9)`);
-				gradient.addColorStop(1, `rgba(200, ${20 + 100 * flash}, ${20 + 100 * flash}, 0.7)`);
+				gradient.addColorStop(1, `rgba(${Math.floor(color.r * 0.8)}, ${Math.floor(color.g * 0.8)}, ${color.b}, 0.7)`);
+
+				// Draw main bubble
 				ctx.beginPath();
+
 				ctx.arc(this.x, this.y, this.currentSize, 0, Math.PI * 2);
 				ctx.fillStyle = gradient;
 				ctx.fill();
 
-				// Simple white text directly on sphere
+				// Add a subtle glow effect
+				const glowGradient = ctx.createRadialGradient(this.x, this.y, this.currentSize * 0.8, this.x, this.y, this.currentSize * 1.2);
+
+				glowGradient.addColorStop(0, `rgba(${color.r}, ${color.g}, ${color.b}, 0.2)`);
+				glowGradient.addColorStop(1, "rgba(0, 0, 0, 0)");
+				ctx.beginPath();
+				ctx.arc(this.x, this.y, this.currentSize * 1.2, 0, Math.PI * 2);
+				ctx.fillStyle = glowGradient;
+				ctx.fill();
+
+				// Draw text information
 				ctx.font = `${Math.max(14, this.currentSize / 5)}px Arial`;
 
 				ctx.fillStyle = "white";
 				ctx.textAlign = "center";
 				ctx.textBaseline = "middle";
 				const lineHeight = this.currentSize / 3;
+
+				// System name
 				const systemName = this.battle.kills[0]?.pinpoints?.celestialData?.solarsystemname || this.battle.systemId;
+
 				ctx.fillText(systemName, this.x, this.y - lineHeight);
+
+				// Number of pilots
 				ctx.fillText(`${this.battle.involvedCount} pilots`, this.x, this.y);
+
+				// Total value
 				ctx.fillText(`${formatValue$1(this.battle.totalValue)} ISK`, this.x, this.y + lineHeight);
 			}
 
@@ -68443,6 +68567,7 @@ void main() {
 			FRICTION,
 			REPULSION,
 			FLASH_DURATION,
+			BATTLE_TIMEOUT,
 			Bubble,
 			formatValue: formatValue$1,
 			handleClick,

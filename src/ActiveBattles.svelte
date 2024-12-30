@@ -11,31 +11,91 @@
   let defaultSize = 40; // Default size when canvas isn't ready
 
   // Physics constants
+  // Physics constants
   const FRICTION = 0.99;
   const REPULSION = 0.5;
   const FLASH_DURATION = 1000;
+  const BATTLE_TIMEOUT = 5 * 60 * 1000; // 5 minutes in milliseconds
 
   class Bubble {
     constructor(battle) {
+      if (!battle) {
+        throw new Error("Battle data is required for Bubble construction");
+      }
+
       this.battle = battle;
       this.id =
         battle.battleId || `${battle.systemId}-${battle.kills[0]?.killmail_id}`;
 
-      // Use default center position if canvas isn't ready
+      // Position properties
       this.x = canvas?.width ? canvas.width / 2 : 0;
       this.y = canvas?.height ? canvas.height / 2 : 0;
 
+      // Velocity properties
       this.vx = (Math.random() - 0.5) * 0.1;
       this.vy = (Math.random() - 0.5) * 0.1;
 
-      this.lastValue = this.currentValue || battle.totalValue;
+      // Size properties
+      this.lastValue = battle.totalValue;
       this.currentValue = battle.totalValue;
       this.targetSize = this.calculateSize();
       this.currentSize = 0;
-      this.flashTime = Date.now();
 
-      // Flag to indicate bubble needs positioning
+      // Animation properties
+      this.flashTime = Date.now();
       this.needsPositioning = true;
+    }
+
+    update(bubbles) {
+      this.currentSize += (this.targetSize - this.currentSize) * 0.1;
+
+      // Strong repulsion between bubbles to prevent overlap
+      bubbles.forEach((other) => {
+        if (other === this) return;
+
+        const dx = other.x - this.x;
+        const dy = other.y - this.y;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+        const minDist = (this.currentSize + other.currentSize) * 1.2; // 20% buffer between bubbles
+
+        if (distance < minDist) {
+          const angle = Math.atan2(dy, dx);
+          const force = (minDist - distance) * 0.2; // Increased force for stronger separation
+          const fx = Math.cos(angle) * force;
+          const fy = Math.sin(angle) * force;
+
+          // Apply stronger repulsion when bubbles are very close
+          const repulsionMultiplier = Math.min(2, minDist / (distance + 1));
+
+          this.vx -= fx * repulsionMultiplier;
+          this.vy -= fy * repulsionMultiplier;
+          other.vx += fx * repulsionMultiplier;
+          other.vy += fy * repulsionMultiplier;
+        }
+      });
+
+      // Add boundary checking to keep bubbles in view
+      const margin = this.currentSize;
+      const boundsForce = 0.1;
+
+      if (this.x < margin) this.vx += boundsForce;
+      if (this.x > canvas.width - margin) this.vx -= boundsForce;
+      if (this.y < margin) this.vy += boundsForce;
+      if (this.y > canvas.height - margin) this.vy -= boundsForce;
+
+      // Update position with improved damping
+      this.x += this.vx;
+      this.y += this.vy;
+      this.vx *= 0.95;
+      this.vy *= 0.95;
+
+      // Add slight gravitational pull to center to prevent bubbles from drifting too far
+      const centerX = canvas.width / 2;
+      const centerY = canvas.height / 2;
+      const pullStrength = 0.001;
+
+      this.vx += (centerX - this.x) * pullStrength;
+      this.vy += (centerY - this.y) * pullStrength;
     }
 
     calculateSize() {
@@ -44,45 +104,47 @@
       return Math.max(40, participantFactor + valueFactor);
     }
 
-    update(bubbles) {
-      this.currentSize += (this.targetSize - this.currentSize) * 0.1;
+    calculateSize() {
+      // Base size for minimum visibility
+      const baseSize = 30;
 
-      // Strong center gravity
-      const dx = canvas.width / 2 - this.x;
-      const dy = canvas.height / 2 - this.y;
-      const centerForce = 0.02;
-      this.vx += dx * centerForce;
-      this.vy += dy * centerForce;
+      // Scale based on number of involved participants (logarithmic)
+      const participantFactor = Math.log10(this.battle.involvedCount + 1) * 15;
 
-      // Update position
-      this.x += this.vx;
-      this.y += this.vy;
-      this.vx *= 0.95;
-      this.vy *= 0.95;
+      // Scale based on total value (logarithmic)
+      // Add 1 to avoid log(0), scale down large values
+      const valueFactor =
+        Math.log10(Math.max(1, this.battle.totalValue / 1000000)) * 10;
 
-      // Strong repulsion between bubbles
-      bubbles.forEach((other) => {
-        if (other === this) return;
-        const dx = other.x - this.x;
-        const dy = other.y - this.y;
-        const distance = Math.sqrt(dx * dx + dy * dy);
-        const minDist = (this.currentSize + other.currentSize) * 1.1;
+      // Combine factors with base size
+      const finalSize = baseSize + participantFactor + valueFactor;
 
-        if (distance < minDist) {
-          const angle = Math.atan2(dy, dx);
-          const force = (minDist - distance) * 0.1;
-          const fx = Math.cos(angle) * force;
-          const fy = Math.sin(angle) * force;
+      // Cap minimum and maximum sizes
+      return Math.min(Math.max(30, finalSize), 120);
+    }
 
-          this.vx -= fx;
-          this.vy -= fy;
-          other.vx += fx;
-          other.vy += fy;
-        }
-      });
+    calculateTimeBasedColor() {
+      const now = new Date().getTime();
+      const battleAge = now - new Date(this.battle.lastKill).getTime();
+      const timeRatio = battleAge / BATTLE_TIMEOUT;
+
+      // Start with yellow (most time left), transition to orange, then red (about to pop)
+      const r = Math.min(255, Math.floor(255 * (0.5 + timeRatio * 0.5)));
+      const g = Math.max(0, Math.floor(255 * (1 - timeRatio)));
+      const b = 0;
+
+      return {
+        r: r,
+        g: g,
+        b: b,
+      };
     }
 
     draw(ctx) {
+      // Calculate time-based color
+      const color = this.calculateTimeBasedColor();
+
+      // Create gradient for main bubble
       const gradient = ctx.createRadialGradient(
         this.x - this.currentSize * 0.3,
         this.y - this.currentSize * 0.3,
@@ -92,38 +154,57 @@
         this.currentSize
       );
 
-      const flashProgress = this.flashTime
-        ? (Date.now() - this.flashTime) / FLASH_DURATION
-        : 1;
-      const flash = Math.max(0, 1 - flashProgress);
-
-      gradient.addColorStop(
-        0,
-        `rgba(255, ${50 + 150 * flash}, ${50 + 150 * flash}, 0.9)`
-      );
+      // Add gradient stops with time-based color
+      gradient.addColorStop(0, `rgba(${color.r}, ${color.g}, ${color.b}, 0.9)`);
       gradient.addColorStop(
         1,
-        `rgba(200, ${20 + 100 * flash}, ${20 + 100 * flash}, 0.7)`
+        `rgba(${Math.floor(color.r * 0.8)}, ${Math.floor(color.g * 0.8)}, ${color.b}, 0.7)`
       );
 
+      // Draw main bubble
       ctx.beginPath();
       ctx.arc(this.x, this.y, this.currentSize, 0, Math.PI * 2);
       ctx.fillStyle = gradient;
       ctx.fill();
 
-      // Simple white text directly on sphere
+      // Add a subtle glow effect
+      const glowGradient = ctx.createRadialGradient(
+        this.x,
+        this.y,
+        this.currentSize * 0.8,
+        this.x,
+        this.y,
+        this.currentSize * 1.2
+      );
+      glowGradient.addColorStop(
+        0,
+        `rgba(${color.r}, ${color.g}, ${color.b}, 0.2)`
+      );
+      glowGradient.addColorStop(1, "rgba(0, 0, 0, 0)");
+
+      ctx.beginPath();
+      ctx.arc(this.x, this.y, this.currentSize * 1.2, 0, Math.PI * 2);
+      ctx.fillStyle = glowGradient;
+      ctx.fill();
+
+      // Draw text information
       ctx.font = `${Math.max(14, this.currentSize / 5)}px Arial`;
       ctx.fillStyle = "white";
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
 
       const lineHeight = this.currentSize / 3;
+
+      // System name
       const systemName =
         this.battle.kills[0]?.pinpoints?.celestialData?.solarsystemname ||
         this.battle.systemId;
-
       ctx.fillText(systemName, this.x, this.y - lineHeight);
+
+      // Number of pilots
       ctx.fillText(`${this.battle.involvedCount} pilots`, this.x, this.y);
+
+      // Total value
       ctx.fillText(
         `${formatValue(this.battle.totalValue)} ISK`,
         this.x,
