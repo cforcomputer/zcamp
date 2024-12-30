@@ -5935,22 +5935,33 @@ var app = (function () {
 	          case "region": {
 	            const celestialData = killmail.pinpoints.celestialData;
 
-	            // Log to verify data
-	            console.log("Region Filter - Comparing:", {
-	              celestialRegionId: celestialData.regionid,
-	              celestialRegionName: celestialData.regionname,
-	              filterIds: ids,
-	            });
+	            // Check if this is an Abyssal killmail
+	            const isAbyssal = killmail.zkb.labels.includes("loc:abyssal");
 
-	            // Ensure ids is an array
+	            // If region is null and it's an Abyssal location
+	            if (
+	              !celestialData.regionid &&
+	              !celestialData.regionname &&
+	              isAbyssal
+	            ) {
+	              // Special handling for Abyssal regions
+	              const idList = Array.isArray(ids) ? ids : [ids];
+	              match = idList.some(
+	                (id) =>
+	                  id.toLowerCase() === "abyssal" || id.toLowerCase() === "abyss"
+	              );
+	              break;
+	            }
+
+	            // Rest of existing region filter logic
 	            const idList = Array.isArray(ids) ? ids : [ids];
-
-	            // Match against both ID and name
 	            match = idList.some((id) => {
 	              return (
-	                celestialData.regionid.toString() === id.toString() ||
-	                celestialData.regionname.toLowerCase() ===
-	                  id.toString().toLowerCase()
+	                (celestialData.regionid &&
+	                  celestialData.regionid.toString() === id.toString()) ||
+	                (celestialData.regionname &&
+	                  celestialData.regionname.toLowerCase() ===
+	                    id.toString().toLowerCase())
 	              );
 	            });
 	            break;
