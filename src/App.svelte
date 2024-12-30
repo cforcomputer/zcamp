@@ -55,8 +55,8 @@
       try {
         console.log("App.svelte - Received initialData:", data);
         const initializedSettings = initializeSettings(data.settings);
-        settings.set(initializedSettings);
-        killmails.set([]); // Start with empty array
+        settings.set(initializedSettings); // This will properly merge defaults with saved settings
+        killmails.set([]);
         filterLists.set(data.filterLists || []);
         profiles.set(data.profiles || []);
         console.log("App.svelte - Stores initialized");

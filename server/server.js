@@ -102,6 +102,8 @@ async function storeCelestialData(systemId, celestialData) {
   return new Promise((resolve, reject) => {
     const systemName = celestialData[0]?.solarsystemname || systemId.toString();
 
+    console.log("Storing celestial data:", celestialData[0]); // Log first entry for verification
+
     const query = `REPLACE INTO celestial_data 
       (system_id, system_name, celestial_data, last_updated) 
       VALUES (?, ?, ?, CURRENT_TIMESTAMP)`;

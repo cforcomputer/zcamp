@@ -1,6 +1,6 @@
 <script>
   import { createEventDispatcher, onMount, afterUpdate } from "svelte";
-  import { settings, filterLists, profiles } from "./store";
+  import { settings, filterLists, profiles, DEFAULT_SETTINGS } from "./store";
   import FilterListManager from "./FilterListManager.svelte";
   import ProfileListManager from "./ProfileListManager.svelte";
 
@@ -38,37 +38,39 @@
   // SettingsManager.svelte
   function updateSetting(key, value) {
     try {
-      settings.update((s) => {
-        // Ensure we always have valid settings object
-        const currentSettings = s ? { ...s } : { ...DEFAULT_SETTINGS };
+      settings.update((currentSettings) => {
+        // Create a new settings object with defaults
+        const updatedSettings = {
+          ...DEFAULT_SETTINGS,
+          ...currentSettings,
+        };
 
-        // Handle nested settings
-        if (
-          key === "location_type_filter_enabled" &&
-          !currentSettings.location_types
-        ) {
-          currentSettings.location_types = {
+        // Handle nested objects
+        if (key === "location_types") {
+          updatedSettings.location_types = {
             ...DEFAULT_SETTINGS.location_types,
+            ...currentSettings.location_types,
+            ...value,
           };
+        } else if (key === "combat_labels") {
+          updatedSettings.combat_labels = {
+            ...DEFAULT_SETTINGS.combat_labels,
+            ...currentSettings.combat_labels,
+            ...value,
+          };
+        } else {
+          // Handle regular settings
+          updatedSettings[key] = value;
         }
-        if (
-          key === "combat_label_filter_enabled" &&
-          !currentSettings.combat_labels
-        ) {
-          currentSettings.combat_labels = { ...DEFAULT_SETTINGS.combat_labels };
-        }
-
-        // Update the setting
-        currentSettings[key] = value;
 
         // Emit update to server
-        socket.emit("updateSettings", currentSettings);
+        socket.emit("updateSettings", updatedSettings);
 
-        return currentSettings;
+        return updatedSettings;
       });
     } catch (e) {
       console.error("Error updating setting:", e);
-      settings.set({ ...DEFAULT_SETTINGS }); // Set to default if error occurs
+      settings.set({ ...DEFAULT_SETTINGS }); // Reset to defaults if error occurs
     }
   }
 
@@ -608,14 +610,15 @@
     Enable Location Type Filter
   </label>
 
-  {#if localSettings.location_type_filter_enabled}
+  {#if $settings.location_type_filter_enabled}
     <div class="location-types">
+      <!-- Location type checkboxes -->
       <label>
         <input
           type="checkbox"
-          bind:checked={localSettings.location_types.highsec}
+          bind:checked={$settings.location_types.highsec}
           on:change={() =>
-            updateSetting("location_types", localSettings.location_types)}
+            updateSetting("location_types", $settings.location_types)}
         />
         High Security
       </label>

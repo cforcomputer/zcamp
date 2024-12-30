@@ -5870,7 +5870,7 @@ var app = (function () {
 	    padding: false,
 	  },
 	};
-	const settings = writable(DEFAULT_SETTINGS$1);
+	const settings = writable({ ...DEFAULT_SETTINGS$1 }); // Initialize with defaults immediately
 	const filteredKillmails = derived(
 	  [killmails, settings, filterLists],
 	  ([$killmails, $settings, $filterLists]) => {
@@ -5933,39 +5933,26 @@ var app = (function () {
 	            match = ids.includes(killmail.killmail.solar_system_id?.toString());
 	            break;
 	          case "region": {
-	            const celestialData = killmail.pinpoints?.celestialData;
-	            if (!celestialData) return false;
+	            const celestialData = killmail.pinpoints.celestialData;
 
-	            // Debug log to verify data
-	            // console.log("Region Filter - Comparing:", {
-	            //   celestialRegionId: celestialData.regionid,
-	            //   celestialRegionName: celestialData.regionname,
-	            //   filterIds: ids,
-	            // });
+	            // Log to verify data
+	            console.log("Region Filter - Comparing:", {
+	              celestialRegionId: celestialData.regionid,
+	              celestialRegionName: celestialData.regionname,
+	              filterIds: ids,
+	            });
 
 	            // Ensure ids is an array
 	            const idList = Array.isArray(ids) ? ids : [ids];
 
-	            // Compare both ID and name, accounting for string/number conversion
+	            // Match against both ID and name
 	            match = idList.some((id) => {
-	              const matchesId =
-	                celestialData.regionid.toString() === id.toString();
-	              const matchesName =
+	              return (
+	                celestialData.regionid.toString() === id.toString() ||
 	                celestialData.regionname.toLowerCase() ===
-	                id.toString().toLowerCase();
-
-	              // Debug log for each comparison
-	              console.log("Comparing:", {
-	                id,
-	                matchesId,
-	                matchesName,
-	                celestialRegionId: celestialData.regionid,
-	                celestialRegionName: celestialData.regionname,
-	              });
-
-	              return matchesId || matchesName;
+	                  id.toString().toLowerCase()
+	              );
 	            });
-
 	            break;
 	          }
 	          case "location_type":
@@ -6031,23 +6018,32 @@ var app = (function () {
 
 	      // Location Filter
 	      // Location Type Filter
-	      if ($settings.location_type_filter_enabled && $settings.location_types) {
-	        const selectedTypes = Object.entries(
-	          $settings.location_types || {
-	            highsec: false,
-	            lowsec: false,
-	            nullsec: false,
-	            wspace: false,
-	            abyssal: false,
+	      // Location Type Filter
+	      if ($settings.location_type_filter_enabled) {
+	        const locationTypes = $settings.location_types || {
+	          highsec: false,
+	          lowsec: false,
+	          nullsec: false,
+	          wspace: false,
+	          abyssal: false,
+	        };
+
+	        // Check if any location types are enabled
+	        const hasEnabledTypes = Object.values(locationTypes).some(
+	          (enabled) => enabled
+	        );
+
+	        // Only apply filter if at least one type is enabled
+	        if (hasEnabledTypes) {
+	          const selectedTypes = Object.entries($settings.location_types || {})
+	            .filter(([_, enabled]) => enabled)
+	            .map(([type, _]) => `loc:${type}`);
+
+	          if (
+	            !killmail.zkb.labels.some((label) => selectedTypes.includes(label))
+	          ) {
+	            return false;
 	          }
-	        )
-	          .filter(([_, enabled]) => enabled)
-	          .map(([type, _]) => `loc:${type}`);
-	        if (
-	          selectedTypes.length > 0 &&
-	          !killmail.zkb.labels.some((label) => selectedTypes.includes(label))
-	        ) {
-	          return false;
 	        }
 	      }
 
@@ -6151,7 +6147,7 @@ var app = (function () {
 
 	      // Location Type Filter
 	      if ($settings.location_type_filter_enabled) {
-	        const selectedTypes = Object.entries(settings.location_types)
+	        const selectedTypes = Object.entries($settings.location_types || {})
 	          .filter(([_, enabled]) => enabled)
 	          .map(([type, _]) => `loc:${type}`);
 	        if (
@@ -7093,7 +7089,7 @@ var app = (function () {
 	const { console: console_1$4 } = globals;
 	const file$6 = "src\\SettingsManager.svelte";
 
-	// (224:2) {#if localSettings}
+	// (226:2) {#if localSettings}
 	function create_if_block_3$1(ctx) {
 		let label0;
 		let input0;
@@ -7227,7 +7223,7 @@ var app = (function () {
 		let input30;
 		let mounted;
 		let dispose;
-		let if_block = /*localSettings*/ ctx[6].triangulation_filter_enabled && create_if_block_4$1(ctx);
+		let if_block = /*localSettings*/ ctx[7].triangulation_filter_enabled && create_if_block_4$1(ctx);
 
 		const block = {
 			c: function create() {
@@ -7366,168 +7362,168 @@ var app = (function () {
 				t67 = text("Solar System ID:\r\n      ");
 				input30 = element("input");
 				attr_dev(input0, "type", "checkbox");
-				add_location(input0, file$6, 225, 6, 6483);
+				add_location(input0, file$6, 227, 6, 6577);
 				attr_dev(label0, "class", "svelte-gu7nlb");
-				add_location(label0, file$6, 224, 4, 6468);
+				add_location(label0, file$6, 226, 4, 6562);
 				attr_dev(input1, "type", "number");
 				attr_dev(input1, "class", "svelte-gu7nlb");
-				add_location(input1, file$6, 238, 6, 6837);
+				add_location(input1, file$6, 240, 6, 6931);
 				attr_dev(label1, "class", "svelte-gu7nlb");
-				add_location(label1, file$6, 236, 4, 6792);
+				add_location(label1, file$6, 238, 4, 6886);
 				attr_dev(input2, "type", "checkbox");
-				add_location(input2, file$6, 247, 6, 7060);
+				add_location(input2, file$6, 249, 6, 7154);
 				attr_dev(label2, "class", "svelte-gu7nlb");
-				add_location(label2, file$6, 246, 4, 7045);
+				add_location(label2, file$6, 248, 4, 7139);
 				attr_dev(input3, "type", "checkbox");
-				add_location(input3, file$6, 260, 6, 7378);
+				add_location(input3, file$6, 262, 6, 7472);
 				attr_dev(label3, "class", "svelte-gu7nlb");
-				add_location(label3, file$6, 259, 4, 7363);
+				add_location(label3, file$6, 261, 4, 7457);
 				attr_dev(h30, "class", "svelte-gu7nlb");
-				add_location(h30, file$6, 287, 4, 8147);
+				add_location(h30, file$6, 289, 4, 8241);
 				attr_dev(input4, "type", "checkbox");
-				add_location(input4, file$6, 289, 6, 8188);
+				add_location(input4, file$6, 291, 6, 8282);
 				attr_dev(label4, "class", "svelte-gu7nlb");
-				add_location(label4, file$6, 288, 4, 8173);
+				add_location(label4, file$6, 290, 4, 8267);
 				attr_dev(input5, "type", "number");
 				attr_dev(input5, "class", "svelte-gu7nlb");
-				add_location(input5, file$6, 302, 6, 8538);
+				add_location(input5, file$6, 304, 6, 8632);
 				attr_dev(label5, "class", "svelte-gu7nlb");
-				add_location(label5, file$6, 300, 4, 8502);
+				add_location(label5, file$6, 302, 4, 8596);
 				attr_dev(input6, "type", "number");
 				attr_dev(input6, "class", "svelte-gu7nlb");
-				add_location(input6, file$6, 312, 6, 8798);
+				add_location(input6, file$6, 314, 6, 8892);
 				attr_dev(label6, "class", "svelte-gu7nlb");
-				add_location(label6, file$6, 310, 4, 8755);
+				add_location(label6, file$6, 312, 4, 8849);
 				attr_dev(input7, "type", "checkbox");
-				add_location(input7, file$6, 320, 6, 9004);
+				add_location(input7, file$6, 322, 6, 9098);
 				attr_dev(label7, "class", "svelte-gu7nlb");
-				add_location(label7, file$6, 319, 4, 8989);
+				add_location(label7, file$6, 321, 4, 9083);
 				attr_dev(input8, "type", "number");
 				attr_dev(input8, "class", "svelte-gu7nlb");
-				add_location(input8, file$6, 330, 6, 9284);
+				add_location(input8, file$6, 332, 6, 9378);
 				attr_dev(label8, "class", "svelte-gu7nlb");
-				add_location(label8, file$6, 328, 4, 9246);
+				add_location(label8, file$6, 330, 4, 9340);
 				attr_dev(input9, "type", "checkbox");
-				add_location(input9, file$6, 338, 6, 9475);
+				add_location(input9, file$6, 340, 6, 9569);
 				attr_dev(label9, "class", "svelte-gu7nlb");
-				add_location(label9, file$6, 337, 4, 9460);
+				add_location(label9, file$6, 339, 4, 9554);
 				attr_dev(input10, "type", "checkbox");
-				add_location(input10, file$6, 347, 6, 9693);
+				add_location(input10, file$6, 349, 6, 9787);
 				attr_dev(label10, "class", "svelte-gu7nlb");
-				add_location(label10, file$6, 346, 4, 9678);
+				add_location(label10, file$6, 348, 4, 9772);
 				attr_dev(input11, "type", "checkbox");
-				add_location(input11, file$6, 356, 6, 9900);
+				add_location(input11, file$6, 358, 6, 9994);
 				attr_dev(label11, "class", "svelte-gu7nlb");
-				add_location(label11, file$6, 355, 4, 9885);
+				add_location(label11, file$6, 357, 4, 9979);
 				attr_dev(input12, "type", "checkbox");
-				add_location(input12, file$6, 365, 6, 10122);
+				add_location(input12, file$6, 367, 6, 10216);
 				attr_dev(label12, "class", "svelte-gu7nlb");
-				add_location(label12, file$6, 364, 4, 10107);
+				add_location(label12, file$6, 366, 4, 10201);
 				attr_dev(input13, "type", "number");
 				attr_dev(input13, "class", "svelte-gu7nlb");
-				add_location(input13, file$6, 378, 6, 10467);
+				add_location(input13, file$6, 380, 6, 10561);
 				attr_dev(label13, "class", "svelte-gu7nlb");
-				add_location(label13, file$6, 376, 4, 10432);
+				add_location(label13, file$6, 378, 4, 10526);
 				attr_dev(input14, "type", "checkbox");
-				add_location(input14, file$6, 387, 6, 10696);
+				add_location(input14, file$6, 389, 6, 10790);
 				attr_dev(label14, "class", "svelte-gu7nlb");
-				add_location(label14, file$6, 386, 4, 10681);
+				add_location(label14, file$6, 388, 4, 10775);
 				attr_dev(input15, "type", "number");
 				attr_dev(input15, "class", "svelte-gu7nlb");
-				add_location(input15, file$6, 400, 6, 11046);
+				add_location(input15, file$6, 402, 6, 11140);
 				attr_dev(label15, "class", "svelte-gu7nlb");
-				add_location(label15, file$6, 398, 4, 11010);
+				add_location(label15, file$6, 400, 4, 11104);
 				attr_dev(input16, "type", "checkbox");
-				add_location(input16, file$6, 409, 6, 11278);
+				add_location(input16, file$6, 411, 6, 11372);
 				attr_dev(label16, "class", "svelte-gu7nlb");
-				add_location(label16, file$6, 408, 4, 11263);
+				add_location(label16, file$6, 410, 4, 11357);
 				attr_dev(input17, "type", "number");
 				attr_dev(input17, "class", "svelte-gu7nlb");
-				add_location(input17, file$6, 422, 6, 11632);
+				add_location(input17, file$6, 424, 6, 11726);
 				attr_dev(label17, "class", "svelte-gu7nlb");
-				add_location(label17, file$6, 420, 4, 11584);
+				add_location(label17, file$6, 422, 4, 11678);
 				attr_dev(input18, "type", "checkbox");
-				add_location(input18, file$6, 431, 6, 11858);
+				add_location(input18, file$6, 433, 6, 11952);
 				attr_dev(label18, "class", "svelte-gu7nlb");
-				add_location(label18, file$6, 430, 4, 11843);
+				add_location(label18, file$6, 432, 4, 11937);
 				attr_dev(h31, "class", "svelte-gu7nlb");
-				add_location(h31, file$6, 443, 4, 12158);
+				add_location(h31, file$6, 445, 4, 12252);
 				attr_dev(input19, "type", "checkbox");
-				add_location(input19, file$6, 445, 6, 12204);
+				add_location(input19, file$6, 447, 6, 12298);
 				attr_dev(label19, "class", "svelte-gu7nlb");
-				add_location(label19, file$6, 444, 4, 12189);
+				add_location(label19, file$6, 446, 4, 12283);
 				attr_dev(input20, "type", "number");
 				attr_dev(input20, "class", "svelte-gu7nlb");
-				add_location(input20, file$6, 458, 6, 12594);
+				add_location(input20, file$6, 460, 6, 12688);
 				attr_dev(label20, "class", "svelte-gu7nlb");
-				add_location(label20, file$6, 456, 4, 12550);
+				add_location(label20, file$6, 458, 4, 12644);
 				attr_dev(input21, "type", "checkbox");
-				add_location(input21, file$6, 470, 6, 12889);
+				add_location(input21, file$6, 472, 6, 12983);
 				attr_dev(label21, "class", "svelte-gu7nlb");
-				add_location(label21, file$6, 469, 4, 12874);
+				add_location(label21, file$6, 471, 4, 12968);
 				attr_dev(input22, "type", "number");
 				attr_dev(input22, "class", "svelte-gu7nlb");
-				add_location(input22, file$6, 483, 6, 13294);
+				add_location(input22, file$6, 485, 6, 13388);
 				attr_dev(label22, "class", "svelte-gu7nlb");
-				add_location(label22, file$6, 481, 4, 13247);
+				add_location(label22, file$6, 483, 4, 13341);
 				attr_dev(input23, "type", "checkbox");
-				add_location(input23, file$6, 495, 6, 13598);
+				add_location(input23, file$6, 497, 6, 13692);
 				attr_dev(label23, "class", "svelte-gu7nlb");
-				add_location(label23, file$6, 494, 4, 13583);
+				add_location(label23, file$6, 496, 4, 13677);
 				attr_dev(input24, "type", "number");
 				attr_dev(input24, "class", "svelte-gu7nlb");
-				add_location(input24, file$6, 508, 6, 13993);
+				add_location(input24, file$6, 510, 6, 14087);
 				attr_dev(label24, "class", "svelte-gu7nlb");
-				add_location(label24, file$6, 506, 4, 13948);
+				add_location(label24, file$6, 508, 4, 14042);
 				attr_dev(h32, "class", "svelte-gu7nlb");
-				add_location(h32, file$6, 519, 4, 14276);
+				add_location(h32, file$6, 521, 4, 14370);
 				attr_dev(input25, "type", "checkbox");
-				add_location(input25, file$6, 521, 6, 14320);
+				add_location(input25, file$6, 523, 6, 14414);
 				attr_dev(label25, "class", "svelte-gu7nlb");
-				add_location(label25, file$6, 520, 4, 14305);
+				add_location(label25, file$6, 522, 4, 14399);
 				attr_dev(input26, "type", "number");
 				attr_dev(input26, "class", "svelte-gu7nlb");
-				add_location(input26, file$6, 534, 6, 14700);
+				add_location(input26, file$6, 536, 6, 14794);
 				attr_dev(label26, "class", "svelte-gu7nlb");
-				add_location(label26, file$6, 532, 4, 14658);
+				add_location(label26, file$6, 534, 4, 14752);
 				attr_dev(input27, "type", "checkbox");
-				add_location(input27, file$6, 546, 6, 14989);
+				add_location(input27, file$6, 548, 6, 15083);
 				attr_dev(label27, "class", "svelte-gu7nlb");
-				add_location(label27, file$6, 545, 4, 14974);
+				add_location(label27, file$6, 547, 4, 15068);
 				attr_dev(input28, "type", "number");
 				attr_dev(input28, "class", "svelte-gu7nlb");
-				add_location(input28, file$6, 559, 6, 15384);
+				add_location(input28, file$6, 561, 6, 15478);
 				attr_dev(label28, "class", "svelte-gu7nlb");
-				add_location(label28, file$6, 557, 4, 15339);
+				add_location(label28, file$6, 559, 4, 15433);
 				attr_dev(input29, "type", "checkbox");
-				add_location(input29, file$6, 571, 6, 15682);
+				add_location(input29, file$6, 573, 6, 15776);
 				attr_dev(label29, "class", "svelte-gu7nlb");
-				add_location(label29, file$6, 570, 4, 15667);
+				add_location(label29, file$6, 572, 4, 15761);
 				attr_dev(input30, "type", "number");
 				attr_dev(input30, "class", "svelte-gu7nlb");
-				add_location(input30, file$6, 584, 6, 16047);
+				add_location(input30, file$6, 586, 6, 16141);
 				attr_dev(label30, "class", "svelte-gu7nlb");
-				add_location(label30, file$6, 582, 4, 16008);
+				add_location(label30, file$6, 584, 4, 16102);
 			},
 			m: function mount(target, anchor) {
 				insert_dev(target, label0, anchor);
 				append_dev(label0, input0);
-				input0.checked = /*localSettings*/ ctx[6].dropped_value_enabled;
+				input0.checked = /*localSettings*/ ctx[7].dropped_value_enabled;
 				append_dev(label0, t0);
 				insert_dev(target, t1, anchor);
 				insert_dev(target, label1, anchor);
 				append_dev(label1, t2);
 				append_dev(label1, input1);
-				set_input_value(input1, /*localSettings*/ ctx[6].dropped_value);
+				set_input_value(input1, /*localSettings*/ ctx[7].dropped_value);
 				insert_dev(target, t3, anchor);
 				insert_dev(target, label2, anchor);
 				append_dev(label2, input2);
-				input2.checked = /*localSettings*/ ctx[6].total_value_enabled;
+				input2.checked = /*localSettings*/ ctx[7].total_value_enabled;
 				append_dev(label2, t4);
 				insert_dev(target, t5, anchor);
 				insert_dev(target, label3, anchor);
 				append_dev(label3, input3);
-				input3.checked = /*localSettings*/ ctx[6].triangulation_filter_enabled;
+				input3.checked = /*localSettings*/ ctx[7].triangulation_filter_enabled;
 				append_dev(label3, t6);
 				insert_dev(target, t7, anchor);
 				if (if_block) if_block.m(target, anchor);
@@ -7536,142 +7532,142 @@ var app = (function () {
 				insert_dev(target, t10, anchor);
 				insert_dev(target, label4, anchor);
 				append_dev(label4, input4);
-				input4.checked = /*localSettings*/ ctx[6].item_type_filter_enabled;
+				input4.checked = /*localSettings*/ ctx[7].item_type_filter_enabled;
 				append_dev(label4, t11);
 				insert_dev(target, t12, anchor);
 				insert_dev(target, label5, anchor);
 				append_dev(label5, t13);
 				append_dev(label5, input5);
-				set_input_value(input5, /*localSettings*/ ctx[6].item_type_filter);
+				set_input_value(input5, /*localSettings*/ ctx[7].item_type_filter);
 				insert_dev(target, t14, anchor);
 				insert_dev(target, label6, anchor);
 				append_dev(label6, t15);
 				append_dev(label6, input6);
-				set_input_value(input6, /*localSettings*/ ctx[6].total_value);
+				set_input_value(input6, /*localSettings*/ ctx[7].total_value);
 				insert_dev(target, t16, anchor);
 				insert_dev(target, label7, anchor);
 				append_dev(label7, input7);
-				input7.checked = /*localSettings*/ ctx[6].points_enabled;
+				input7.checked = /*localSettings*/ ctx[7].points_enabled;
 				append_dev(label7, t17);
 				insert_dev(target, t18, anchor);
 				insert_dev(target, label8, anchor);
 				append_dev(label8, t19);
 				append_dev(label8, input8);
-				set_input_value(input8, /*localSettings*/ ctx[6].points);
+				set_input_value(input8, /*localSettings*/ ctx[7].points);
 				insert_dev(target, t20, anchor);
 				insert_dev(target, label9, anchor);
 				append_dev(label9, input9);
-				input9.checked = /*localSettings*/ ctx[6].npc_only;
+				input9.checked = /*localSettings*/ ctx[7].npc_only;
 				append_dev(label9, t21);
 				insert_dev(target, t22, anchor);
 				insert_dev(target, label10, anchor);
 				append_dev(label10, input10);
-				input10.checked = /*localSettings*/ ctx[6].solo;
+				input10.checked = /*localSettings*/ ctx[7].solo;
 				append_dev(label10, t23);
 				insert_dev(target, t24, anchor);
 				insert_dev(target, label11, anchor);
 				append_dev(label11, input11);
-				input11.checked = /*localSettings*/ ctx[6].awox_only;
+				input11.checked = /*localSettings*/ ctx[7].awox_only;
 				append_dev(label11, t25);
 				insert_dev(target, t26, anchor);
 				insert_dev(target, label12, anchor);
 				append_dev(label12, input12);
-				input12.checked = /*localSettings*/ ctx[6].location_filter_enabled;
+				input12.checked = /*localSettings*/ ctx[7].location_filter_enabled;
 				append_dev(label12, t27);
 				insert_dev(target, t28, anchor);
 				insert_dev(target, label13, anchor);
 				append_dev(label13, t29);
 				append_dev(label13, input13);
-				set_input_value(input13, /*localSettings*/ ctx[6].location_filter);
+				set_input_value(input13, /*localSettings*/ ctx[7].location_filter);
 				insert_dev(target, t30, anchor);
 				insert_dev(target, label14, anchor);
 				append_dev(label14, input14);
-				input14.checked = /*localSettings*/ ctx[6].ship_type_filter_enabled;
+				input14.checked = /*localSettings*/ ctx[7].ship_type_filter_enabled;
 				append_dev(label14, t31);
 				insert_dev(target, t32, anchor);
 				insert_dev(target, label15, anchor);
 				append_dev(label15, t33);
 				append_dev(label15, input15);
-				set_input_value(input15, /*localSettings*/ ctx[6].ship_type_filter);
+				set_input_value(input15, /*localSettings*/ ctx[7].ship_type_filter);
 				insert_dev(target, t34, anchor);
 				insert_dev(target, label16, anchor);
 				append_dev(label16, input16);
-				input16.checked = /*localSettings*/ ctx[6].time_threshold_enabled;
+				input16.checked = /*localSettings*/ ctx[7].time_threshold_enabled;
 				append_dev(label16, t35);
 				insert_dev(target, t36, anchor);
 				insert_dev(target, label17, anchor);
 				append_dev(label17, t37);
 				append_dev(label17, input17);
-				set_input_value(input17, /*localSettings*/ ctx[6].time_threshold);
+				set_input_value(input17, /*localSettings*/ ctx[7].time_threshold);
 				insert_dev(target, t38, anchor);
 				insert_dev(target, label18, anchor);
 				append_dev(label18, input18);
-				input18.checked = /*localSettings*/ ctx[6].audio_alerts_enabled;
+				input18.checked = /*localSettings*/ ctx[7].audio_alerts_enabled;
 				append_dev(label18, t39);
 				insert_dev(target, t40, anchor);
 				insert_dev(target, h31, anchor);
 				insert_dev(target, t42, anchor);
 				insert_dev(target, label19, anchor);
 				append_dev(label19, input19);
-				input19.checked = /*localSettings*/ ctx[6].attacker_alliance_filter_enabled;
+				input19.checked = /*localSettings*/ ctx[7].attacker_alliance_filter_enabled;
 				append_dev(label19, t43);
 				insert_dev(target, t44, anchor);
 				insert_dev(target, label20, anchor);
 				append_dev(label20, t45);
 				append_dev(label20, input20);
-				set_input_value(input20, /*localSettings*/ ctx[6].attacker_alliance_filter);
+				set_input_value(input20, /*localSettings*/ ctx[7].attacker_alliance_filter);
 				insert_dev(target, t46, anchor);
 				insert_dev(target, label21, anchor);
 				append_dev(label21, input21);
-				input21.checked = /*localSettings*/ ctx[6].attacker_corporation_filter_enabled;
+				input21.checked = /*localSettings*/ ctx[7].attacker_corporation_filter_enabled;
 				append_dev(label21, t47);
 				insert_dev(target, t48, anchor);
 				insert_dev(target, label22, anchor);
 				append_dev(label22, t49);
 				append_dev(label22, input22);
-				set_input_value(input22, /*localSettings*/ ctx[6].attacker_corporation_filter);
+				set_input_value(input22, /*localSettings*/ ctx[7].attacker_corporation_filter);
 				insert_dev(target, t50, anchor);
 				insert_dev(target, label23, anchor);
 				append_dev(label23, input23);
-				input23.checked = /*localSettings*/ ctx[6].attacker_ship_type_filter_enabled;
+				input23.checked = /*localSettings*/ ctx[7].attacker_ship_type_filter_enabled;
 				append_dev(label23, t51);
 				insert_dev(target, t52, anchor);
 				insert_dev(target, label24, anchor);
 				append_dev(label24, t53);
 				append_dev(label24, input24);
-				set_input_value(input24, /*localSettings*/ ctx[6].attacker_ship_type_filter);
+				set_input_value(input24, /*localSettings*/ ctx[7].attacker_ship_type_filter);
 				insert_dev(target, t54, anchor);
 				insert_dev(target, h32, anchor);
 				insert_dev(target, t56, anchor);
 				insert_dev(target, label25, anchor);
 				append_dev(label25, input25);
-				input25.checked = /*localSettings*/ ctx[6].victim_alliance_filter_enabled;
+				input25.checked = /*localSettings*/ ctx[7].victim_alliance_filter_enabled;
 				append_dev(label25, t57);
 				insert_dev(target, t58, anchor);
 				insert_dev(target, label26, anchor);
 				append_dev(label26, t59);
 				append_dev(label26, input26);
-				set_input_value(input26, /*localSettings*/ ctx[6].victim_alliance_filter);
+				set_input_value(input26, /*localSettings*/ ctx[7].victim_alliance_filter);
 				insert_dev(target, t60, anchor);
 				insert_dev(target, label27, anchor);
 				append_dev(label27, input27);
-				input27.checked = /*localSettings*/ ctx[6].victim_corporation_filter_enabled;
+				input27.checked = /*localSettings*/ ctx[7].victim_corporation_filter_enabled;
 				append_dev(label27, t61);
 				insert_dev(target, t62, anchor);
 				insert_dev(target, label28, anchor);
 				append_dev(label28, t63);
 				append_dev(label28, input28);
-				set_input_value(input28, /*localSettings*/ ctx[6].victim_corporation_filter);
+				set_input_value(input28, /*localSettings*/ ctx[7].victim_corporation_filter);
 				insert_dev(target, t64, anchor);
 				insert_dev(target, label29, anchor);
 				append_dev(label29, input29);
-				input29.checked = /*localSettings*/ ctx[6].solar_system_filter_enabled;
+				input29.checked = /*localSettings*/ ctx[7].solar_system_filter_enabled;
 				append_dev(label29, t65);
 				insert_dev(target, t66, anchor);
 				insert_dev(target, label30, anchor);
 				append_dev(label30, t67);
 				append_dev(label30, input30);
-				set_input_value(input30, /*localSettings*/ ctx[6].solar_system_filter);
+				set_input_value(input30, /*localSettings*/ ctx[7].solar_system_filter);
 
 				if (!mounted) {
 					dispose = [
@@ -7743,23 +7739,23 @@ var app = (function () {
 				}
 			},
 			p: function update(ctx, dirty) {
-				if (dirty[0] & /*localSettings*/ 64) {
-					input0.checked = /*localSettings*/ ctx[6].dropped_value_enabled;
+				if (dirty[0] & /*localSettings*/ 128) {
+					input0.checked = /*localSettings*/ ctx[7].dropped_value_enabled;
 				}
 
-				if (dirty[0] & /*localSettings*/ 64 && to_number(input1.value) !== /*localSettings*/ ctx[6].dropped_value) {
-					set_input_value(input1, /*localSettings*/ ctx[6].dropped_value);
+				if (dirty[0] & /*localSettings*/ 128 && to_number(input1.value) !== /*localSettings*/ ctx[7].dropped_value) {
+					set_input_value(input1, /*localSettings*/ ctx[7].dropped_value);
 				}
 
-				if (dirty[0] & /*localSettings*/ 64) {
-					input2.checked = /*localSettings*/ ctx[6].total_value_enabled;
+				if (dirty[0] & /*localSettings*/ 128) {
+					input2.checked = /*localSettings*/ ctx[7].total_value_enabled;
 				}
 
-				if (dirty[0] & /*localSettings*/ 64) {
-					input3.checked = /*localSettings*/ ctx[6].triangulation_filter_enabled;
+				if (dirty[0] & /*localSettings*/ 128) {
+					input3.checked = /*localSettings*/ ctx[7].triangulation_filter_enabled;
 				}
 
-				if (/*localSettings*/ ctx[6].triangulation_filter_enabled) {
+				if (/*localSettings*/ ctx[7].triangulation_filter_enabled) {
 					if (if_block) {
 						if_block.p(ctx, dirty);
 					} else {
@@ -7772,112 +7768,112 @@ var app = (function () {
 					if_block = null;
 				}
 
-				if (dirty[0] & /*localSettings*/ 64) {
-					input4.checked = /*localSettings*/ ctx[6].item_type_filter_enabled;
+				if (dirty[0] & /*localSettings*/ 128) {
+					input4.checked = /*localSettings*/ ctx[7].item_type_filter_enabled;
 				}
 
-				if (dirty[0] & /*localSettings*/ 64 && to_number(input5.value) !== /*localSettings*/ ctx[6].item_type_filter) {
-					set_input_value(input5, /*localSettings*/ ctx[6].item_type_filter);
+				if (dirty[0] & /*localSettings*/ 128 && to_number(input5.value) !== /*localSettings*/ ctx[7].item_type_filter) {
+					set_input_value(input5, /*localSettings*/ ctx[7].item_type_filter);
 				}
 
-				if (dirty[0] & /*localSettings*/ 64 && to_number(input6.value) !== /*localSettings*/ ctx[6].total_value) {
-					set_input_value(input6, /*localSettings*/ ctx[6].total_value);
+				if (dirty[0] & /*localSettings*/ 128 && to_number(input6.value) !== /*localSettings*/ ctx[7].total_value) {
+					set_input_value(input6, /*localSettings*/ ctx[7].total_value);
 				}
 
-				if (dirty[0] & /*localSettings*/ 64) {
-					input7.checked = /*localSettings*/ ctx[6].points_enabled;
+				if (dirty[0] & /*localSettings*/ 128) {
+					input7.checked = /*localSettings*/ ctx[7].points_enabled;
 				}
 
-				if (dirty[0] & /*localSettings*/ 64 && to_number(input8.value) !== /*localSettings*/ ctx[6].points) {
-					set_input_value(input8, /*localSettings*/ ctx[6].points);
+				if (dirty[0] & /*localSettings*/ 128 && to_number(input8.value) !== /*localSettings*/ ctx[7].points) {
+					set_input_value(input8, /*localSettings*/ ctx[7].points);
 				}
 
-				if (dirty[0] & /*localSettings*/ 64) {
-					input9.checked = /*localSettings*/ ctx[6].npc_only;
+				if (dirty[0] & /*localSettings*/ 128) {
+					input9.checked = /*localSettings*/ ctx[7].npc_only;
 				}
 
-				if (dirty[0] & /*localSettings*/ 64) {
-					input10.checked = /*localSettings*/ ctx[6].solo;
+				if (dirty[0] & /*localSettings*/ 128) {
+					input10.checked = /*localSettings*/ ctx[7].solo;
 				}
 
-				if (dirty[0] & /*localSettings*/ 64) {
-					input11.checked = /*localSettings*/ ctx[6].awox_only;
+				if (dirty[0] & /*localSettings*/ 128) {
+					input11.checked = /*localSettings*/ ctx[7].awox_only;
 				}
 
-				if (dirty[0] & /*localSettings*/ 64) {
-					input12.checked = /*localSettings*/ ctx[6].location_filter_enabled;
+				if (dirty[0] & /*localSettings*/ 128) {
+					input12.checked = /*localSettings*/ ctx[7].location_filter_enabled;
 				}
 
-				if (dirty[0] & /*localSettings*/ 64 && to_number(input13.value) !== /*localSettings*/ ctx[6].location_filter) {
-					set_input_value(input13, /*localSettings*/ ctx[6].location_filter);
+				if (dirty[0] & /*localSettings*/ 128 && to_number(input13.value) !== /*localSettings*/ ctx[7].location_filter) {
+					set_input_value(input13, /*localSettings*/ ctx[7].location_filter);
 				}
 
-				if (dirty[0] & /*localSettings*/ 64) {
-					input14.checked = /*localSettings*/ ctx[6].ship_type_filter_enabled;
+				if (dirty[0] & /*localSettings*/ 128) {
+					input14.checked = /*localSettings*/ ctx[7].ship_type_filter_enabled;
 				}
 
-				if (dirty[0] & /*localSettings*/ 64 && to_number(input15.value) !== /*localSettings*/ ctx[6].ship_type_filter) {
-					set_input_value(input15, /*localSettings*/ ctx[6].ship_type_filter);
+				if (dirty[0] & /*localSettings*/ 128 && to_number(input15.value) !== /*localSettings*/ ctx[7].ship_type_filter) {
+					set_input_value(input15, /*localSettings*/ ctx[7].ship_type_filter);
 				}
 
-				if (dirty[0] & /*localSettings*/ 64) {
-					input16.checked = /*localSettings*/ ctx[6].time_threshold_enabled;
+				if (dirty[0] & /*localSettings*/ 128) {
+					input16.checked = /*localSettings*/ ctx[7].time_threshold_enabled;
 				}
 
-				if (dirty[0] & /*localSettings*/ 64 && to_number(input17.value) !== /*localSettings*/ ctx[6].time_threshold) {
-					set_input_value(input17, /*localSettings*/ ctx[6].time_threshold);
+				if (dirty[0] & /*localSettings*/ 128 && to_number(input17.value) !== /*localSettings*/ ctx[7].time_threshold) {
+					set_input_value(input17, /*localSettings*/ ctx[7].time_threshold);
 				}
 
-				if (dirty[0] & /*localSettings*/ 64) {
-					input18.checked = /*localSettings*/ ctx[6].audio_alerts_enabled;
+				if (dirty[0] & /*localSettings*/ 128) {
+					input18.checked = /*localSettings*/ ctx[7].audio_alerts_enabled;
 				}
 
-				if (dirty[0] & /*localSettings*/ 64) {
-					input19.checked = /*localSettings*/ ctx[6].attacker_alliance_filter_enabled;
+				if (dirty[0] & /*localSettings*/ 128) {
+					input19.checked = /*localSettings*/ ctx[7].attacker_alliance_filter_enabled;
 				}
 
-				if (dirty[0] & /*localSettings*/ 64 && to_number(input20.value) !== /*localSettings*/ ctx[6].attacker_alliance_filter) {
-					set_input_value(input20, /*localSettings*/ ctx[6].attacker_alliance_filter);
+				if (dirty[0] & /*localSettings*/ 128 && to_number(input20.value) !== /*localSettings*/ ctx[7].attacker_alliance_filter) {
+					set_input_value(input20, /*localSettings*/ ctx[7].attacker_alliance_filter);
 				}
 
-				if (dirty[0] & /*localSettings*/ 64) {
-					input21.checked = /*localSettings*/ ctx[6].attacker_corporation_filter_enabled;
+				if (dirty[0] & /*localSettings*/ 128) {
+					input21.checked = /*localSettings*/ ctx[7].attacker_corporation_filter_enabled;
 				}
 
-				if (dirty[0] & /*localSettings*/ 64 && to_number(input22.value) !== /*localSettings*/ ctx[6].attacker_corporation_filter) {
-					set_input_value(input22, /*localSettings*/ ctx[6].attacker_corporation_filter);
+				if (dirty[0] & /*localSettings*/ 128 && to_number(input22.value) !== /*localSettings*/ ctx[7].attacker_corporation_filter) {
+					set_input_value(input22, /*localSettings*/ ctx[7].attacker_corporation_filter);
 				}
 
-				if (dirty[0] & /*localSettings*/ 64) {
-					input23.checked = /*localSettings*/ ctx[6].attacker_ship_type_filter_enabled;
+				if (dirty[0] & /*localSettings*/ 128) {
+					input23.checked = /*localSettings*/ ctx[7].attacker_ship_type_filter_enabled;
 				}
 
-				if (dirty[0] & /*localSettings*/ 64 && to_number(input24.value) !== /*localSettings*/ ctx[6].attacker_ship_type_filter) {
-					set_input_value(input24, /*localSettings*/ ctx[6].attacker_ship_type_filter);
+				if (dirty[0] & /*localSettings*/ 128 && to_number(input24.value) !== /*localSettings*/ ctx[7].attacker_ship_type_filter) {
+					set_input_value(input24, /*localSettings*/ ctx[7].attacker_ship_type_filter);
 				}
 
-				if (dirty[0] & /*localSettings*/ 64) {
-					input25.checked = /*localSettings*/ ctx[6].victim_alliance_filter_enabled;
+				if (dirty[0] & /*localSettings*/ 128) {
+					input25.checked = /*localSettings*/ ctx[7].victim_alliance_filter_enabled;
 				}
 
-				if (dirty[0] & /*localSettings*/ 64 && to_number(input26.value) !== /*localSettings*/ ctx[6].victim_alliance_filter) {
-					set_input_value(input26, /*localSettings*/ ctx[6].victim_alliance_filter);
+				if (dirty[0] & /*localSettings*/ 128 && to_number(input26.value) !== /*localSettings*/ ctx[7].victim_alliance_filter) {
+					set_input_value(input26, /*localSettings*/ ctx[7].victim_alliance_filter);
 				}
 
-				if (dirty[0] & /*localSettings*/ 64) {
-					input27.checked = /*localSettings*/ ctx[6].victim_corporation_filter_enabled;
+				if (dirty[0] & /*localSettings*/ 128) {
+					input27.checked = /*localSettings*/ ctx[7].victim_corporation_filter_enabled;
 				}
 
-				if (dirty[0] & /*localSettings*/ 64 && to_number(input28.value) !== /*localSettings*/ ctx[6].victim_corporation_filter) {
-					set_input_value(input28, /*localSettings*/ ctx[6].victim_corporation_filter);
+				if (dirty[0] & /*localSettings*/ 128 && to_number(input28.value) !== /*localSettings*/ ctx[7].victim_corporation_filter) {
+					set_input_value(input28, /*localSettings*/ ctx[7].victim_corporation_filter);
 				}
 
-				if (dirty[0] & /*localSettings*/ 64) {
-					input29.checked = /*localSettings*/ ctx[6].solar_system_filter_enabled;
+				if (dirty[0] & /*localSettings*/ 128) {
+					input29.checked = /*localSettings*/ ctx[7].solar_system_filter_enabled;
 				}
 
-				if (dirty[0] & /*localSettings*/ 64 && to_number(input30.value) !== /*localSettings*/ ctx[6].solar_system_filter) {
-					set_input_value(input30, /*localSettings*/ ctx[6].solar_system_filter);
+				if (dirty[0] & /*localSettings*/ 128 && to_number(input30.value) !== /*localSettings*/ ctx[7].solar_system_filter) {
+					set_input_value(input30, /*localSettings*/ ctx[7].solar_system_filter);
 				}
 			},
 			d: function destroy(detaching) {
@@ -7962,14 +7958,14 @@ var app = (function () {
 			block,
 			id: create_if_block_3$1.name,
 			type: "if",
-			source: "(224:2) {#if localSettings}",
+			source: "(226:2) {#if localSettings}",
 			ctx
 		});
 
 		return block;
 	}
 
-	// (273:4) {#if localSettings.triangulation_filter_enabled}
+	// (275:4) {#if localSettings.triangulation_filter_enabled}
 	function create_if_block_4$1(ctx) {
 		let label;
 		let input;
@@ -7983,14 +7979,14 @@ var app = (function () {
 				input = element("input");
 				t = text("\r\n        Exclude Triangulatable Kills");
 				attr_dev(input, "type", "checkbox");
-				add_location(input, file$6, 274, 8, 7783);
+				add_location(input, file$6, 276, 8, 7877);
 				attr_dev(label, "class", "svelte-gu7nlb");
-				add_location(label, file$6, 273, 6, 7766);
+				add_location(label, file$6, 275, 6, 7860);
 			},
 			m: function mount(target, anchor) {
 				insert_dev(target, label, anchor);
 				append_dev(label, input);
-				input.checked = /*localSettings*/ ctx[6].triangulation_filter_exclude;
+				input.checked = /*localSettings*/ ctx[7].triangulation_filter_exclude;
 				append_dev(label, t);
 
 				if (!mounted) {
@@ -8003,8 +7999,8 @@ var app = (function () {
 				}
 			},
 			p: function update(ctx, dirty) {
-				if (dirty[0] & /*localSettings*/ 64) {
-					input.checked = /*localSettings*/ ctx[6].triangulation_filter_exclude;
+				if (dirty[0] & /*localSettings*/ 128) {
+					input.checked = /*localSettings*/ ctx[7].triangulation_filter_exclude;
 				}
 			},
 			d: function destroy(detaching) {
@@ -8021,14 +8017,14 @@ var app = (function () {
 			block,
 			id: create_if_block_4$1.name,
 			type: "if",
-			source: "(273:4) {#if localSettings.triangulation_filter_enabled}",
+			source: "(275:4) {#if localSettings.triangulation_filter_enabled}",
 			ctx
 		});
 
 		return block;
 	}
 
-	// (611:2) {#if localSettings.location_type_filter_enabled}
+	// (613:2) {#if $settings.location_type_filter_enabled}
 	function create_if_block_2$3(ctx) {
 		let div;
 		let label0;
@@ -8076,53 +8072,53 @@ var app = (function () {
 				input4 = element("input");
 				t8 = text("\r\n        Abyssal Space");
 				attr_dev(input0, "type", "checkbox");
-				add_location(input0, file$6, 613, 8, 16782);
+				add_location(input0, file$6, 616, 8, 16913);
 				attr_dev(label0, "class", "svelte-gu7nlb");
-				add_location(label0, file$6, 612, 6, 16765);
+				add_location(label0, file$6, 615, 6, 16896);
 				attr_dev(input1, "type", "checkbox");
-				add_location(input1, file$6, 622, 8, 17058);
+				add_location(input1, file$6, 625, 8, 17181);
 				attr_dev(label1, "class", "svelte-gu7nlb");
-				add_location(label1, file$6, 621, 6, 17041);
+				add_location(label1, file$6, 624, 6, 17164);
 				attr_dev(input2, "type", "checkbox");
-				add_location(input2, file$6, 631, 8, 17332);
+				add_location(input2, file$6, 634, 8, 17455);
 				attr_dev(label2, "class", "svelte-gu7nlb");
-				add_location(label2, file$6, 630, 6, 17315);
+				add_location(label2, file$6, 633, 6, 17438);
 				attr_dev(input3, "type", "checkbox");
-				add_location(input3, file$6, 640, 8, 17608);
+				add_location(input3, file$6, 643, 8, 17731);
 				attr_dev(label3, "class", "svelte-gu7nlb");
-				add_location(label3, file$6, 639, 6, 17591);
+				add_location(label3, file$6, 642, 6, 17714);
 				attr_dev(input4, "type", "checkbox");
-				add_location(input4, file$6, 649, 8, 17884);
+				add_location(input4, file$6, 652, 8, 18007);
 				attr_dev(label4, "class", "svelte-gu7nlb");
-				add_location(label4, file$6, 648, 6, 17867);
+				add_location(label4, file$6, 651, 6, 17990);
 				attr_dev(div, "class", "location-types");
-				add_location(div, file$6, 611, 4, 16729);
+				add_location(div, file$6, 613, 4, 16819);
 			},
 			m: function mount(target, anchor) {
 				insert_dev(target, div, anchor);
 				append_dev(div, label0);
 				append_dev(label0, input0);
-				input0.checked = /*localSettings*/ ctx[6].location_types.highsec;
+				input0.checked = /*$settings*/ ctx[1].location_types.highsec;
 				append_dev(label0, t0);
 				append_dev(div, t1);
 				append_dev(div, label1);
 				append_dev(label1, input1);
-				input1.checked = /*localSettings*/ ctx[6].location_types.lowsec;
+				input1.checked = /*localSettings*/ ctx[7].location_types.lowsec;
 				append_dev(label1, t2);
 				append_dev(div, t3);
 				append_dev(div, label2);
 				append_dev(label2, input2);
-				input2.checked = /*localSettings*/ ctx[6].location_types.nullsec;
+				input2.checked = /*localSettings*/ ctx[7].location_types.nullsec;
 				append_dev(label2, t4);
 				append_dev(div, t5);
 				append_dev(div, label3);
 				append_dev(label3, input3);
-				input3.checked = /*localSettings*/ ctx[6].location_types.wspace;
+				input3.checked = /*localSettings*/ ctx[7].location_types.wspace;
 				append_dev(label3, t6);
 				append_dev(div, t7);
 				append_dev(div, label4);
 				append_dev(label4, input4);
-				input4.checked = /*localSettings*/ ctx[6].location_types.abyssal;
+				input4.checked = /*localSettings*/ ctx[7].location_types.abyssal;
 				append_dev(label4, t8);
 
 				if (!mounted) {
@@ -8143,24 +8139,24 @@ var app = (function () {
 				}
 			},
 			p: function update(ctx, dirty) {
-				if (dirty[0] & /*localSettings*/ 64) {
-					input0.checked = /*localSettings*/ ctx[6].location_types.highsec;
+				if (dirty[0] & /*$settings*/ 2) {
+					input0.checked = /*$settings*/ ctx[1].location_types.highsec;
 				}
 
-				if (dirty[0] & /*localSettings*/ 64) {
-					input1.checked = /*localSettings*/ ctx[6].location_types.lowsec;
+				if (dirty[0] & /*localSettings*/ 128) {
+					input1.checked = /*localSettings*/ ctx[7].location_types.lowsec;
 				}
 
-				if (dirty[0] & /*localSettings*/ 64) {
-					input2.checked = /*localSettings*/ ctx[6].location_types.nullsec;
+				if (dirty[0] & /*localSettings*/ 128) {
+					input2.checked = /*localSettings*/ ctx[7].location_types.nullsec;
 				}
 
-				if (dirty[0] & /*localSettings*/ 64) {
-					input3.checked = /*localSettings*/ ctx[6].location_types.wspace;
+				if (dirty[0] & /*localSettings*/ 128) {
+					input3.checked = /*localSettings*/ ctx[7].location_types.wspace;
 				}
 
-				if (dirty[0] & /*localSettings*/ 64) {
-					input4.checked = /*localSettings*/ ctx[6].location_types.abyssal;
+				if (dirty[0] & /*localSettings*/ 128) {
+					input4.checked = /*localSettings*/ ctx[7].location_types.abyssal;
 				}
 			},
 			d: function destroy(detaching) {
@@ -8177,14 +8173,14 @@ var app = (function () {
 			block,
 			id: create_if_block_2$3.name,
 			type: "if",
-			source: "(611:2) {#if localSettings.location_type_filter_enabled}",
+			source: "(613:2) {#if $settings.location_type_filter_enabled}",
 			ctx
 		});
 
 		return block;
 	}
 
-	// (686:2) {#if localSettings.combat_label_filter_enabled}
+	// (689:2) {#if localSettings.combat_label_filter_enabled}
 	function create_if_block_1$4(ctx) {
 		let div;
 		let label0;
@@ -8216,35 +8212,35 @@ var app = (function () {
 				input2 = element("input");
 				t4 = text("\r\n        Padding");
 				attr_dev(input0, "type", "checkbox");
-				add_location(input0, file$6, 688, 8, 18881);
+				add_location(input0, file$6, 691, 8, 19004);
 				attr_dev(label0, "class", "svelte-gu7nlb");
-				add_location(label0, file$6, 687, 6, 18864);
+				add_location(label0, file$6, 690, 6, 18987);
 				attr_dev(input1, "type", "checkbox");
-				add_location(input1, file$6, 697, 8, 19146);
+				add_location(input1, file$6, 700, 8, 19269);
 				attr_dev(label1, "class", "svelte-gu7nlb");
-				add_location(label1, file$6, 696, 6, 19129);
+				add_location(label1, file$6, 699, 6, 19252);
 				attr_dev(input2, "type", "checkbox");
-				add_location(input2, file$6, 706, 8, 19405);
+				add_location(input2, file$6, 709, 8, 19528);
 				attr_dev(label2, "class", "svelte-gu7nlb");
-				add_location(label2, file$6, 705, 6, 19388);
+				add_location(label2, file$6, 708, 6, 19511);
 				attr_dev(div, "class", "combat-labels");
-				add_location(div, file$6, 686, 4, 18829);
+				add_location(div, file$6, 689, 4, 18952);
 			},
 			m: function mount(target, anchor) {
 				insert_dev(target, div, anchor);
 				append_dev(div, label0);
 				append_dev(label0, input0);
-				input0.checked = /*localSettings*/ ctx[6].combat_labels.ganked;
+				input0.checked = /*localSettings*/ ctx[7].combat_labels.ganked;
 				append_dev(label0, t0);
 				append_dev(div, t1);
 				append_dev(div, label1);
 				append_dev(label1, input1);
-				input1.checked = /*localSettings*/ ctx[6].combat_labels.pvp;
+				input1.checked = /*localSettings*/ ctx[7].combat_labels.pvp;
 				append_dev(label1, t2);
 				append_dev(div, t3);
 				append_dev(div, label2);
 				append_dev(label2, input2);
-				input2.checked = /*localSettings*/ ctx[6].combat_labels.padding;
+				input2.checked = /*localSettings*/ ctx[7].combat_labels.padding;
 				append_dev(label2, t4);
 
 				if (!mounted) {
@@ -8261,16 +8257,16 @@ var app = (function () {
 				}
 			},
 			p: function update(ctx, dirty) {
-				if (dirty[0] & /*localSettings*/ 64) {
-					input0.checked = /*localSettings*/ ctx[6].combat_labels.ganked;
+				if (dirty[0] & /*localSettings*/ 128) {
+					input0.checked = /*localSettings*/ ctx[7].combat_labels.ganked;
 				}
 
-				if (dirty[0] & /*localSettings*/ 64) {
-					input1.checked = /*localSettings*/ ctx[6].combat_labels.pvp;
+				if (dirty[0] & /*localSettings*/ 128) {
+					input1.checked = /*localSettings*/ ctx[7].combat_labels.pvp;
 				}
 
-				if (dirty[0] & /*localSettings*/ 64) {
-					input2.checked = /*localSettings*/ ctx[6].combat_labels.padding;
+				if (dirty[0] & /*localSettings*/ 128) {
+					input2.checked = /*localSettings*/ ctx[7].combat_labels.padding;
 				}
 			},
 			d: function destroy(detaching) {
@@ -8287,14 +8283,14 @@ var app = (function () {
 			block,
 			id: create_if_block_1$4.name,
 			type: "if",
-			source: "(686:2) {#if localSettings.combat_label_filter_enabled}",
+			source: "(689:2) {#if localSettings.combat_label_filter_enabled}",
 			ctx
 		});
 
 		return block;
 	}
 
-	// (729:2) {#if localSettings.webhook_enabled}
+	// (732:2) {#if localSettings.webhook_enabled}
 	function create_if_block$5(ctx) {
 		let label;
 		let t;
@@ -8311,15 +8307,15 @@ var app = (function () {
 				attr_dev(input, "placeholder", "https://discord.com/api/webhooks/...");
 				set_style(input, "width", "100%");
 				set_style(input, "max-width", "500px");
-				add_location(input, file$6, 731, 6, 20031);
+				add_location(input, file$6, 734, 6, 20154);
 				attr_dev(label, "class", "svelte-gu7nlb");
-				add_location(label, file$6, 729, 4, 19996);
+				add_location(label, file$6, 732, 4, 20119);
 			},
 			m: function mount(target, anchor) {
 				insert_dev(target, label, anchor);
 				append_dev(label, t);
 				append_dev(label, input);
-				set_input_value(input, /*localSettings*/ ctx[6].webhook_url);
+				set_input_value(input, /*localSettings*/ ctx[7].webhook_url);
 
 				if (!mounted) {
 					dispose = [
@@ -8331,8 +8327,8 @@ var app = (function () {
 				}
 			},
 			p: function update(ctx, dirty) {
-				if (dirty[0] & /*localSettings*/ 64 && input.value !== /*localSettings*/ ctx[6].webhook_url) {
-					set_input_value(input, /*localSettings*/ ctx[6].webhook_url);
+				if (dirty[0] & /*localSettings*/ 128 && input.value !== /*localSettings*/ ctx[7].webhook_url) {
+					set_input_value(input, /*localSettings*/ ctx[7].webhook_url);
 				}
 			},
 			d: function destroy(detaching) {
@@ -8349,7 +8345,7 @@ var app = (function () {
 			block,
 			id: create_if_block$5.name,
 			type: "if",
-			source: "(729:2) {#if localSettings.webhook_enabled}",
+			source: "(732:2) {#if localSettings.webhook_enabled}",
 			ctx
 		});
 
@@ -8418,8 +8414,8 @@ var app = (function () {
 
 		let profilelistmanager_props = { profiles: /*localProfiles*/ ctx[0] || [] };
 
-		if (/*selectedProfile*/ ctx[5] !== void 0) {
-			profilelistmanager_props.selectedProfile = /*selectedProfile*/ ctx[5];
+		if (/*selectedProfile*/ ctx[6] !== void 0) {
+			profilelistmanager_props.selectedProfile = /*selectedProfile*/ ctx[6];
 		}
 
 		profilelistmanager = new ProfileListManager({
@@ -8428,16 +8424,16 @@ var app = (function () {
 			});
 
 		binding_callbacks.push(() => bind(profilelistmanager, 'selectedProfile', profilelistmanager_selectedProfile_binding));
-		profilelistmanager.$on("saveProfile", /*saveProfile*/ ctx[10]);
-		profilelistmanager.$on("loadProfile", /*loadProfile*/ ctx[11]);
-		profilelistmanager.$on("fetchProfiles", /*fetchProfiles*/ ctx[13]);
-		profilelistmanager.$on("deleteProfile", /*deleteProfile*/ ctx[12]);
-		let if_block0 = /*localSettings*/ ctx[6] && create_if_block_3$1(ctx);
-		let if_block1 = /*localSettings*/ ctx[6].location_type_filter_enabled && create_if_block_2$3(ctx);
-		let if_block2 = /*localSettings*/ ctx[6].combat_label_filter_enabled && create_if_block_1$4(ctx);
-		let if_block3 = /*localSettings*/ ctx[6].webhook_enabled && create_if_block$5(ctx);
+		profilelistmanager.$on("saveProfile", /*saveProfile*/ ctx[11]);
+		profilelistmanager.$on("loadProfile", /*loadProfile*/ ctx[12]);
+		profilelistmanager.$on("fetchProfiles", /*fetchProfiles*/ ctx[14]);
+		profilelistmanager.$on("deleteProfile", /*deleteProfile*/ ctx[13]);
+		let if_block0 = /*localSettings*/ ctx[7] && create_if_block_3$1(ctx);
+		let if_block1 = /*$settings*/ ctx[1].location_type_filter_enabled && create_if_block_2$3(ctx);
+		let if_block2 = /*localSettings*/ ctx[7].combat_label_filter_enabled && create_if_block_1$4(ctx);
+		let if_block3 = /*localSettings*/ ctx[7].webhook_enabled && create_if_block$5(ctx);
 		filterlistmanager = new FilterListManager({ $$inline: true });
-		filterlistmanager.$on("updateFilterLists", /*handleFilterListsUpdate*/ ctx[9]);
+		filterlistmanager.$on("updateFilterLists", /*handleFilterListsUpdate*/ ctx[10]);
 
 		const block = {
 			c: function create() {
@@ -8508,68 +8504,68 @@ var app = (function () {
 				t32 = space();
 				create_component(filterlistmanager.$$.fragment);
 				attr_dev(input0, "type", "checkbox");
-				add_location(input0, file$6, 598, 4, 16365);
+				add_location(input0, file$6, 600, 4, 16459);
 				attr_dev(label0, "class", "svelte-gu7nlb");
-				add_location(label0, file$6, 597, 2, 16352);
+				add_location(label0, file$6, 599, 2, 16446);
 				attr_dev(input1, "type", "checkbox");
-				add_location(input1, file$6, 662, 4, 18208);
+				add_location(input1, file$6, 665, 4, 18331);
 				attr_dev(label1, "class", "svelte-gu7nlb");
-				add_location(label1, file$6, 661, 2, 18195);
+				add_location(label1, file$6, 664, 2, 18318);
 				attr_dev(input2, "type", "checkbox");
-				add_location(input2, file$6, 673, 4, 18470);
+				add_location(input2, file$6, 676, 4, 18593);
 				attr_dev(label2, "class", "svelte-gu7nlb");
-				add_location(label2, file$6, 672, 2, 18457);
+				add_location(label2, file$6, 675, 2, 18580);
 				attr_dev(h30, "class", "svelte-gu7nlb");
-				add_location(h30, file$6, 717, 2, 19674);
+				add_location(h30, file$6, 720, 2, 19797);
 				attr_dev(input3, "type", "checkbox");
-				add_location(input3, file$6, 719, 4, 19715);
+				add_location(input3, file$6, 722, 4, 19838);
 				attr_dev(label3, "class", "svelte-gu7nlb");
-				add_location(label3, file$6, 718, 2, 19702);
+				add_location(label3, file$6, 721, 2, 19825);
 				attr_dev(h31, "class", "svelte-gu7nlb");
-				add_location(h31, file$6, 741, 2, 20335);
+				add_location(h31, file$6, 744, 2, 20458);
 				attr_dev(input4, "placeholder", "New list name");
-				add_location(input4, file$6, 743, 4, 20381);
+				add_location(input4, file$6, 746, 4, 20504);
 				attr_dev(input5, "placeholder", "Comma-separated IDs");
-				add_location(input5, file$6, 744, 4, 20449);
+				add_location(input5, file$6, 747, 4, 20572);
 				attr_dev(input6, "type", "checkbox");
-				add_location(input6, file$6, 746, 6, 20537);
+				add_location(input6, file$6, 749, 6, 20660);
 				attr_dev(label4, "class", "svelte-gu7nlb");
-				add_location(label4, file$6, 745, 4, 20522);
+				add_location(label4, file$6, 748, 4, 20645);
 				option0.__value = "";
 				set_input_value(option0, option0.__value);
-				add_location(option0, file$6, 750, 6, 20676);
+				add_location(option0, file$6, 753, 6, 20799);
 				option1.__value = "attacker_alliance";
 				set_input_value(option1, option1.__value);
-				add_location(option1, file$6, 751, 6, 20728);
+				add_location(option1, file$6, 754, 6, 20851);
 				option2.__value = "attacker_corporation";
 				set_input_value(option2, option2.__value);
-				add_location(option2, file$6, 752, 6, 20796);
+				add_location(option2, file$6, 755, 6, 20919);
 				option3.__value = "attacker_ship_type";
 				set_input_value(option3, option3.__value);
-				add_location(option3, file$6, 753, 6, 20870);
+				add_location(option3, file$6, 756, 6, 20993);
 				option4.__value = "victim_alliance";
 				set_input_value(option4, option4.__value);
-				add_location(option4, file$6, 754, 6, 20940);
+				add_location(option4, file$6, 757, 6, 21063);
 				option5.__value = "victim_corporation";
 				set_input_value(option5, option5.__value);
-				add_location(option5, file$6, 755, 6, 21004);
+				add_location(option5, file$6, 758, 6, 21127);
 				option6.__value = "ship_type";
 				set_input_value(option6, option6.__value);
-				add_location(option6, file$6, 756, 6, 21074);
+				add_location(option6, file$6, 759, 6, 21197);
 				option7.__value = "solar_system";
 				set_input_value(option7, option7.__value);
-				add_location(option7, file$6, 757, 6, 21126);
+				add_location(option7, file$6, 760, 6, 21249);
 				option8.__value = "region";
 				set_input_value(option8, option8.__value);
-				add_location(option8, file$6, 758, 6, 21184);
+				add_location(option8, file$6, 761, 6, 21307);
 				attr_dev(select, "class", "svelte-gu7nlb");
-				if (/*newListFilterType*/ ctx[4] === void 0) add_render_callback(() => /*select_change_handler*/ ctx[112].call(select));
-				add_location(select, file$6, 749, 4, 20629);
+				if (/*newListFilterType*/ ctx[5] === void 0) add_render_callback(() => /*select_change_handler*/ ctx[112].call(select));
+				add_location(select, file$6, 752, 4, 20752);
 				attr_dev(button, "class", "svelte-gu7nlb");
-				add_location(button, file$6, 760, 4, 21243);
-				add_location(div0, file$6, 742, 2, 20370);
+				add_location(button, file$6, 763, 4, 21366);
+				add_location(div0, file$6, 745, 2, 20493);
 				attr_dev(div1, "class", "settings-manager svelte-gu7nlb");
-				add_location(div1, file$6, 213, 0, 6172);
+				add_location(div1, file$6, 215, 0, 6266);
 			},
 			l: function claim(nodes) {
 				throw new Error("options.hydrate only works if the component was compiled with the `hydratable: true` option");
@@ -8582,19 +8578,19 @@ var app = (function () {
 				append_dev(div1, t1);
 				append_dev(div1, label0);
 				append_dev(label0, input0);
-				input0.checked = /*localSettings*/ ctx[6].location_type_filter_enabled;
+				input0.checked = /*localSettings*/ ctx[7].location_type_filter_enabled;
 				append_dev(label0, t2);
 				append_dev(div1, t3);
 				if (if_block1) if_block1.m(div1, null);
 				append_dev(div1, t4);
 				append_dev(div1, label1);
 				append_dev(label1, input1);
-				input1.checked = /*localSettings*/ ctx[6].capitals_only;
+				input1.checked = /*localSettings*/ ctx[7].capitals_only;
 				append_dev(label1, t5);
 				append_dev(div1, t6);
 				append_dev(div1, label2);
 				append_dev(label2, input2);
-				input2.checked = /*localSettings*/ ctx[6].combat_label_filter_enabled;
+				input2.checked = /*localSettings*/ ctx[7].combat_label_filter_enabled;
 				append_dev(label2, t7);
 				append_dev(div1, t8);
 				if (if_block2) if_block2.m(div1, null);
@@ -8603,7 +8599,7 @@ var app = (function () {
 				append_dev(div1, t11);
 				append_dev(div1, label3);
 				append_dev(label3, input3);
-				input3.checked = /*localSettings*/ ctx[6].webhook_enabled;
+				input3.checked = /*localSettings*/ ctx[7].webhook_enabled;
 				append_dev(label3, t12);
 				append_dev(div1, t13);
 				if (if_block3) if_block3.m(div1, null);
@@ -8612,14 +8608,14 @@ var app = (function () {
 				append_dev(div1, t16);
 				append_dev(div1, div0);
 				append_dev(div0, input4);
-				set_input_value(input4, /*newListName*/ ctx[1]);
+				set_input_value(input4, /*newListName*/ ctx[2]);
 				append_dev(div0, t17);
 				append_dev(div0, input5);
-				set_input_value(input5, /*newListIds*/ ctx[2]);
+				set_input_value(input5, /*newListIds*/ ctx[3]);
 				append_dev(div0, t18);
 				append_dev(div0, label4);
 				append_dev(label4, input6);
-				input6.checked = /*newListIsExclude*/ ctx[3];
+				input6.checked = /*newListIsExclude*/ ctx[4];
 				append_dev(label4, t19);
 				append_dev(div0, t20);
 				append_dev(div0, select);
@@ -8632,7 +8628,7 @@ var app = (function () {
 				append_dev(select, option6);
 				append_dev(select, option7);
 				append_dev(select, option8);
-				select_option(select, /*newListFilterType*/ ctx[4], true);
+				select_option(select, /*newListFilterType*/ ctx[5], true);
 				append_dev(div0, t30);
 				append_dev(div0, button);
 				append_dev(div1, t32);
@@ -8653,7 +8649,7 @@ var app = (function () {
 						listen_dev(input5, "input", /*input5_input_handler_1*/ ctx[110]),
 						listen_dev(input6, "change", /*input6_change_handler*/ ctx[111]),
 						listen_dev(select, "change", /*select_change_handler*/ ctx[112]),
-						listen_dev(button, "click", /*createFilterList*/ ctx[8], false, false, false, false)
+						listen_dev(button, "click", /*createFilterList*/ ctx[9], false, false, false, false)
 					];
 
 					mounted = true;
@@ -8663,15 +8659,15 @@ var app = (function () {
 				const profilelistmanager_changes = {};
 				if (dirty[0] & /*localProfiles*/ 1) profilelistmanager_changes.profiles = /*localProfiles*/ ctx[0] || [];
 
-				if (!updating_selectedProfile && dirty[0] & /*selectedProfile*/ 32) {
+				if (!updating_selectedProfile && dirty[0] & /*selectedProfile*/ 64) {
 					updating_selectedProfile = true;
-					profilelistmanager_changes.selectedProfile = /*selectedProfile*/ ctx[5];
+					profilelistmanager_changes.selectedProfile = /*selectedProfile*/ ctx[6];
 					add_flush_callback(() => updating_selectedProfile = false);
 				}
 
 				profilelistmanager.$set(profilelistmanager_changes);
 
-				if (/*localSettings*/ ctx[6]) {
+				if (/*localSettings*/ ctx[7]) {
 					if (if_block0) {
 						if_block0.p(ctx, dirty);
 					} else {
@@ -8684,11 +8680,11 @@ var app = (function () {
 					if_block0 = null;
 				}
 
-				if (dirty[0] & /*localSettings*/ 64) {
-					input0.checked = /*localSettings*/ ctx[6].location_type_filter_enabled;
+				if (dirty[0] & /*localSettings*/ 128) {
+					input0.checked = /*localSettings*/ ctx[7].location_type_filter_enabled;
 				}
 
-				if (/*localSettings*/ ctx[6].location_type_filter_enabled) {
+				if (/*$settings*/ ctx[1].location_type_filter_enabled) {
 					if (if_block1) {
 						if_block1.p(ctx, dirty);
 					} else {
@@ -8701,15 +8697,15 @@ var app = (function () {
 					if_block1 = null;
 				}
 
-				if (dirty[0] & /*localSettings*/ 64) {
-					input1.checked = /*localSettings*/ ctx[6].capitals_only;
+				if (dirty[0] & /*localSettings*/ 128) {
+					input1.checked = /*localSettings*/ ctx[7].capitals_only;
 				}
 
-				if (dirty[0] & /*localSettings*/ 64) {
-					input2.checked = /*localSettings*/ ctx[6].combat_label_filter_enabled;
+				if (dirty[0] & /*localSettings*/ 128) {
+					input2.checked = /*localSettings*/ ctx[7].combat_label_filter_enabled;
 				}
 
-				if (/*localSettings*/ ctx[6].combat_label_filter_enabled) {
+				if (/*localSettings*/ ctx[7].combat_label_filter_enabled) {
 					if (if_block2) {
 						if_block2.p(ctx, dirty);
 					} else {
@@ -8722,11 +8718,11 @@ var app = (function () {
 					if_block2 = null;
 				}
 
-				if (dirty[0] & /*localSettings*/ 64) {
-					input3.checked = /*localSettings*/ ctx[6].webhook_enabled;
+				if (dirty[0] & /*localSettings*/ 128) {
+					input3.checked = /*localSettings*/ ctx[7].webhook_enabled;
 				}
 
-				if (/*localSettings*/ ctx[6].webhook_enabled) {
+				if (/*localSettings*/ ctx[7].webhook_enabled) {
 					if (if_block3) {
 						if_block3.p(ctx, dirty);
 					} else {
@@ -8739,20 +8735,20 @@ var app = (function () {
 					if_block3 = null;
 				}
 
-				if (dirty[0] & /*newListName*/ 2 && input4.value !== /*newListName*/ ctx[1]) {
-					set_input_value(input4, /*newListName*/ ctx[1]);
+				if (dirty[0] & /*newListName*/ 4 && input4.value !== /*newListName*/ ctx[2]) {
+					set_input_value(input4, /*newListName*/ ctx[2]);
 				}
 
-				if (dirty[0] & /*newListIds*/ 4 && input5.value !== /*newListIds*/ ctx[2]) {
-					set_input_value(input5, /*newListIds*/ ctx[2]);
+				if (dirty[0] & /*newListIds*/ 8 && input5.value !== /*newListIds*/ ctx[3]) {
+					set_input_value(input5, /*newListIds*/ ctx[3]);
 				}
 
-				if (dirty[0] & /*newListIsExclude*/ 8) {
-					input6.checked = /*newListIsExclude*/ ctx[3];
+				if (dirty[0] & /*newListIsExclude*/ 16) {
+					input6.checked = /*newListIsExclude*/ ctx[4];
 				}
 
-				if (dirty[0] & /*newListFilterType*/ 16) {
-					select_option(select, /*newListFilterType*/ ctx[4]);
+				if (dirty[0] & /*newListFilterType*/ 32) {
+					select_option(select, /*newListFilterType*/ ctx[5]);
 				}
 			},
 			i: function intro(local) {
@@ -8801,9 +8797,9 @@ var app = (function () {
 		let $settings;
 		let $profiles;
 		validate_store(filterLists, 'filterLists');
-		component_subscribe($$self, filterLists, $$value => $$invalidate(15, $filterLists = $$value));
+		component_subscribe($$self, filterLists, $$value => $$invalidate(16, $filterLists = $$value));
 		validate_store(settings, 'settings');
-		component_subscribe($$self, settings, $$value => $$invalidate(16, $settings = $$value));
+		component_subscribe($$self, settings, $$value => $$invalidate(1, $settings = $$value));
 		validate_store(profiles, 'profiles');
 		component_subscribe($$self, profiles, $$value => $$invalidate(17, $profiles = $$value));
 		let { $$slots: slots = {}, $$scope } = $$props;
@@ -8827,30 +8823,36 @@ var app = (function () {
 		// SettingsManager.svelte
 		function updateSetting(key, value) {
 			try {
-				settings.update(s => {
-					// Ensure we always have valid settings object
-					const currentSettings = s ? { ...s } : { ...DEFAULT_SETTINGS };
+				settings.update(currentSettings => {
+					// Create a new settings object with defaults
+					const updatedSettings = { ...DEFAULT_SETTINGS$1, ...currentSettings };
 
-					// Handle nested settings
-					if (key === "location_type_filter_enabled" && !currentSettings.location_types) {
-						currentSettings.location_types = { ...DEFAULT_SETTINGS.location_types };
+					// Handle nested objects
+					if (key === "location_types") {
+						updatedSettings.location_types = {
+							...DEFAULT_SETTINGS$1.location_types,
+							...currentSettings.location_types,
+							...value
+						};
+					} else if (key === "combat_labels") {
+						updatedSettings.combat_labels = {
+							...DEFAULT_SETTINGS$1.combat_labels,
+							...currentSettings.combat_labels,
+							...value
+						};
+					} else {
+						// Handle regular settings
+						updatedSettings[key] = value;
 					}
-
-					if (key === "combat_label_filter_enabled" && !currentSettings.combat_labels) {
-						currentSettings.combat_labels = { ...DEFAULT_SETTINGS.combat_labels };
-					}
-
-					// Update the setting
-					currentSettings[key] = value;
 
 					// Emit update to server
-					socket.emit("updateSettings", currentSettings);
+					socket.emit("updateSettings", updatedSettings);
 
-					return currentSettings;
+					return updatedSettings;
 				});
 			} catch(e) {
 				console.error("Error updating setting:", e);
-				settings.set({ ...DEFAULT_SETTINGS }); // Set to default if error occurs
+				settings.set({ ...DEFAULT_SETTINGS$1 }); // Reset to defaults if error occurs
 			}
 		}
 
@@ -8867,9 +8869,9 @@ var app = (function () {
 
 			console.log("Creating new filter list:", newList);
 			socket.emit("createFilterList", newList);
-			$$invalidate(1, newListName = $$invalidate(2, newListIds = ""));
-			$$invalidate(3, newListIsExclude = false);
-			$$invalidate(4, newListFilterType = "");
+			$$invalidate(2, newListName = $$invalidate(3, newListIds = ""));
+			$$invalidate(4, newListIsExclude = false);
+			$$invalidate(5, newListFilterType = "");
 		}
 
 		function handleFilterListsUpdate(event) {
@@ -8933,7 +8935,7 @@ var app = (function () {
 				return profs;
 			});
 
-			$$invalidate(5, selectedProfile = profile.id);
+			$$invalidate(6, selectedProfile = profile.id);
 			fetchProfiles(); // Fetch updated list of profiles
 		});
 
@@ -8980,7 +8982,7 @@ var app = (function () {
 			});
 
 			if (selectedProfile === deletedId) {
-				$$invalidate(5, selectedProfile = null);
+				$$invalidate(6, selectedProfile = null);
 			}
 
 			fetchProfiles(); // Fetch updated list of profiles
@@ -9015,346 +9017,346 @@ var app = (function () {
 
 		function profilelistmanager_selectedProfile_binding(value) {
 			selectedProfile = value;
-			$$invalidate(5, selectedProfile);
+			$$invalidate(6, selectedProfile);
 		}
 
 		function input0_change_handler() {
 			localSettings.dropped_value_enabled = this.checked;
-			($$invalidate(6, localSettings), $$invalidate(16, $settings));
+			($$invalidate(7, localSettings), $$invalidate(1, $settings));
 		}
 
 		const change_handler = () => updateSetting("dropped_value_enabled", localSettings.dropped_value_enabled);
 
 		function input1_input_handler() {
 			localSettings.dropped_value = to_number(this.value);
-			($$invalidate(6, localSettings), $$invalidate(16, $settings));
+			($$invalidate(7, localSettings), $$invalidate(1, $settings));
 		}
 
 		const input_handler = () => updateSetting("dropped_value", localSettings.dropped_value);
 
 		function input2_change_handler() {
 			localSettings.total_value_enabled = this.checked;
-			($$invalidate(6, localSettings), $$invalidate(16, $settings));
+			($$invalidate(7, localSettings), $$invalidate(1, $settings));
 		}
 
 		const change_handler_1 = () => updateSetting("total_value_enabled", localSettings.total_value_enabled);
 
 		function input3_change_handler() {
 			localSettings.triangulation_filter_enabled = this.checked;
-			($$invalidate(6, localSettings), $$invalidate(16, $settings));
+			($$invalidate(7, localSettings), $$invalidate(1, $settings));
 		}
 
 		const change_handler_2 = () => updateSetting("triangulation_filter_enabled", localSettings.triangulation_filter_enabled);
 
 		function input_change_handler() {
 			localSettings.triangulation_filter_exclude = this.checked;
-			($$invalidate(6, localSettings), $$invalidate(16, $settings));
+			($$invalidate(7, localSettings), $$invalidate(1, $settings));
 		}
 
 		const change_handler_3 = () => updateSetting("triangulation_filter_exclude", localSettings.triangulation_filter_exclude);
 
 		function input4_change_handler() {
 			localSettings.item_type_filter_enabled = this.checked;
-			($$invalidate(6, localSettings), $$invalidate(16, $settings));
+			($$invalidate(7, localSettings), $$invalidate(1, $settings));
 		}
 
 		const change_handler_4 = () => updateSetting("item_type_filter_enabled", localSettings.item_type_filter_enabled);
 
 		function input5_input_handler() {
 			localSettings.item_type_filter = to_number(this.value);
-			($$invalidate(6, localSettings), $$invalidate(16, $settings));
+			($$invalidate(7, localSettings), $$invalidate(1, $settings));
 		}
 
 		const input_handler_1 = () => updateSetting("item_type_filter", localSettings.item_type_filter);
 
 		function input6_input_handler() {
 			localSettings.total_value = to_number(this.value);
-			($$invalidate(6, localSettings), $$invalidate(16, $settings));
+			($$invalidate(7, localSettings), $$invalidate(1, $settings));
 		}
 
 		const input_handler_2 = () => updateSetting("total_value", localSettings.total_value);
 
 		function input7_change_handler() {
 			localSettings.points_enabled = this.checked;
-			($$invalidate(6, localSettings), $$invalidate(16, $settings));
+			($$invalidate(7, localSettings), $$invalidate(1, $settings));
 		}
 
 		const change_handler_5 = () => updateSetting("points_enabled", localSettings.points_enabled);
 
 		function input8_input_handler() {
 			localSettings.points = to_number(this.value);
-			($$invalidate(6, localSettings), $$invalidate(16, $settings));
+			($$invalidate(7, localSettings), $$invalidate(1, $settings));
 		}
 
 		const input_handler_3 = () => updateSetting("points", localSettings.points);
 
 		function input9_change_handler() {
 			localSettings.npc_only = this.checked;
-			($$invalidate(6, localSettings), $$invalidate(16, $settings));
+			($$invalidate(7, localSettings), $$invalidate(1, $settings));
 		}
 
 		const change_handler_6 = () => updateSetting("npc_only", localSettings.npc_only);
 
 		function input10_change_handler() {
 			localSettings.solo = this.checked;
-			($$invalidate(6, localSettings), $$invalidate(16, $settings));
+			($$invalidate(7, localSettings), $$invalidate(1, $settings));
 		}
 
 		const change_handler_7 = () => updateSetting("solo", localSettings.solo);
 
 		function input11_change_handler() {
 			localSettings.awox_only = this.checked;
-			($$invalidate(6, localSettings), $$invalidate(16, $settings));
+			($$invalidate(7, localSettings), $$invalidate(1, $settings));
 		}
 
 		const change_handler_8 = () => updateSetting("awox_only", localSettings.awox_only);
 
 		function input12_change_handler() {
 			localSettings.location_filter_enabled = this.checked;
-			($$invalidate(6, localSettings), $$invalidate(16, $settings));
+			($$invalidate(7, localSettings), $$invalidate(1, $settings));
 		}
 
 		const change_handler_9 = () => updateSetting("location_filter_enabled", localSettings.location_filter_enabled);
 
 		function input13_input_handler() {
 			localSettings.location_filter = to_number(this.value);
-			($$invalidate(6, localSettings), $$invalidate(16, $settings));
+			($$invalidate(7, localSettings), $$invalidate(1, $settings));
 		}
 
 		const input_handler_4 = () => updateSetting("location_filter", localSettings.location_filter);
 
 		function input14_change_handler() {
 			localSettings.ship_type_filter_enabled = this.checked;
-			($$invalidate(6, localSettings), $$invalidate(16, $settings));
+			($$invalidate(7, localSettings), $$invalidate(1, $settings));
 		}
 
 		const change_handler_10 = () => updateSetting("ship_type_filter_enabled", localSettings.ship_type_filter_enabled);
 
 		function input15_input_handler() {
 			localSettings.ship_type_filter = to_number(this.value);
-			($$invalidate(6, localSettings), $$invalidate(16, $settings));
+			($$invalidate(7, localSettings), $$invalidate(1, $settings));
 		}
 
 		const input_handler_5 = () => updateSetting("ship_type_filter", localSettings.ship_type_filter);
 
 		function input16_change_handler() {
 			localSettings.time_threshold_enabled = this.checked;
-			($$invalidate(6, localSettings), $$invalidate(16, $settings));
+			($$invalidate(7, localSettings), $$invalidate(1, $settings));
 		}
 
 		const change_handler_11 = () => updateSetting("time_threshold_enabled", localSettings.time_threshold_enabled);
 
 		function input17_input_handler() {
 			localSettings.time_threshold = to_number(this.value);
-			($$invalidate(6, localSettings), $$invalidate(16, $settings));
+			($$invalidate(7, localSettings), $$invalidate(1, $settings));
 		}
 
 		const input_handler_6 = () => updateSetting("time_threshold", localSettings.time_threshold);
 
 		function input18_change_handler() {
 			localSettings.audio_alerts_enabled = this.checked;
-			($$invalidate(6, localSettings), $$invalidate(16, $settings));
+			($$invalidate(7, localSettings), $$invalidate(1, $settings));
 		}
 
 		const change_handler_12 = () => updateSetting("audio_alerts_enabled", localSettings.audio_alerts_enabled);
 
 		function input19_change_handler() {
 			localSettings.attacker_alliance_filter_enabled = this.checked;
-			($$invalidate(6, localSettings), $$invalidate(16, $settings));
+			($$invalidate(7, localSettings), $$invalidate(1, $settings));
 		}
 
 		const change_handler_13 = () => updateSetting("attacker_alliance_filter_enabled", localSettings.attacker_alliance_filter_enabled);
 
 		function input20_input_handler() {
 			localSettings.attacker_alliance_filter = to_number(this.value);
-			($$invalidate(6, localSettings), $$invalidate(16, $settings));
+			($$invalidate(7, localSettings), $$invalidate(1, $settings));
 		}
 
 		const input_handler_7 = () => updateSetting("attacker_alliance_filter", localSettings.attacker_alliance_filter);
 
 		function input21_change_handler() {
 			localSettings.attacker_corporation_filter_enabled = this.checked;
-			($$invalidate(6, localSettings), $$invalidate(16, $settings));
+			($$invalidate(7, localSettings), $$invalidate(1, $settings));
 		}
 
 		const change_handler_14 = () => updateSetting("attacker_corporation_filter_enabled", localSettings.attacker_corporation_filter_enabled);
 
 		function input22_input_handler() {
 			localSettings.attacker_corporation_filter = to_number(this.value);
-			($$invalidate(6, localSettings), $$invalidate(16, $settings));
+			($$invalidate(7, localSettings), $$invalidate(1, $settings));
 		}
 
 		const input_handler_8 = () => updateSetting("attacker_corporation_filter", localSettings.attacker_corporation_filter);
 
 		function input23_change_handler() {
 			localSettings.attacker_ship_type_filter_enabled = this.checked;
-			($$invalidate(6, localSettings), $$invalidate(16, $settings));
+			($$invalidate(7, localSettings), $$invalidate(1, $settings));
 		}
 
 		const change_handler_15 = () => updateSetting("attacker_ship_type_filter_enabled", localSettings.attacker_ship_type_filter_enabled);
 
 		function input24_input_handler() {
 			localSettings.attacker_ship_type_filter = to_number(this.value);
-			($$invalidate(6, localSettings), $$invalidate(16, $settings));
+			($$invalidate(7, localSettings), $$invalidate(1, $settings));
 		}
 
 		const input_handler_9 = () => updateSetting("attacker_ship_type_filter", localSettings.attacker_ship_type_filter);
 
 		function input25_change_handler() {
 			localSettings.victim_alliance_filter_enabled = this.checked;
-			($$invalidate(6, localSettings), $$invalidate(16, $settings));
+			($$invalidate(7, localSettings), $$invalidate(1, $settings));
 		}
 
 		const change_handler_16 = () => updateSetting("victim_alliance_filter_enabled", localSettings.victim_alliance_filter_enabled);
 
 		function input26_input_handler() {
 			localSettings.victim_alliance_filter = to_number(this.value);
-			($$invalidate(6, localSettings), $$invalidate(16, $settings));
+			($$invalidate(7, localSettings), $$invalidate(1, $settings));
 		}
 
 		const input_handler_10 = () => updateSetting("victim_alliance_filter", localSettings.victim_alliance_filter);
 
 		function input27_change_handler() {
 			localSettings.victim_corporation_filter_enabled = this.checked;
-			($$invalidate(6, localSettings), $$invalidate(16, $settings));
+			($$invalidate(7, localSettings), $$invalidate(1, $settings));
 		}
 
 		const change_handler_17 = () => updateSetting("victim_corporation_filter_enabled", localSettings.victim_corporation_filter_enabled);
 
 		function input28_input_handler() {
 			localSettings.victim_corporation_filter = to_number(this.value);
-			($$invalidate(6, localSettings), $$invalidate(16, $settings));
+			($$invalidate(7, localSettings), $$invalidate(1, $settings));
 		}
 
 		const input_handler_11 = () => updateSetting("victim_corporation_filter", localSettings.victim_corporation_filter);
 
 		function input29_change_handler() {
 			localSettings.solar_system_filter_enabled = this.checked;
-			($$invalidate(6, localSettings), $$invalidate(16, $settings));
+			($$invalidate(7, localSettings), $$invalidate(1, $settings));
 		}
 
 		const change_handler_18 = () => updateSetting("solar_system_filter_enabled", localSettings.solar_system_filter_enabled);
 
 		function input30_input_handler() {
 			localSettings.solar_system_filter = to_number(this.value);
-			($$invalidate(6, localSettings), $$invalidate(16, $settings));
+			($$invalidate(7, localSettings), $$invalidate(1, $settings));
 		}
 
 		const input_handler_12 = () => updateSetting("solar_system_filter", localSettings.solar_system_filter);
 
 		function input0_change_handler_1() {
 			localSettings.location_type_filter_enabled = this.checked;
-			($$invalidate(6, localSettings), $$invalidate(16, $settings));
+			($$invalidate(7, localSettings), $$invalidate(1, $settings));
 		}
 
 		const change_handler_19 = () => updateSetting("location_type_filter_enabled", localSettings.location_type_filter_enabled);
 
 		function input0_change_handler_2() {
-			localSettings.location_types.highsec = this.checked;
-			($$invalidate(6, localSettings), $$invalidate(16, $settings));
+			$settings.location_types.highsec = this.checked;
+			settings.set($settings);
 		}
 
-		const change_handler_20 = () => updateSetting("location_types", localSettings.location_types);
+		const change_handler_20 = () => updateSetting("location_types", $settings.location_types);
 
 		function input1_change_handler() {
 			localSettings.location_types.lowsec = this.checked;
-			($$invalidate(6, localSettings), $$invalidate(16, $settings));
+			($$invalidate(7, localSettings), $$invalidate(1, $settings));
 		}
 
 		const change_handler_21 = () => updateSetting("location_types", localSettings.location_types);
 
 		function input2_change_handler_1() {
 			localSettings.location_types.nullsec = this.checked;
-			($$invalidate(6, localSettings), $$invalidate(16, $settings));
+			($$invalidate(7, localSettings), $$invalidate(1, $settings));
 		}
 
 		const change_handler_22 = () => updateSetting("location_types", localSettings.location_types);
 
 		function input3_change_handler_1() {
 			localSettings.location_types.wspace = this.checked;
-			($$invalidate(6, localSettings), $$invalidate(16, $settings));
+			($$invalidate(7, localSettings), $$invalidate(1, $settings));
 		}
 
 		const change_handler_23 = () => updateSetting("location_types", localSettings.location_types);
 
 		function input4_change_handler_1() {
 			localSettings.location_types.abyssal = this.checked;
-			($$invalidate(6, localSettings), $$invalidate(16, $settings));
+			($$invalidate(7, localSettings), $$invalidate(1, $settings));
 		}
 
 		const change_handler_24 = () => updateSetting("location_types", localSettings.location_types);
 
 		function input1_change_handler_1() {
 			localSettings.capitals_only = this.checked;
-			($$invalidate(6, localSettings), $$invalidate(16, $settings));
+			($$invalidate(7, localSettings), $$invalidate(1, $settings));
 		}
 
 		const change_handler_25 = () => updateSetting("capitals_only", localSettings.capitals_only);
 
 		function input2_change_handler_2() {
 			localSettings.combat_label_filter_enabled = this.checked;
-			($$invalidate(6, localSettings), $$invalidate(16, $settings));
+			($$invalidate(7, localSettings), $$invalidate(1, $settings));
 		}
 
 		const change_handler_26 = () => updateSetting("combat_label_filter_enabled", localSettings.combat_label_filter_enabled);
 
 		function input0_change_handler_3() {
 			localSettings.combat_labels.ganked = this.checked;
-			($$invalidate(6, localSettings), $$invalidate(16, $settings));
+			($$invalidate(7, localSettings), $$invalidate(1, $settings));
 		}
 
 		const change_handler_27 = () => updateSetting("combat_labels", localSettings.combat_labels);
 
 		function input1_change_handler_2() {
 			localSettings.combat_labels.pvp = this.checked;
-			($$invalidate(6, localSettings), $$invalidate(16, $settings));
+			($$invalidate(7, localSettings), $$invalidate(1, $settings));
 		}
 
 		const change_handler_28 = () => updateSetting("combat_labels", localSettings.combat_labels);
 
 		function input2_change_handler_3() {
 			localSettings.combat_labels.padding = this.checked;
-			($$invalidate(6, localSettings), $$invalidate(16, $settings));
+			($$invalidate(7, localSettings), $$invalidate(1, $settings));
 		}
 
 		const change_handler_29 = () => updateSetting("combat_labels", localSettings.combat_labels);
 
 		function input3_change_handler_2() {
 			localSettings.webhook_enabled = this.checked;
-			($$invalidate(6, localSettings), $$invalidate(16, $settings));
+			($$invalidate(7, localSettings), $$invalidate(1, $settings));
 		}
 
 		const change_handler_30 = () => updateSetting("webhook_enabled", localSettings.webhook_enabled);
 
 		function input_input_handler() {
 			localSettings.webhook_url = this.value;
-			($$invalidate(6, localSettings), $$invalidate(16, $settings));
+			($$invalidate(7, localSettings), $$invalidate(1, $settings));
 		}
 
 		const input_handler_13 = () => updateSetting("webhook_url", localSettings.webhook_url);
 
 		function input4_input_handler() {
 			newListName = this.value;
-			$$invalidate(1, newListName);
+			$$invalidate(2, newListName);
 		}
 
 		function input5_input_handler_1() {
 			newListIds = this.value;
-			$$invalidate(2, newListIds);
+			$$invalidate(3, newListIds);
 		}
 
 		function input6_change_handler() {
 			newListIsExclude = this.checked;
-			$$invalidate(3, newListIsExclude);
+			$$invalidate(4, newListIsExclude);
 		}
 
 		function select_change_handler() {
 			newListFilterType = select_value(this);
-			$$invalidate(4, newListFilterType);
+			$$invalidate(5, newListFilterType);
 		}
 
 		$$self.$$set = $$props => {
-			if ('socket' in $$props) $$invalidate(14, socket = $$props.socket);
+			if ('socket' in $$props) $$invalidate(15, socket = $$props.socket);
 		};
 
 		$$self.$capture_state = () => ({
@@ -9364,6 +9366,7 @@ var app = (function () {
 			settings,
 			filterLists,
 			profiles,
+			DEFAULT_SETTINGS: DEFAULT_SETTINGS$1,
 			FilterListManager,
 			ProfileListManager,
 			socket,
@@ -9388,15 +9391,15 @@ var app = (function () {
 		});
 
 		$$self.$inject_state = $$props => {
-			if ('socket' in $$props) $$invalidate(14, socket = $$props.socket);
-			if ('newListName' in $$props) $$invalidate(1, newListName = $$props.newListName);
-			if ('newListIds' in $$props) $$invalidate(2, newListIds = $$props.newListIds);
-			if ('newListIsExclude' in $$props) $$invalidate(3, newListIsExclude = $$props.newListIsExclude);
-			if ('newListFilterType' in $$props) $$invalidate(4, newListFilterType = $$props.newListFilterType);
-			if ('selectedProfile' in $$props) $$invalidate(5, selectedProfile = $$props.selectedProfile);
+			if ('socket' in $$props) $$invalidate(15, socket = $$props.socket);
+			if ('newListName' in $$props) $$invalidate(2, newListName = $$props.newListName);
+			if ('newListIds' in $$props) $$invalidate(3, newListIds = $$props.newListIds);
+			if ('newListIsExclude' in $$props) $$invalidate(4, newListIsExclude = $$props.newListIsExclude);
+			if ('newListFilterType' in $$props) $$invalidate(5, newListFilterType = $$props.newListFilterType);
+			if ('selectedProfile' in $$props) $$invalidate(6, selectedProfile = $$props.selectedProfile);
 			if ('localProfiles' in $$props) $$invalidate(0, localProfiles = $$props.localProfiles);
 			if ('localFilterLists' in $$props) localFilterLists = $$props.localFilterLists;
-			if ('localSettings' in $$props) $$invalidate(6, localSettings = $$props.localSettings);
+			if ('localSettings' in $$props) $$invalidate(7, localSettings = $$props.localSettings);
 		};
 
 		if ($$props && "$$inject" in $$props) {
@@ -9404,11 +9407,11 @@ var app = (function () {
 		}
 
 		$$self.$$.update = () => {
-			if ($$self.$$.dirty[0] & /*$settings*/ 65536) {
-				$$invalidate(6, localSettings = $settings);
+			if ($$self.$$.dirty[0] & /*$settings*/ 2) {
+				$$invalidate(7, localSettings = $settings);
 			}
 
-			if ($$self.$$.dirty[0] & /*$filterLists*/ 32768) {
+			if ($$self.$$.dirty[0] & /*$filterLists*/ 65536) {
 				localFilterLists = $filterLists;
 			}
 
@@ -9425,6 +9428,7 @@ var app = (function () {
 
 		return [
 			localProfiles,
+			$settings,
 			newListName,
 			newListIds,
 			newListIsExclude,
@@ -9440,7 +9444,6 @@ var app = (function () {
 			fetchProfiles,
 			socket,
 			$filterLists,
-			$settings,
 			$profiles,
 			profilelistmanager_selectedProfile_binding,
 			input0_change_handler,
@@ -9543,7 +9546,7 @@ var app = (function () {
 	class SettingsManager extends SvelteComponentDev {
 		constructor(options) {
 			super(options);
-			init(this, options, instance$6, create_fragment$6, safe_not_equal, { socket: 14 }, null, [-1, -1, -1, -1]);
+			init(this, options, instance$6, create_fragment$6, safe_not_equal, { socket: 15 }, null, [-1, -1, -1, -1]);
 
 			dispatch_dev("SvelteRegisterComponent", {
 				component: this,
@@ -69371,15 +69374,15 @@ void main() {
 				if_block_anchor = empty$1();
 				attr_dev(button0, "class", "svelte-d6m7ck");
 				toggle_class(button0, "active", /*currentPage*/ ctx[3] === "kills");
-				add_location(button0, file, 84, 6, 2482);
+				add_location(button0, file, 84, 6, 2513);
 				attr_dev(button1, "class", "svelte-d6m7ck");
 				toggle_class(button1, "active", /*currentPage*/ ctx[3] === "battles");
-				add_location(button1, file, 90, 6, 2636);
+				add_location(button1, file, 90, 6, 2667);
 				attr_dev(button2, "class", "svelte-d6m7ck");
 				toggle_class(button2, "active", /*currentPage*/ ctx[3] === "camps");
-				add_location(button2, file, 96, 6, 2803);
+				add_location(button2, file, 96, 6, 2834);
 				attr_dev(div, "class", "nav-tabs svelte-d6m7ck");
-				add_location(div, file, 83, 4, 2452);
+				add_location(div, file, 83, 4, 2483);
 			},
 			m: function mount(target, anchor) {
 				insert_dev(target, div, anchor);
@@ -69631,12 +69634,12 @@ void main() {
 				button = element("button");
 				button.textContent = "Clear All Kills";
 				attr_dev(div0, "class", "settings-section svelte-d6m7ck");
-				add_location(div0, file, 106, 8, 3044);
-				add_location(button, file, 111, 10, 3249);
+				add_location(div0, file, 106, 8, 3075);
+				add_location(button, file, 111, 10, 3280);
 				attr_dev(div1, "class", "killmail-section svelte-d6m7ck");
-				add_location(div1, file, 109, 8, 3177);
+				add_location(div1, file, 109, 8, 3208);
 				attr_dev(div2, "class", "dashboard svelte-d6m7ck");
-				add_location(div2, file, 105, 6, 3011);
+				add_location(div2, file, 105, 6, 3042);
 			},
 			m: function mount(target, anchor) {
 				insert_dev(target, div2, anchor);
@@ -69714,7 +69717,7 @@ void main() {
 				main = element("main");
 				if_block.c();
 				attr_dev(main, "class", "svelte-d6m7ck");
-				add_location(main, file, 79, 0, 2372);
+				add_location(main, file, 79, 0, 2403);
 			},
 			l: function claim(nodes) {
 				throw new Error("options.hydrate only works if the component was compiled with the `hydratable: true` option");
@@ -69837,8 +69840,8 @@ void main() {
 				try {
 					console.log("App.svelte - Received initialData:", data);
 					const initializedSettings = initializeSettings(data.settings);
-					settings.set(initializedSettings);
-					killmails.set([]); // Start with empty array
+					settings.set(initializedSettings); // This will properly merge defaults with saved settings
+					killmails.set([]);
 					filterLists.set(data.filterLists || []);
 					profiles.set(data.profiles || []);
 					console.log("App.svelte - Stores initialized");

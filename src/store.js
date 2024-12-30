@@ -4,7 +4,7 @@ export const killmails = writable([]);
 export const filterLists = writable([]);
 export const profiles = writable([]);
 
-const DEFAULT_SETTINGS = {
+export const DEFAULT_SETTINGS = {
   dropped_value_enabled: false,
   total_value_enabled: false,
   points_enabled: false,
@@ -42,7 +42,7 @@ const DEFAULT_SETTINGS = {
     padding: false,
   },
 };
-export const settings = writable(DEFAULT_SETTINGS);
+export const settings = writable({ ...DEFAULT_SETTINGS }); // Initialize with defaults immediately
 export const filteredKillmails = derived(
   [killmails, settings, filterLists],
   ([$killmails, $settings, $filterLists]) => {
@@ -105,39 +105,26 @@ export const filteredKillmails = derived(
             match = ids.includes(killmail.killmail.solar_system_id?.toString());
             break;
           case "region": {
-            const celestialData = killmail.pinpoints?.celestialData;
-            if (!celestialData) return false;
+            const celestialData = killmail.pinpoints.celestialData;
 
-            // Debug log to verify data
-            // console.log("Region Filter - Comparing:", {
-            //   celestialRegionId: celestialData.regionid,
-            //   celestialRegionName: celestialData.regionname,
-            //   filterIds: ids,
-            // });
+            // Log to verify data
+            console.log("Region Filter - Comparing:", {
+              celestialRegionId: celestialData.regionid,
+              celestialRegionName: celestialData.regionname,
+              filterIds: ids,
+            });
 
             // Ensure ids is an array
             const idList = Array.isArray(ids) ? ids : [ids];
 
-            // Compare both ID and name, accounting for string/number conversion
+            // Match against both ID and name
             match = idList.some((id) => {
-              const matchesId =
-                celestialData.regionid.toString() === id.toString();
-              const matchesName =
+              return (
+                celestialData.regionid.toString() === id.toString() ||
                 celestialData.regionname.toLowerCase() ===
-                id.toString().toLowerCase();
-
-              // Debug log for each comparison
-              console.log("Comparing:", {
-                id,
-                matchesId,
-                matchesName,
-                celestialRegionId: celestialData.regionid,
-                celestialRegionName: celestialData.regionname,
-              });
-
-              return matchesId || matchesName;
+                  id.toString().toLowerCase()
+              );
             });
-
             break;
           }
           case "location_type":
@@ -203,23 +190,32 @@ export const filteredKillmails = derived(
 
       // Location Filter
       // Location Type Filter
-      if ($settings.location_type_filter_enabled && $settings.location_types) {
-        const selectedTypes = Object.entries(
-          $settings.location_types || {
-            highsec: false,
-            lowsec: false,
-            nullsec: false,
-            wspace: false,
-            abyssal: false,
+      // Location Type Filter
+      if ($settings.location_type_filter_enabled) {
+        const locationTypes = $settings.location_types || {
+          highsec: false,
+          lowsec: false,
+          nullsec: false,
+          wspace: false,
+          abyssal: false,
+        };
+
+        // Check if any location types are enabled
+        const hasEnabledTypes = Object.values(locationTypes).some(
+          (enabled) => enabled
+        );
+
+        // Only apply filter if at least one type is enabled
+        if (hasEnabledTypes) {
+          const selectedTypes = Object.entries($settings.location_types || {})
+            .filter(([_, enabled]) => enabled)
+            .map(([type, _]) => `loc:${type}`);
+
+          if (
+            !killmail.zkb.labels.some((label) => selectedTypes.includes(label))
+          ) {
+            return false;
           }
-        )
-          .filter(([_, enabled]) => enabled)
-          .map(([type, _]) => `loc:${type}`);
-        if (
-          selectedTypes.length > 0 &&
-          !killmail.zkb.labels.some((label) => selectedTypes.includes(label))
-        ) {
-          return false;
         }
       }
 
@@ -323,7 +319,7 @@ export const filteredKillmails = derived(
 
       // Location Type Filter
       if ($settings.location_type_filter_enabled) {
-        const selectedTypes = Object.entries(settings.location_types)
+        const selectedTypes = Object.entries($settings.location_types || {})
           .filter(([_, enabled]) => enabled)
           .map(([type, _]) => `loc:${type}`);
         if (
