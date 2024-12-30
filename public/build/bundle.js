@@ -65429,7 +65429,7 @@ void main() {
 	const { Error: Error_1$1, Object: Object_1, console: console_1$3 } = globals;
 	const file$5 = "src\\MapVisualization.svelte";
 
-	// (1114:20) 
+	// (1196:20) 
 	function create_if_block_6(ctx) {
 		let div;
 		let t;
@@ -65438,8 +65438,8 @@ void main() {
 			c: function create() {
 				div = element("div");
 				t = text(/*error*/ ctx[2]);
-				attr_dev(div, "class", "status-message error svelte-ur9yx9");
-				add_location(div, file$5, 1114, 6, 33315);
+				attr_dev(div, "class", "status-message error svelte-1f8v9si");
+				add_location(div, file$5, 1196, 6, 35851);
 			},
 			m: function mount(target, anchor) {
 				insert_dev(target, div, anchor);
@@ -65459,14 +65459,14 @@ void main() {
 			block,
 			id: create_if_block_6.name,
 			type: "if",
-			source: "(1114:20) ",
+			source: "(1196:20) ",
 			ctx
 		});
 
 		return block;
 	}
 
-	// (1112:4) {#if loading}
+	// (1194:4) {#if loading}
 	function create_if_block_5(ctx) {
 		let div;
 
@@ -65474,8 +65474,8 @@ void main() {
 			c: function create() {
 				div = element("div");
 				div.textContent = "Loading map...";
-				attr_dev(div, "class", "status-message svelte-ur9yx9");
-				add_location(div, file$5, 1112, 6, 33237);
+				attr_dev(div, "class", "status-message svelte-1f8v9si");
+				add_location(div, file$5, 1194, 6, 35773);
 			},
 			m: function mount(target, anchor) {
 				insert_dev(target, div, anchor);
@@ -65492,14 +65492,14 @@ void main() {
 			block,
 			id: create_if_block_5.name,
 			type: "if",
-			source: "(1112:4) {#if loading}",
+			source: "(1194:4) {#if loading}",
 			ctx
 		});
 
 		return block;
 	}
 
-	// (1120:4) {#if kill.pinpoints}
+	// (1202:4) {#if kill.pinpoints}
 	function create_if_block_4(ctx) {
 		let pre;
 		let t_value = JSON.stringify(/*kill*/ ctx[0].pinpoints, null, 2) + "";
@@ -65510,7 +65510,7 @@ void main() {
 				pre = element("pre");
 				t = text(t_value);
 				set_style(pre, "display", "none");
-				add_location(pre, file$5, 1120, 6, 33447);
+				add_location(pre, file$5, 1202, 6, 35983);
 			},
 			m: function mount(target, anchor) {
 				insert_dev(target, pre, anchor);
@@ -65530,14 +65530,14 @@ void main() {
 			block,
 			id: create_if_block_4.name,
 			type: "if",
-			source: "(1120:4) {#if kill.pinpoints}",
+			source: "(1202:4) {#if kill.pinpoints}",
 			ctx
 		});
 
 		return block;
 	}
 
-	// (1160:4) {:else}
+	// (1242:4) {:else}
 	function create_else_block$1(ctx) {
 		let p;
 
@@ -65545,8 +65545,8 @@ void main() {
 			c: function create() {
 				p = element("p");
 				p.textContent = "Wreck triangulation not possible";
-				attr_dev(p, "class", "svelte-ur9yx9");
-				add_location(p, file$5, 1160, 6, 35004);
+				attr_dev(p, "class", "svelte-1f8v9si");
+				add_location(p, file$5, 1242, 6, 37540);
 			},
 			m: function mount(target, anchor) {
 				insert_dev(target, p, anchor);
@@ -65563,14 +65563,14 @@ void main() {
 			block,
 			id: create_else_block$1.name,
 			type: "else",
-			source: "(1160:4) {:else}",
+			source: "(1242:4) {:else}",
 			ctx
 		});
 
 		return block;
 	}
 
-	// (1154:88) 
+	// (1236:88) 
 	function create_if_block_3(ctx) {
 		let p;
 		let t0;
@@ -65589,8 +65589,8 @@ void main() {
 				t2 = text(" (");
 				t3 = text(t3_value);
 				t4 = text(" km)");
-				attr_dev(p, "class", "svelte-ur9yx9");
-				add_location(p, file$5, 1154, 6, 34811);
+				attr_dev(p, "class", "svelte-1f8v9si");
+				add_location(p, file$5, 1236, 6, 37347);
 			},
 			m: function mount(target, anchor) {
 				insert_dev(target, p, anchor);
@@ -65615,14 +65615,14 @@ void main() {
 			block,
 			id: create_if_block_3.name,
 			type: "if",
-			source: "(1154:88) ",
+			source: "(1236:88) ",
 			ctx
 		});
 
 		return block;
 	}
 
-	// (1133:82) 
+	// (1215:82) 
 	function create_if_block_2$2(ctx) {
 		let p0;
 		let t0;
@@ -65689,14 +65689,14 @@ void main() {
 				t20 = text(" (");
 				t21 = text(t21_value);
 				t22 = text(" km)");
-				attr_dev(p0, "class", "svelte-ur9yx9");
-				add_location(p0, file$5, 1133, 6, 34085);
-				attr_dev(p1, "class", "svelte-ur9yx9");
-				add_location(p1, file$5, 1138, 6, 34244);
-				attr_dev(p2, "class", "svelte-ur9yx9");
-				add_location(p2, file$5, 1143, 6, 34403);
-				attr_dev(p3, "class", "svelte-ur9yx9");
-				add_location(p3, file$5, 1148, 6, 34562);
+				attr_dev(p0, "class", "svelte-1f8v9si");
+				add_location(p0, file$5, 1215, 6, 36621);
+				attr_dev(p1, "class", "svelte-1f8v9si");
+				add_location(p1, file$5, 1220, 6, 36780);
+				attr_dev(p2, "class", "svelte-1f8v9si");
+				add_location(p2, file$5, 1225, 6, 36939);
+				attr_dev(p3, "class", "svelte-1f8v9si");
+				add_location(p3, file$5, 1230, 6, 37098);
 			},
 			m: function mount(target, anchor) {
 				insert_dev(target, p0, anchor);
@@ -65754,14 +65754,14 @@ void main() {
 			block,
 			id: create_if_block_2$2.name,
 			type: "if",
-			source: "(1133:82) ",
+			source: "(1215:82) ",
 			ctx
 		});
 
 		return block;
 	}
 
-	// (1127:88) 
+	// (1209:88) 
 	function create_if_block_1$3(ctx) {
 		let p;
 		let t0;
@@ -65780,8 +65780,8 @@ void main() {
 				t2 = text(" (");
 				t3 = text(t3_value);
 				t4 = text(" km)");
-				attr_dev(p, "class", "svelte-ur9yx9");
-				add_location(p, file$5, 1127, 6, 33824);
+				attr_dev(p, "class", "svelte-1f8v9si");
+				add_location(p, file$5, 1209, 6, 36360);
 			},
 			m: function mount(target, anchor) {
 				insert_dev(target, p, anchor);
@@ -65806,14 +65806,14 @@ void main() {
 			block,
 			id: create_if_block_1$3.name,
 			type: "if",
-			source: "(1127:88) ",
+			source: "(1209:88) ",
 			ctx
 		});
 
 		return block;
 	}
 
-	// (1125:4) {#if kill.pinpoints?.atCelestial}
+	// (1207:4) {#if kill.pinpoints?.atCelestial}
 	function create_if_block$4(ctx) {
 		let p;
 		let t0;
@@ -65825,8 +65825,8 @@ void main() {
 				p = element("p");
 				t0 = text("At celestial: ");
 				t1 = text(t1_value);
-				attr_dev(p, "class", "svelte-ur9yx9");
-				add_location(p, file$5, 1125, 6, 33667);
+				attr_dev(p, "class", "svelte-1f8v9si");
+				add_location(p, file$5, 1207, 6, 36203);
 			},
 			m: function mount(target, anchor) {
 				insert_dev(target, p, anchor);
@@ -65847,7 +65847,7 @@ void main() {
 			block,
 			id: create_if_block$4.name,
 			type: "if",
-			source: "(1125:4) {#if kill.pinpoints?.atCelestial}",
+			source: "(1207:4) {#if kill.pinpoints?.atCelestial}",
 			ctx
 		});
 
@@ -65921,22 +65921,22 @@ void main() {
 				t10 = text(/*closestCelestial*/ ctx[5]);
 				t11 = space();
 				if_block2.c();
-				attr_dev(button0, "class", "focus-sun svelte-ur9yx9");
-				add_location(button0, file$5, 1096, 4, 32760);
-				attr_dev(button1, "class", "focus-kill svelte-ur9yx9");
-				add_location(button1, file$5, 1097, 4, 32832);
-				attr_dev(div0, "class", "controls svelte-ur9yx9");
-				add_location(div0, file$5, 1095, 2, 32732);
-				attr_dev(div1, "class", "map-container svelte-ur9yx9");
-				add_location(div1, file$5, 1110, 2, 33161);
-				attr_dev(p0, "class", "svelte-ur9yx9");
-				add_location(p0, file$5, 1122, 4, 33538);
-				attr_dev(p1, "class", "svelte-ur9yx9");
-				add_location(p1, file$5, 1123, 4, 33576);
-				attr_dev(div2, "class", "info-panel svelte-ur9yx9");
-				add_location(div2, file$5, 1118, 2, 33389);
-				attr_dev(div3, "class", "visualization-container svelte-ur9yx9");
-				add_location(div3, file$5, 1094, 0, 32691);
+				attr_dev(button0, "class", "focus-sun svelte-1f8v9si");
+				add_location(button0, file$5, 1178, 4, 35296);
+				attr_dev(button1, "class", "focus-kill svelte-1f8v9si");
+				add_location(button1, file$5, 1179, 4, 35368);
+				attr_dev(div0, "class", "controls svelte-1f8v9si");
+				add_location(div0, file$5, 1177, 2, 35268);
+				attr_dev(div1, "class", "map-container svelte-1f8v9si");
+				add_location(div1, file$5, 1192, 2, 35697);
+				attr_dev(p0, "class", "svelte-1f8v9si");
+				add_location(p0, file$5, 1204, 4, 36074);
+				attr_dev(p1, "class", "svelte-1f8v9si");
+				add_location(p1, file$5, 1205, 4, 36112);
+				attr_dev(div2, "class", "info-panel svelte-1f8v9si");
+				add_location(div2, file$5, 1200, 2, 35925);
+				attr_dev(div3, "class", "visualization-container svelte-1f8v9si");
+				add_location(div3, file$5, 1176, 0, 35227);
 			},
 			l: function claim(nodes) {
 				throw new Error_1$1("options.hydrate only works if the component was compiled with the `hydratable: true` option");
@@ -66094,45 +66094,6 @@ void main() {
 	function getRomanNumeralGroup(name) {
 		const match = name?.match(/ ([IVX]+)( -|$)/);
 		return match ? match[1] : null;
-	}
-
-	function createDirectionalGUI() {
-		const guiContainer = document.createElement("div");
-
-		// Apply container styles
-		Object.assign(guiContainer.style, {
-			position: "absolute",
-			top: "20px",
-			right: "20px",
-			background: "rgba(0, 0, 0, 0.7)",
-			padding: "10px",
-			borderRadius: "5px",
-			display: "grid",
-			gridTemplateColumns: "repeat(2, 1fr)",
-			gap: "5px",
-			zIndex: "1000"
-		});
-
-		const directions = ["N", "S", "E", "W", "Up", "Down"];
-
-		directions.forEach(direction => {
-			const arrow = document.createElement("div");
-
-			// Apply arrow styles
-			Object.assign(arrow.style, {
-				color: "white",
-				padding: "5px 10px",
-				textAlign: "center",
-				cursor: "pointer",
-				fontFamily: "monospace"
-			});
-
-			arrow.className = `direction-${direction.toLowerCase()}`;
-			arrow.textContent = direction;
-			guiContainer.appendChild(arrow);
-		});
-
-		return guiContainer;
 	}
 
 	// Add new formatter function
@@ -66474,6 +66435,7 @@ void main() {
 				});
 			}
 
+			sunBrightnessAnimation();
 			controls.update();
 			renderer.render(scene, camera);
 		}
@@ -66567,47 +66529,79 @@ void main() {
 			}
 		}
 
+		let zoomLevel = 50; // Initial zoom level (0-100)
 		let directionIndicator;
 
 		function initDirectionalGUI() {
-			directionIndicator = createDirectionalGUI();
-			document.body.appendChild(directionIndicator);
-			updateDirectionalGUI();
+			const container = document.createElement("div");
+
+			Object.assign(container.style, {
+				position: "absolute",
+				bottom: "120px",
+				right: "5px",
+				background: "rgba(0, 0, 0, 0.7)",
+				padding: "10px",
+				borderRadius: "5px",
+				display: "flex",
+				flexDirection: "column",
+				gap: "10px",
+				zIndex: "1000"
+			});
+
+			const zoomIn = document.createElement("button");
+			const zoomOut = document.createElement("button");
+			zoomIn.textContent = "+";
+			zoomOut.textContent = "-";
+			zoomIn.onclick = () => smoothZoom(Math.max(0, zoomLevel - 10));
+			zoomOut.onclick = () => smoothZoom(Math.min(100, zoomLevel + 10));
+
+			[zoomIn, zoomOut].forEach(btn => {
+				Object.assign(btn.style, {
+					width: "30px",
+					height: "30px",
+					background: "rgba(255, 255, 255, 0.2)",
+					border: "none",
+					color: "white",
+					fontSize: "20px",
+					cursor: "pointer",
+					borderRadius: "4px"
+				});
+			});
+
+			container.append(zoomIn, zoomOut);
+			document.querySelector(".map-container").appendChild(container);
+			directionIndicator = container;
 		}
 
-		function updateDirectionalGUI() {
-			if (!directionIndicator) return;
+		function smoothZoom(targetLevel) {
+			if (!camera || !controls) return;
+			const startLevel = zoomLevel;
+			const duration = 300; // ms
+			const startTime = performance.now();
 
-			// Find sun position from objects
-			const sunObject = Array.from(objectsWithLabels.entries()).find(([_, data]) => data.type === "sun");
+			function animateZoom(currentTime) {
+				const elapsed = currentTime - startTime;
+				const progress = Math.min(elapsed / duration, 1);
 
-			if (!sunObject) return;
-			const starPosition = sunObject[0].position;
-			if (!starPosition) return;
-			const cameraDirection = new Vector3();
-			camera.getWorldDirection(cameraDirection);
-			const cameraUp = camera.up;
-			const cameraRight = new Vector3().crossVectors(cameraDirection, cameraUp);
+				// Smooth easing
+				const easedProgress = 1 - Math.pow(1 - progress, 3);
 
-			// Calculate direction vectors
-			const directionVectors = {
-				north: cameraRight,
-				south: cameraRight.clone().negate(),
-				east: cameraDirection.clone().cross(cameraUp),
-				west: cameraDirection.clone().cross(cameraUp).negate(),
-				up: cameraUp,
-				down: cameraUp.clone().negate()
-			};
+				zoomLevel = startLevel + (targetLevel - startLevel) * easedProgress;
+				const minZoom = 0.000001;
+				const maxZoom = 1000000;
+				const logZoom = Math.pow(10, Math.log10(minZoom) + zoomLevel / 100 * (Math.log10(maxZoom) - Math.log10(minZoom)));
+				const currentTarget = controls.target.clone();
+				const cameraDirection = camera.position.clone().sub(currentTarget).normalize();
+				const newCameraPosition = currentTarget.clone().add(cameraDirection.multiplyScalar(logZoom));
+				camera.position.copy(newCameraPosition);
+				controls.update();
 
-			// Update arrow opacities
-			Object.entries(directionVectors).forEach(([dir, vector]) => {
-				const arrow = directionIndicator.querySelector(`.direction-arrow.${dir}`);
-				if (!arrow) return;
-				const dirToStar = starPosition.clone().sub(camera.position).normalize();
-				const angle = vector.angleTo(dirToStar);
-				const opacity = Math.max(0.2, 1 - angle / Math.PI);
-				arrow.style.opacity = opacity;
-			});
+				if (progress < 1) {
+					requestAnimationFrame(animateZoom);
+				}
+			}
+
+			requestAnimationFrame(animateZoom);
 		}
 
 		// function findClosestCelestial(celestials, killPosition) {
@@ -66675,18 +66669,90 @@ void main() {
 					position: sphere.position.clone()
 				});
 			} else if (typeName.includes("Sun")) {
-				const geometry = new SphereGeometry(SIZES.SUN.radius);
+				const coronaGeometry = new Object3D();
+				const coronaSize = SIZES.SUN.radius * 8;
+				const points = [];
+				const numPoints = 32;
+				const phi = Math.PI * (3 - Math.sqrt(5));
 
-				const material = new MeshPhongMaterial({
-						color: 0xffff00,
-						emissive: 0xffff00,
-						emissiveIntensity: 0.5,
-						shininess: 100
+				for (let i = 0; i < numPoints; i++) {
+					const y = 1 - i / (numPoints - 1) * 2;
+					const radius = Math.sqrt(1 - y * y);
+					const theta = phi * i;
+
+					points.push({
+						x: Math.cos(theta) * radius,
+						y,
+						z: Math.sin(theta) * radius
+					});
+				}
+
+				points.forEach((point, i) => {
+					const plane = new PlaneGeometry(coronaSize, coronaSize);
+
+					const coronaMaterial = new ShaderMaterial({
+							uniforms: { time: { value: 0 }, seed: { value: i } },
+							vertexShader: `
+       varying vec2 vUv;
+       void main() {
+         vUv = uv;
+         gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+       }
+     `,
+							fragmentShader: `
+       uniform float time;
+       uniform float seed;
+       varying vec2 vUv;
+       
+       float noise(vec2 p) {
+         return fract(sin(dot(p, vec2(12.9898 + seed, 78.233))) * 43758.5453);
+       }
+       
+       void main() {
+         vec2 uvc = vUv - 0.5;
+         float dist = length(uvc);
+         float n = noise(uvc + time * 0.1);
+         float alpha = smoothstep(0.5, 0.0, dist);
+         alpha *= 0.5 * (1.0 + 0.2 * sin(time * 0.2 + dist * 3.0 + n * 2.0));
+         vec3 color = mix(vec3(1.0, 1.0, 0.8), vec3(1.0, 0.6, 0.1), dist * 1.5 + n * 0.2);
+         gl_FragColor = vec4(color, alpha);
+       }
+     `,
+							transparent: true,
+							depthWrite: false,
+							blending: AdditiveBlending,
+							side: DoubleSide
+						});
+
+					const coronaMesh = new Mesh(plane, coronaMaterial);
+					coronaMesh.lookAt(new Vector3(point.x, point.y, point.z));
+					coronaGeometry.add(coronaMesh);
+				});
+
+				coronaGeometry.position.copy(position);
+				const light = new PointLight(0xffff66, 3, SIZES.SUN.radius * 20);
+				light.position.copy(position);
+
+				const animateSun = () => {
+					light.intensity = 2.8 + Math.sin(Date.now() * 0.0002) * 0.3;
+
+					coronaGeometry.children.forEach(plane => {
+						plane.material.uniforms.time.value += 0.016;
 					});
 
-				const sphere = new Mesh(geometry, material);
-				sphere.position.copy(position);
-				group.add(sphere);
+					coronaGeometry.rotation.y += 0.0005;
+					coronaGeometry.rotation.x += 0.0003;
+				};
+
+				const originalAnimate = animate;
+
+				animate = () => {
+					originalAnimate();
+					animateSun();
+				};
+
+				group.add(coronaGeometry);
+				group.add(light);
 				const sprite = createLocationSprite(position, "sun", celestialData.itemname);
 				group.add(sprite);
 
@@ -66908,6 +66974,14 @@ void main() {
 			$$invalidate(3, loading = false);
 		}
 
+		const sunBrightnessAnimation = () => {
+			scene.traverse(object => {
+				if (object.material?.emissive) {
+					object.material.emissiveIntensity = 0.5 + Math.sin(Date.now() * 0.001) * 0.2;
+				}
+			});
+		};
+
 		function handleResize() {
 			if (camera && renderer && container) {
 				camera.aspect = container.clientWidth / container.clientHeight;
@@ -67083,14 +67157,15 @@ void main() {
 			updateInfoPanel,
 			getRomanNumeralGroup,
 			focusOnSun,
+			zoomLevel,
 			directionIndicator,
 			initDirectionalGUI,
-			createDirectionalGUI,
-			updateDirectionalGUI,
+			smoothZoom,
 			findClosestCelestial,
 			formatDistance,
 			createCelestialObject,
 			initVisualization,
+			sunBrightnessAnimation,
 			handleResize,
 			onClick
 		});
@@ -67118,6 +67193,7 @@ void main() {
 			if ('cameraTarget' in $$props) cameraTarget = $$props.cameraTarget;
 			if ('lastCameraPosition' in $$props) lastCameraPosition = $$props.lastCameraPosition;
 			if ('allCelestialData' in $$props) allCelestialData = $$props.allCelestialData;
+			if ('zoomLevel' in $$props) zoomLevel = $$props.zoomLevel;
 			if ('directionIndicator' in $$props) directionIndicator = $$props.directionIndicator;
 		};
 

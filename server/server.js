@@ -867,12 +867,18 @@ io.on("connection", (socket) => {
   socket.on(
     "updateFilterList",
     ({ id, name, ids, enabled, is_exclude, filter_type }) => {
-      console.log("Updating filter list with filter_type:", filter_type); // Add this log
+      // Ensure ids is properly processed
+      const processedIds = Array.isArray(ids)
+        ? ids
+        : typeof ids === "string"
+        ? JSON.parse(ids)
+        : ids;
+
       db.run(
         "UPDATE filter_lists SET name = ?, ids = ?, enabled = ?, is_exclude = ?, filter_type = ? WHERE id = ?",
         [
           name,
-          JSON.stringify(ids),
+          JSON.stringify(processedIds), // Use processed ids
           enabled ? 1 : 0,
           is_exclude ? 1 : 0,
           filter_type,
@@ -885,7 +891,7 @@ io.on("connection", (socket) => {
             console.log("Updated filter list:", {
               id,
               name,
-              ids,
+              ids: processedIds,
               enabled,
               is_exclude,
               filter_type,
@@ -893,7 +899,7 @@ io.on("connection", (socket) => {
             socket.emit("filterListUpdated", {
               id,
               name,
-              ids,
+              ids: processedIds,
               enabled,
               is_exclude,
               filter_type,

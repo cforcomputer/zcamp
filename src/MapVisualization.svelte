@@ -424,6 +424,7 @@
       });
     }
 
+    sunBrightnessAnimation();
     controls.update();
     renderer.render(scene, camera);
   }
@@ -539,94 +540,92 @@
     }
   }
 
+  let zoomLevel = 50; // Initial zoom level (0-100)
   let directionIndicator;
 
   function initDirectionalGUI() {
-    directionIndicator = createDirectionalGUI();
-    document.body.appendChild(directionIndicator);
-    updateDirectionalGUI();
-  }
-
-  function createDirectionalGUI() {
-    const guiContainer = document.createElement("div");
-
-    // Apply container styles
-    Object.assign(guiContainer.style, {
+    const container = document.createElement("div");
+    Object.assign(container.style, {
       position: "absolute",
-      top: "20px",
-      right: "20px",
+      bottom: "120px",
+      right: "5px",
       background: "rgba(0, 0, 0, 0.7)",
       padding: "10px",
       borderRadius: "5px",
-      display: "grid",
-      gridTemplateColumns: "repeat(2, 1fr)",
-      gap: "5px",
+      display: "flex",
+      flexDirection: "column",
+      gap: "10px",
       zIndex: "1000",
     });
 
-    const directions = ["N", "S", "E", "W", "Up", "Down"];
+    const zoomIn = document.createElement("button");
+    const zoomOut = document.createElement("button");
 
-    directions.forEach((direction) => {
-      const arrow = document.createElement("div");
+    zoomIn.textContent = "+";
+    zoomOut.textContent = "-";
 
-      // Apply arrow styles
-      Object.assign(arrow.style, {
+    zoomIn.onclick = () => smoothZoom(Math.max(0, zoomLevel - 10));
+    zoomOut.onclick = () => smoothZoom(Math.min(100, zoomLevel + 10));
+
+    [zoomIn, zoomOut].forEach((btn) => {
+      Object.assign(btn.style, {
+        width: "30px",
+        height: "30px",
+        background: "rgba(255, 255, 255, 0.2)",
+        border: "none",
         color: "white",
-        padding: "5px 10px",
-        textAlign: "center",
+        fontSize: "20px",
         cursor: "pointer",
-        fontFamily: "monospace",
+        borderRadius: "4px",
       });
-
-      arrow.className = `direction-${direction.toLowerCase()}`;
-      arrow.textContent = direction;
-      guiContainer.appendChild(arrow);
     });
 
-    return guiContainer;
+    container.append(zoomIn, zoomOut);
+    document.querySelector(".map-container").appendChild(container);
+    directionIndicator = container;
   }
 
-  function updateDirectionalGUI() {
-    if (!directionIndicator) return;
+  function smoothZoom(targetLevel) {
+    if (!camera || !controls) return;
 
-    // Find sun position from objects
-    const sunObject = Array.from(objectsWithLabels.entries()).find(
-      ([_, data]) => data.type === "sun"
-    );
-    if (!sunObject) return;
+    const startLevel = zoomLevel;
+    const duration = 300; // ms
+    const startTime = performance.now();
 
-    const starPosition = sunObject[0].position;
-    if (!starPosition) return;
+    function animateZoom(currentTime) {
+      const elapsed = currentTime - startTime;
+      const progress = Math.min(elapsed / duration, 1);
 
-    const cameraDirection = new THREE.Vector3();
-    camera.getWorldDirection(cameraDirection);
-    const cameraUp = camera.up;
-    const cameraRight = new THREE.Vector3().crossVectors(
-      cameraDirection,
-      cameraUp
-    );
+      // Smooth easing
+      const easedProgress = 1 - Math.pow(1 - progress, 3);
+      zoomLevel = startLevel + (targetLevel - startLevel) * easedProgress;
 
-    // Calculate direction vectors
-    const directionVectors = {
-      north: cameraRight,
-      south: cameraRight.clone().negate(),
-      east: cameraDirection.clone().cross(cameraUp),
-      west: cameraDirection.clone().cross(cameraUp).negate(),
-      up: cameraUp,
-      down: cameraUp.clone().negate(),
-    };
+      const minZoom = 0.000001;
+      const maxZoom = 1000000;
+      const logZoom = Math.pow(
+        10,
+        Math.log10(minZoom) +
+          (zoomLevel / 100) * (Math.log10(maxZoom) - Math.log10(minZoom))
+      );
 
-    // Update arrow opacities
-    Object.entries(directionVectors).forEach(([dir, vector]) => {
-      const arrow = directionIndicator.querySelector(`.direction-arrow.${dir}`);
-      if (!arrow) return;
+      const currentTarget = controls.target.clone();
+      const cameraDirection = camera.position
+        .clone()
+        .sub(currentTarget)
+        .normalize();
+      const newCameraPosition = currentTarget
+        .clone()
+        .add(cameraDirection.multiplyScalar(logZoom));
 
-      const dirToStar = starPosition.clone().sub(camera.position).normalize();
-      const angle = vector.angleTo(dirToStar);
-      const opacity = Math.max(0.2, 1 - angle / Math.PI);
+      camera.position.copy(newCameraPosition);
+      controls.update();
 
-      arrow.style.opacity = opacity;
-    });
+      if (progress < 1) {
+        requestAnimationFrame(animateZoom);
+      }
+    }
+
+    requestAnimationFrame(animateZoom);
   }
 
   // function findClosestCelestial(celestials, killPosition) {
@@ -711,16 +710,90 @@
         position: sphere.position.clone(),
       });
     } else if (typeName.includes("Sun")) {
-      const geometry = new THREE.SphereGeometry(SIZES.SUN.radius);
-      const material = new THREE.MeshPhongMaterial({
-        color: 0xffff00,
-        emissive: 0xffff00,
-        emissiveIntensity: 0.5,
-        shininess: 100,
+      const coronaGeometry = new THREE.Object3D();
+      const coronaSize = SIZES.SUN.radius * 8;
+
+      const points = [];
+      const numPoints = 32;
+      const phi = Math.PI * (3 - Math.sqrt(5));
+
+      for (let i = 0; i < numPoints; i++) {
+        const y = 1 - (i / (numPoints - 1)) * 2;
+        const radius = Math.sqrt(1 - y * y);
+        const theta = phi * i;
+        points.push({
+          x: Math.cos(theta) * radius,
+          y: y,
+          z: Math.sin(theta) * radius,
+        });
+      }
+
+      points.forEach((point, i) => {
+        const plane = new THREE.PlaneGeometry(coronaSize, coronaSize);
+        const coronaMaterial = new THREE.ShaderMaterial({
+          uniforms: {
+            time: { value: 0 },
+            seed: { value: i },
+          },
+          vertexShader: `
+       varying vec2 vUv;
+       void main() {
+         vUv = uv;
+         gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+       }
+     `,
+          fragmentShader: `
+       uniform float time;
+       uniform float seed;
+       varying vec2 vUv;
+       
+       float noise(vec2 p) {
+         return fract(sin(dot(p, vec2(12.9898 + seed, 78.233))) * 43758.5453);
+       }
+       
+       void main() {
+         vec2 uvc = vUv - 0.5;
+         float dist = length(uvc);
+         float n = noise(uvc + time * 0.1);
+         float alpha = smoothstep(0.5, 0.0, dist);
+         alpha *= 0.5 * (1.0 + 0.2 * sin(time * 0.2 + dist * 3.0 + n * 2.0));
+         vec3 color = mix(vec3(1.0, 1.0, 0.8), vec3(1.0, 0.6, 0.1), dist * 1.5 + n * 0.2);
+         gl_FragColor = vec4(color, alpha);
+       }
+     `,
+          transparent: true,
+          depthWrite: false,
+          blending: THREE.AdditiveBlending,
+          side: THREE.DoubleSide,
+        });
+
+        const coronaMesh = new THREE.Mesh(plane, coronaMaterial);
+        coronaMesh.lookAt(new THREE.Vector3(point.x, point.y, point.z));
+        coronaGeometry.add(coronaMesh);
       });
-      const sphere = new THREE.Mesh(geometry, material);
-      sphere.position.copy(position);
-      group.add(sphere);
+
+      coronaGeometry.position.copy(position);
+
+      const light = new THREE.PointLight(0xffff66, 3, SIZES.SUN.radius * 20);
+      light.position.copy(position);
+
+      const animateSun = () => {
+        light.intensity = 2.8 + Math.sin(Date.now() * 0.0002) * 0.3;
+        coronaGeometry.children.forEach((plane) => {
+          plane.material.uniforms.time.value += 0.016;
+        });
+        coronaGeometry.rotation.y += 0.0005;
+        coronaGeometry.rotation.x += 0.0003;
+      };
+
+      const originalAnimate = animate;
+      animate = () => {
+        originalAnimate();
+        animateSun();
+      };
+
+      group.add(coronaGeometry);
+      group.add(light);
 
       const sprite = createLocationSprite(
         position,
@@ -998,6 +1071,15 @@
     loading = false;
   }
 
+  const sunBrightnessAnimation = () => {
+    scene.traverse((object) => {
+      if (object.material?.emissive) {
+        object.material.emissiveIntensity =
+          0.5 + Math.sin(Date.now() * 0.001) * 0.2;
+      }
+    });
+  };
+
   function handleResize() {
     if (camera && renderer && container) {
       camera.aspect = container.clientWidth / container.clientHeight;
@@ -1168,6 +1250,7 @@
     position: relative;
     width: 100%;
     height: 100%;
+    overflow: hidden;
   }
 
   .map-container {
