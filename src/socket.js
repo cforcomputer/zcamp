@@ -1,18 +1,22 @@
 import { io } from "socket.io-client";
 import { get } from "svelte/store";
-import { addKillmailToBattles } from "./battleStore";
-import { addKillmailToCamps } from "./campStore";
+import { addKillmailToBattles } from "./battleStore.js";
+// import { addKillmailToCamps } from "../server/campStore.js";
 import {
   killmails,
   settings,
   filterLists,
   profiles,
-  addFilterList,
   filteredKillmails,
-} from "./store";
+} from "./store.js";
 
 const socket = io("http://localhost:3000");
-let audio = new Audio("audio_files/alert.wav");
+
+let audio;
+
+if (typeof Audio !== "undefined") {
+  audio = new Audio("audio_files/alert.wav");
+}
 
 socket.on("newKillmail", (killmail) => {
   console.log("Socket.js - Processing killmail:", killmail.killID);
@@ -38,7 +42,7 @@ socket.on("newKillmail", (killmail) => {
 
     // Process for battles and camps
     addKillmailToBattles(killmail);
-    addKillmailToCamps(killmail);
+    // addKillmailToCamps(killmail);
 
     // Add new killmail and sort chronologically
     const updatedKillmails = [...existingKillmails, killmail].sort((a, b) => {

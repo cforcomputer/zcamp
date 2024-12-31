@@ -24,8 +24,11 @@ export const DEFAULT_SETTINGS = {
   item_type_filter_enabled: false,
   triangulation_filter_enabled: false,
   triangulation_filter_exclude: false,
+  triangulation_filter_near_stargate: false,
+  triangulation_filter_near_celestial: false,
   webhook_enabled: false,
   webhook_url: "",
+
   // location type/new filters
   location_type_filter_enabled: false,
   location_types: {
@@ -49,12 +52,29 @@ export const filteredKillmails = derived(
     const filtered = $killmails.filter((killmail) => {
       // Triangulation Filter check
       if ($settings.triangulation_filter_enabled) {
-        const isTriangulatable =
-          killmail?.pinpoints?.triangulationPossible || false;
+        const pinpoints = killmail?.pinpoints;
+
+        // Filter out "near stargate" kills
+        if (
+          $settings.triangulation_filter_near_stargate &&
+          pinpoints?.nearestCelestial?.name?.toLowerCase().includes("stargate")
+        ) {
+          return false;
+        }
+
+        // Filter out "near celestial" AND "at celestial" kills
+        if (
+          $settings.triangulation_filter_near_celestial &&
+          (pinpoints?.atCelestial || pinpoints?.nearestCelestial)
+        ) {
+          return false;
+        }
+
+        // Existing triangulation exclude logic
         if ($settings.triangulation_filter_exclude) {
-          if (isTriangulatable) return false;
+          if (pinpoints?.triangulationPossible) return false;
         } else {
-          if (!isTriangulatable) return false;
+          if (!pinpoints?.triangulationPossible) return false;
         }
       }
 

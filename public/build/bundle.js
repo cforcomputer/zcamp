@@ -5580,225 +5580,6 @@ var app = (function () {
 	  }
 	);
 
-	const activeCamps = writable([]);
-
-	const CAMP_TIMEOUT = 60 * 60 * 1000; // 1 hour in milliseconds
-	const CAPSULE_ID = 670;
-
-	const PERMANENTLY_CAMPED_SYSTEMS = new Set([
-	  30002813, 30005196, 30002718, 30002647,
-	]);
-
-	function isStargate(name) {
-	  if (!name) return false;
-	  return (
-	    name.toLowerCase().includes("stargate") ||
-	    name.toLowerCase().includes("gate to") ||
-	    name.toLowerCase().includes("jump gate")
-	  );
-	}
-
-	function calculateCampProbability(kills, systemId) {
-	  let probability = 0;
-	  const now = new Date().getTime();
-	  const lastKillTime = new Date(
-	    kills[kills.length - 1].killmail.killmail_time
-	  ).getTime();
-	  const timeSinceLastKill = now - lastKillTime;
-
-	  if (kills.every((k) => k.zkb.npc)) return 0;
-
-	  const nonCapsuleKills = kills.filter(
-	    (k) => k.killmail.victim.ship_type_id !== CAPSULE_ID
-	  );
-	  if (nonCapsuleKills.length < 2) return 0;
-
-	  if (PERMANENTLY_CAMPED_SYSTEMS.has(systemId)) {
-	    if (timeSinceLastKill <= 45 * 60 * 1000) {
-	      return 100;
-	    }
-	    return 30;
-	  }
-
-	  // Check for industrial victims
-	  const hasIndustrialVictims = kills.some(
-	    (kill) => kill.shipCategories?.victim === "industrial"
-	  );
-	  if (hasIndustrialVictims) {
-	    probability += 20;
-	  }
-
-	  // Check for capital victims
-	  const hasCapitalVictims = kills.some(
-	    (kill) => kill.shipCategories?.victim === "capital"
-	  );
-	  if (hasCapitalVictims) {
-	    probability += 30;
-	  }
-
-	  // Analyze attacker compositions
-	  kills.forEach((kill) => {
-	    const attackerCategories = kill.shipCategories?.attackers || [];
-
-	    // Check for capital support
-	    const hasCapitalSupport = attackerCategories.some(
-	      (attacker) => attacker.category === "capital"
-	    );
-	    if (hasCapitalSupport) {
-	      probability += 25;
-	    }
-
-	    // Check for combat ship concentration
-	    const combatShips = attackerCategories.filter(
-	      (attacker) => attacker.category === "combat"
-	    );
-	    if (combatShips.length >= 3) {
-	      probability += 15;
-	    }
-	  });
-
-	  // Time-based probability adjustment
-	  if (probability >= 60) {
-	    if (timeSinceLastKill > 40 * 60 * 1000) {
-	      const decayFactor = Math.min(
-	        1,
-	        (timeSinceLastKill - 40 * 60 * 1000) / (20 * 60 * 1000)
-	      );
-	      probability = Math.max(30, probability * (1 - decayFactor));
-	    }
-	  }
-
-	  // Check for shared attackers
-	  const attackerOverlap = getAttackerOverlap(kills);
-	  if (attackerOverlap.characters > 0) probability += 30;
-	  else if (attackerOverlap.corporations > 0) probability += 20;
-	  else if (attackerOverlap.alliances > 0) probability += 10;
-
-	  return Math.min(100, Math.max(0, probability));
-	}
-
-	function getAttackerOverlap(kills) {
-	  const overlap = {
-	    characters: 0,
-	    corporations: 0,
-	    alliances: 0,
-	  };
-
-	  const firstKillAttackers = {
-	    characters: new Set(
-	      kills[0].killmail.attackers.map((a) => a.character_id).filter(Boolean)
-	    ),
-	    corporations: new Set(
-	      kills[0].killmail.attackers.map((a) => a.corporation_id).filter(Boolean)
-	    ),
-	    alliances: new Set(
-	      kills[0].killmail.attackers.map((a) => a.alliance_id).filter(Boolean)
-	    ),
-	  };
-
-	  for (let i = 1; i < kills.length; i++) {
-	    kills[i].killmail.attackers.forEach((attacker) => {
-	      if (
-	        attacker.character_id &&
-	        firstKillAttackers.characters.has(attacker.character_id)
-	      ) {
-	        overlap.characters++;
-	      }
-	      if (
-	        attacker.corporation_id &&
-	        firstKillAttackers.corporations.has(attacker.corporation_id)
-	      ) {
-	        overlap.corporations++;
-	      }
-	      if (
-	        attacker.alliance_id &&
-	        firstKillAttackers.alliances.has(attacker.alliance_id)
-	      ) {
-	        overlap.alliances++;
-	      }
-	    });
-	  }
-
-	  return overlap;
-	}
-
-	function getAttackerIds(attackers) {
-	  return {
-	    character_ids: new Set(
-	      attackers.map((a) => a.character_id).filter(Boolean)
-	    ),
-	    corporation_ids: new Set(
-	      attackers.map((a) => a.corporation_id).filter(Boolean)
-	    ),
-	    alliance_ids: new Set(attackers.map((a) => a.alliance_id).filter(Boolean)),
-	  };
-	}
-
-	function addKillmailToCamps(killmail) {
-	  if (!killmail.pinpoints?.nearestCelestial) return;
-	  if (!isStargate(killmail.pinpoints.nearestCelestial.name)) return;
-
-	  activeCamps.update((camps) => {
-	    const now = new Date().getTime();
-	    const oldCamps = camps.filter((camp) => {
-	      const age = now - new Date(camp.lastKill).getTime();
-	      return age < CAMP_TIMEOUT;
-	    });
-
-	    const systemId = killmail.killmail.solar_system_id;
-	    const stargateName = killmail.pinpoints.nearestCelestial.name;
-	    let camp = oldCamps.find(
-	      (c) => c.systemId === systemId && c.stargateName === stargateName
-	    );
-
-	    if (camp) {
-	      camp.kills.push(killmail);
-	      camp.lastKill = killmail.killmail.killmail_time;
-	      camp.totalValue += killmail.zkb.totalValue;
-
-	      const newIds = getAttackerIds(killmail.killmail.attackers);
-	      newIds.character_ids.forEach((id) => camp.character_ids.add(id));
-	      newIds.corporation_ids.forEach((id) => camp.corporation_ids.add(id));
-	      newIds.alliance_ids.forEach((id) => camp.alliance_ids.add(id));
-
-	      camp.probability = calculateCampProbability(camp.kills, systemId);
-	    } else {
-	      const ids = getAttackerIds(killmail.killmail.attackers);
-	      camp = {
-	        systemId,
-	        stargateName,
-	        kills: [killmail],
-	        totalValue: killmail.zkb.totalValue,
-	        lastKill: killmail.killmail.killmail_time,
-	        character_ids: ids.character_ids,
-	        corporation_ids: ids.corporation_ids,
-	        alliance_ids: ids.alliance_ids,
-	        probability: 0,
-	      };
-	      oldCamps.push(camp);
-	    }
-
-	    return oldCamps;
-	  });
-	}
-
-	const filteredCamps = derived([activeCamps], ([$activeCamps]) => {
-	  return $activeCamps
-	    .filter((camp) => {
-	      const nonCapsuleKills = camp.kills.filter(
-	        (k) => k.killmail.victim.ship_type_id !== CAPSULE_ID
-	      );
-	      return nonCapsuleKills.length >= 2 && camp.probability >= 30;
-	    })
-	    .map((camp) => ({
-	      ...camp,
-	      numAttackers: camp.character_ids.size,
-	      numCorps: camp.corporation_ids.size,
-	      numAlliances: camp.alliance_ids.size,
-	    }))
-	    .sort((a, b) => b.probability - a.probability);
-	});
-
 	const killmails = writable([]);
 	const filterLists = writable([]);
 	const profiles = writable([]);
@@ -5823,8 +5604,11 @@ var app = (function () {
 	  item_type_filter_enabled: false,
 	  triangulation_filter_enabled: false,
 	  triangulation_filter_exclude: false,
+	  triangulation_filter_near_stargate: false,
+	  triangulation_filter_near_celestial: false,
 	  webhook_enabled: false,
 	  webhook_url: "",
+
 	  // location type/new filters
 	  location_type_filter_enabled: false,
 	  location_types: {
@@ -5848,12 +5632,29 @@ var app = (function () {
 	    const filtered = $killmails.filter((killmail) => {
 	      // Triangulation Filter check
 	      if ($settings.triangulation_filter_enabled) {
-	        const isTriangulatable =
-	          killmail?.pinpoints?.triangulationPossible || false;
+	        const pinpoints = killmail?.pinpoints;
+
+	        // Filter out "near stargate" kills
+	        if (
+	          $settings.triangulation_filter_near_stargate &&
+	          pinpoints?.nearestCelestial?.name?.toLowerCase().includes("stargate")
+	        ) {
+	          return false;
+	        }
+
+	        // Filter out "near celestial" AND "at celestial" kills
+	        if (
+	          $settings.triangulation_filter_near_celestial &&
+	          (pinpoints?.atCelestial || pinpoints?.nearestCelestial)
+	        ) {
+	          return false;
+	        }
+
+	        // Existing triangulation exclude logic
 	        if ($settings.triangulation_filter_exclude) {
-	          if (isTriangulatable) return false;
+	          if (pinpoints?.triangulationPossible) return false;
 	        } else {
-	          if (!isTriangulatable) return false;
+	          if (!pinpoints?.triangulationPossible) return false;
 	        }
 	      }
 
@@ -6203,7 +6004,12 @@ var app = (function () {
 	}
 
 	const socket = lookup("http://localhost:3000");
-	let audio = new Audio("audio_files/alert.wav");
+
+	let audio;
+
+	if (typeof Audio !== "undefined") {
+	  audio = new Audio("audio_files/alert.wav");
+	}
 
 	socket.on("newKillmail", (killmail) => {
 	  console.log("Socket.js - Processing killmail:", killmail.killID);
@@ -6229,7 +6035,7 @@ var app = (function () {
 
 	    // Process for battles and camps
 	    addKillmailToBattles(killmail);
-	    addKillmailToCamps(killmail);
+	    // addKillmailToCamps(killmail);
 
 	    // Add new killmail and sort chronologically
 	    const updatedKillmails = [...existingKillmails, killmail].sort((a, b) => {
@@ -7205,7 +7011,7 @@ var app = (function () {
 		let input30;
 		let mounted;
 		let dispose;
-		let if_block = /*localSettings*/ ctx[7].triangulation_filter_enabled && create_if_block_4$1(ctx);
+		let if_block = /*$settings*/ ctx[1].triangulation_filter_enabled && create_if_block_4$1(ctx);
 
 		const block = {
 			c: function create() {
@@ -7361,131 +7167,131 @@ var app = (function () {
 				attr_dev(label3, "class", "svelte-gu7nlb");
 				add_location(label3, file$6, 261, 4, 7457);
 				attr_dev(h30, "class", "svelte-gu7nlb");
-				add_location(h30, file$6, 289, 4, 8241);
+				add_location(h30, file$6, 315, 4, 8995);
 				attr_dev(input4, "type", "checkbox");
-				add_location(input4, file$6, 291, 6, 8282);
+				add_location(input4, file$6, 317, 6, 9036);
 				attr_dev(label4, "class", "svelte-gu7nlb");
-				add_location(label4, file$6, 290, 4, 8267);
+				add_location(label4, file$6, 316, 4, 9021);
 				attr_dev(input5, "type", "number");
 				attr_dev(input5, "class", "svelte-gu7nlb");
-				add_location(input5, file$6, 304, 6, 8632);
+				add_location(input5, file$6, 330, 6, 9386);
 				attr_dev(label5, "class", "svelte-gu7nlb");
-				add_location(label5, file$6, 302, 4, 8596);
+				add_location(label5, file$6, 328, 4, 9350);
 				attr_dev(input6, "type", "number");
 				attr_dev(input6, "class", "svelte-gu7nlb");
-				add_location(input6, file$6, 314, 6, 8892);
+				add_location(input6, file$6, 340, 6, 9646);
 				attr_dev(label6, "class", "svelte-gu7nlb");
-				add_location(label6, file$6, 312, 4, 8849);
+				add_location(label6, file$6, 338, 4, 9603);
 				attr_dev(input7, "type", "checkbox");
-				add_location(input7, file$6, 322, 6, 9098);
+				add_location(input7, file$6, 348, 6, 9852);
 				attr_dev(label7, "class", "svelte-gu7nlb");
-				add_location(label7, file$6, 321, 4, 9083);
+				add_location(label7, file$6, 347, 4, 9837);
 				attr_dev(input8, "type", "number");
 				attr_dev(input8, "class", "svelte-gu7nlb");
-				add_location(input8, file$6, 332, 6, 9378);
+				add_location(input8, file$6, 358, 6, 10132);
 				attr_dev(label8, "class", "svelte-gu7nlb");
-				add_location(label8, file$6, 330, 4, 9340);
+				add_location(label8, file$6, 356, 4, 10094);
 				attr_dev(input9, "type", "checkbox");
-				add_location(input9, file$6, 340, 6, 9569);
+				add_location(input9, file$6, 366, 6, 10323);
 				attr_dev(label9, "class", "svelte-gu7nlb");
-				add_location(label9, file$6, 339, 4, 9554);
+				add_location(label9, file$6, 365, 4, 10308);
 				attr_dev(input10, "type", "checkbox");
-				add_location(input10, file$6, 349, 6, 9787);
+				add_location(input10, file$6, 375, 6, 10541);
 				attr_dev(label10, "class", "svelte-gu7nlb");
-				add_location(label10, file$6, 348, 4, 9772);
+				add_location(label10, file$6, 374, 4, 10526);
 				attr_dev(input11, "type", "checkbox");
-				add_location(input11, file$6, 358, 6, 9994);
+				add_location(input11, file$6, 384, 6, 10748);
 				attr_dev(label11, "class", "svelte-gu7nlb");
-				add_location(label11, file$6, 357, 4, 9979);
+				add_location(label11, file$6, 383, 4, 10733);
 				attr_dev(input12, "type", "checkbox");
-				add_location(input12, file$6, 367, 6, 10216);
+				add_location(input12, file$6, 393, 6, 10970);
 				attr_dev(label12, "class", "svelte-gu7nlb");
-				add_location(label12, file$6, 366, 4, 10201);
+				add_location(label12, file$6, 392, 4, 10955);
 				attr_dev(input13, "type", "number");
 				attr_dev(input13, "class", "svelte-gu7nlb");
-				add_location(input13, file$6, 380, 6, 10561);
+				add_location(input13, file$6, 406, 6, 11315);
 				attr_dev(label13, "class", "svelte-gu7nlb");
-				add_location(label13, file$6, 378, 4, 10526);
+				add_location(label13, file$6, 404, 4, 11280);
 				attr_dev(input14, "type", "checkbox");
-				add_location(input14, file$6, 389, 6, 10790);
+				add_location(input14, file$6, 415, 6, 11544);
 				attr_dev(label14, "class", "svelte-gu7nlb");
-				add_location(label14, file$6, 388, 4, 10775);
+				add_location(label14, file$6, 414, 4, 11529);
 				attr_dev(input15, "type", "number");
 				attr_dev(input15, "class", "svelte-gu7nlb");
-				add_location(input15, file$6, 402, 6, 11140);
+				add_location(input15, file$6, 428, 6, 11894);
 				attr_dev(label15, "class", "svelte-gu7nlb");
-				add_location(label15, file$6, 400, 4, 11104);
+				add_location(label15, file$6, 426, 4, 11858);
 				attr_dev(input16, "type", "checkbox");
-				add_location(input16, file$6, 411, 6, 11372);
+				add_location(input16, file$6, 437, 6, 12126);
 				attr_dev(label16, "class", "svelte-gu7nlb");
-				add_location(label16, file$6, 410, 4, 11357);
+				add_location(label16, file$6, 436, 4, 12111);
 				attr_dev(input17, "type", "number");
 				attr_dev(input17, "class", "svelte-gu7nlb");
-				add_location(input17, file$6, 424, 6, 11726);
+				add_location(input17, file$6, 450, 6, 12480);
 				attr_dev(label17, "class", "svelte-gu7nlb");
-				add_location(label17, file$6, 422, 4, 11678);
+				add_location(label17, file$6, 448, 4, 12432);
 				attr_dev(input18, "type", "checkbox");
-				add_location(input18, file$6, 433, 6, 11952);
+				add_location(input18, file$6, 459, 6, 12706);
 				attr_dev(label18, "class", "svelte-gu7nlb");
-				add_location(label18, file$6, 432, 4, 11937);
+				add_location(label18, file$6, 458, 4, 12691);
 				attr_dev(h31, "class", "svelte-gu7nlb");
-				add_location(h31, file$6, 445, 4, 12252);
+				add_location(h31, file$6, 471, 4, 13006);
 				attr_dev(input19, "type", "checkbox");
-				add_location(input19, file$6, 447, 6, 12298);
+				add_location(input19, file$6, 473, 6, 13052);
 				attr_dev(label19, "class", "svelte-gu7nlb");
-				add_location(label19, file$6, 446, 4, 12283);
+				add_location(label19, file$6, 472, 4, 13037);
 				attr_dev(input20, "type", "number");
 				attr_dev(input20, "class", "svelte-gu7nlb");
-				add_location(input20, file$6, 460, 6, 12688);
+				add_location(input20, file$6, 486, 6, 13442);
 				attr_dev(label20, "class", "svelte-gu7nlb");
-				add_location(label20, file$6, 458, 4, 12644);
+				add_location(label20, file$6, 484, 4, 13398);
 				attr_dev(input21, "type", "checkbox");
-				add_location(input21, file$6, 472, 6, 12983);
+				add_location(input21, file$6, 498, 6, 13737);
 				attr_dev(label21, "class", "svelte-gu7nlb");
-				add_location(label21, file$6, 471, 4, 12968);
+				add_location(label21, file$6, 497, 4, 13722);
 				attr_dev(input22, "type", "number");
 				attr_dev(input22, "class", "svelte-gu7nlb");
-				add_location(input22, file$6, 485, 6, 13388);
+				add_location(input22, file$6, 511, 6, 14142);
 				attr_dev(label22, "class", "svelte-gu7nlb");
-				add_location(label22, file$6, 483, 4, 13341);
+				add_location(label22, file$6, 509, 4, 14095);
 				attr_dev(input23, "type", "checkbox");
-				add_location(input23, file$6, 497, 6, 13692);
+				add_location(input23, file$6, 523, 6, 14446);
 				attr_dev(label23, "class", "svelte-gu7nlb");
-				add_location(label23, file$6, 496, 4, 13677);
+				add_location(label23, file$6, 522, 4, 14431);
 				attr_dev(input24, "type", "number");
 				attr_dev(input24, "class", "svelte-gu7nlb");
-				add_location(input24, file$6, 510, 6, 14087);
+				add_location(input24, file$6, 536, 6, 14841);
 				attr_dev(label24, "class", "svelte-gu7nlb");
-				add_location(label24, file$6, 508, 4, 14042);
+				add_location(label24, file$6, 534, 4, 14796);
 				attr_dev(h32, "class", "svelte-gu7nlb");
-				add_location(h32, file$6, 521, 4, 14370);
+				add_location(h32, file$6, 547, 4, 15124);
 				attr_dev(input25, "type", "checkbox");
-				add_location(input25, file$6, 523, 6, 14414);
+				add_location(input25, file$6, 549, 6, 15168);
 				attr_dev(label25, "class", "svelte-gu7nlb");
-				add_location(label25, file$6, 522, 4, 14399);
+				add_location(label25, file$6, 548, 4, 15153);
 				attr_dev(input26, "type", "number");
 				attr_dev(input26, "class", "svelte-gu7nlb");
-				add_location(input26, file$6, 536, 6, 14794);
+				add_location(input26, file$6, 562, 6, 15548);
 				attr_dev(label26, "class", "svelte-gu7nlb");
-				add_location(label26, file$6, 534, 4, 14752);
+				add_location(label26, file$6, 560, 4, 15506);
 				attr_dev(input27, "type", "checkbox");
-				add_location(input27, file$6, 548, 6, 15083);
+				add_location(input27, file$6, 574, 6, 15837);
 				attr_dev(label27, "class", "svelte-gu7nlb");
-				add_location(label27, file$6, 547, 4, 15068);
+				add_location(label27, file$6, 573, 4, 15822);
 				attr_dev(input28, "type", "number");
 				attr_dev(input28, "class", "svelte-gu7nlb");
-				add_location(input28, file$6, 561, 6, 15478);
+				add_location(input28, file$6, 587, 6, 16232);
 				attr_dev(label28, "class", "svelte-gu7nlb");
-				add_location(label28, file$6, 559, 4, 15433);
+				add_location(label28, file$6, 585, 4, 16187);
 				attr_dev(input29, "type", "checkbox");
-				add_location(input29, file$6, 573, 6, 15776);
+				add_location(input29, file$6, 599, 6, 16530);
 				attr_dev(label29, "class", "svelte-gu7nlb");
-				add_location(label29, file$6, 572, 4, 15761);
+				add_location(label29, file$6, 598, 4, 16515);
 				attr_dev(input30, "type", "number");
 				attr_dev(input30, "class", "svelte-gu7nlb");
-				add_location(input30, file$6, 586, 6, 16141);
+				add_location(input30, file$6, 612, 6, 16895);
 				attr_dev(label30, "class", "svelte-gu7nlb");
-				add_location(label30, file$6, 584, 4, 16102);
+				add_location(label30, file$6, 610, 4, 16856);
 			},
 			m: function mount(target, anchor) {
 				insert_dev(target, label0, anchor);
@@ -7661,60 +7467,60 @@ var app = (function () {
 						listen_dev(input2, "change", /*change_handler_1*/ ctx[24], false, false, false, false),
 						listen_dev(input3, "change", /*input3_change_handler*/ ctx[25]),
 						listen_dev(input3, "change", /*change_handler_2*/ ctx[26], false, false, false, false),
-						listen_dev(input4, "change", /*input4_change_handler*/ ctx[29]),
-						listen_dev(input4, "change", /*change_handler_4*/ ctx[30], false, false, false, false),
-						listen_dev(input5, "input", /*input5_input_handler*/ ctx[31]),
-						listen_dev(input5, "input", /*input_handler_1*/ ctx[32], false, false, false, false),
-						listen_dev(input6, "input", /*input6_input_handler*/ ctx[33]),
-						listen_dev(input6, "input", /*input_handler_2*/ ctx[34], false, false, false, false),
-						listen_dev(input7, "change", /*input7_change_handler*/ ctx[35]),
-						listen_dev(input7, "change", /*change_handler_5*/ ctx[36], false, false, false, false),
-						listen_dev(input8, "input", /*input8_input_handler*/ ctx[37]),
-						listen_dev(input8, "input", /*input_handler_3*/ ctx[38], false, false, false, false),
-						listen_dev(input9, "change", /*input9_change_handler*/ ctx[39]),
-						listen_dev(input9, "change", /*change_handler_6*/ ctx[40], false, false, false, false),
-						listen_dev(input10, "change", /*input10_change_handler*/ ctx[41]),
-						listen_dev(input10, "change", /*change_handler_7*/ ctx[42], false, false, false, false),
-						listen_dev(input11, "change", /*input11_change_handler*/ ctx[43]),
-						listen_dev(input11, "change", /*change_handler_8*/ ctx[44], false, false, false, false),
-						listen_dev(input12, "change", /*input12_change_handler*/ ctx[45]),
-						listen_dev(input12, "change", /*change_handler_9*/ ctx[46], false, false, false, false),
-						listen_dev(input13, "input", /*input13_input_handler*/ ctx[47]),
-						listen_dev(input13, "input", /*input_handler_4*/ ctx[48], false, false, false, false),
-						listen_dev(input14, "change", /*input14_change_handler*/ ctx[49]),
-						listen_dev(input14, "change", /*change_handler_10*/ ctx[50], false, false, false, false),
-						listen_dev(input15, "input", /*input15_input_handler*/ ctx[51]),
-						listen_dev(input15, "input", /*input_handler_5*/ ctx[52], false, false, false, false),
-						listen_dev(input16, "change", /*input16_change_handler*/ ctx[53]),
-						listen_dev(input16, "change", /*change_handler_11*/ ctx[54], false, false, false, false),
-						listen_dev(input17, "input", /*input17_input_handler*/ ctx[55]),
-						listen_dev(input17, "input", /*input_handler_6*/ ctx[56], false, false, false, false),
-						listen_dev(input18, "change", /*input18_change_handler*/ ctx[57]),
-						listen_dev(input18, "change", /*change_handler_12*/ ctx[58], false, false, false, false),
-						listen_dev(input19, "change", /*input19_change_handler*/ ctx[59]),
-						listen_dev(input19, "change", /*change_handler_13*/ ctx[60], false, false, false, false),
-						listen_dev(input20, "input", /*input20_input_handler*/ ctx[61]),
-						listen_dev(input20, "input", /*input_handler_7*/ ctx[62], false, false, false, false),
-						listen_dev(input21, "change", /*input21_change_handler*/ ctx[63]),
-						listen_dev(input21, "change", /*change_handler_14*/ ctx[64], false, false, false, false),
-						listen_dev(input22, "input", /*input22_input_handler*/ ctx[65]),
-						listen_dev(input22, "input", /*input_handler_8*/ ctx[66], false, false, false, false),
-						listen_dev(input23, "change", /*input23_change_handler*/ ctx[67]),
-						listen_dev(input23, "change", /*change_handler_15*/ ctx[68], false, false, false, false),
-						listen_dev(input24, "input", /*input24_input_handler*/ ctx[69]),
-						listen_dev(input24, "input", /*input_handler_9*/ ctx[70], false, false, false, false),
-						listen_dev(input25, "change", /*input25_change_handler*/ ctx[71]),
-						listen_dev(input25, "change", /*change_handler_16*/ ctx[72], false, false, false, false),
-						listen_dev(input26, "input", /*input26_input_handler*/ ctx[73]),
-						listen_dev(input26, "input", /*input_handler_10*/ ctx[74], false, false, false, false),
-						listen_dev(input27, "change", /*input27_change_handler*/ ctx[75]),
-						listen_dev(input27, "change", /*change_handler_17*/ ctx[76], false, false, false, false),
-						listen_dev(input28, "input", /*input28_input_handler*/ ctx[77]),
-						listen_dev(input28, "input", /*input_handler_11*/ ctx[78], false, false, false, false),
-						listen_dev(input29, "change", /*input29_change_handler*/ ctx[79]),
-						listen_dev(input29, "change", /*change_handler_18*/ ctx[80], false, false, false, false),
-						listen_dev(input30, "input", /*input30_input_handler*/ ctx[81]),
-						listen_dev(input30, "input", /*input_handler_12*/ ctx[82], false, false, false, false)
+						listen_dev(input4, "change", /*input4_change_handler*/ ctx[33]),
+						listen_dev(input4, "change", /*change_handler_6*/ ctx[34], false, false, false, false),
+						listen_dev(input5, "input", /*input5_input_handler*/ ctx[35]),
+						listen_dev(input5, "input", /*input_handler_1*/ ctx[36], false, false, false, false),
+						listen_dev(input6, "input", /*input6_input_handler*/ ctx[37]),
+						listen_dev(input6, "input", /*input_handler_2*/ ctx[38], false, false, false, false),
+						listen_dev(input7, "change", /*input7_change_handler*/ ctx[39]),
+						listen_dev(input7, "change", /*change_handler_7*/ ctx[40], false, false, false, false),
+						listen_dev(input8, "input", /*input8_input_handler*/ ctx[41]),
+						listen_dev(input8, "input", /*input_handler_3*/ ctx[42], false, false, false, false),
+						listen_dev(input9, "change", /*input9_change_handler*/ ctx[43]),
+						listen_dev(input9, "change", /*change_handler_8*/ ctx[44], false, false, false, false),
+						listen_dev(input10, "change", /*input10_change_handler*/ ctx[45]),
+						listen_dev(input10, "change", /*change_handler_9*/ ctx[46], false, false, false, false),
+						listen_dev(input11, "change", /*input11_change_handler*/ ctx[47]),
+						listen_dev(input11, "change", /*change_handler_10*/ ctx[48], false, false, false, false),
+						listen_dev(input12, "change", /*input12_change_handler*/ ctx[49]),
+						listen_dev(input12, "change", /*change_handler_11*/ ctx[50], false, false, false, false),
+						listen_dev(input13, "input", /*input13_input_handler*/ ctx[51]),
+						listen_dev(input13, "input", /*input_handler_4*/ ctx[52], false, false, false, false),
+						listen_dev(input14, "change", /*input14_change_handler*/ ctx[53]),
+						listen_dev(input14, "change", /*change_handler_12*/ ctx[54], false, false, false, false),
+						listen_dev(input15, "input", /*input15_input_handler*/ ctx[55]),
+						listen_dev(input15, "input", /*input_handler_5*/ ctx[56], false, false, false, false),
+						listen_dev(input16, "change", /*input16_change_handler*/ ctx[57]),
+						listen_dev(input16, "change", /*change_handler_13*/ ctx[58], false, false, false, false),
+						listen_dev(input17, "input", /*input17_input_handler*/ ctx[59]),
+						listen_dev(input17, "input", /*input_handler_6*/ ctx[60], false, false, false, false),
+						listen_dev(input18, "change", /*input18_change_handler*/ ctx[61]),
+						listen_dev(input18, "change", /*change_handler_14*/ ctx[62], false, false, false, false),
+						listen_dev(input19, "change", /*input19_change_handler*/ ctx[63]),
+						listen_dev(input19, "change", /*change_handler_15*/ ctx[64], false, false, false, false),
+						listen_dev(input20, "input", /*input20_input_handler*/ ctx[65]),
+						listen_dev(input20, "input", /*input_handler_7*/ ctx[66], false, false, false, false),
+						listen_dev(input21, "change", /*input21_change_handler*/ ctx[67]),
+						listen_dev(input21, "change", /*change_handler_16*/ ctx[68], false, false, false, false),
+						listen_dev(input22, "input", /*input22_input_handler*/ ctx[69]),
+						listen_dev(input22, "input", /*input_handler_8*/ ctx[70], false, false, false, false),
+						listen_dev(input23, "change", /*input23_change_handler*/ ctx[71]),
+						listen_dev(input23, "change", /*change_handler_17*/ ctx[72], false, false, false, false),
+						listen_dev(input24, "input", /*input24_input_handler*/ ctx[73]),
+						listen_dev(input24, "input", /*input_handler_9*/ ctx[74], false, false, false, false),
+						listen_dev(input25, "change", /*input25_change_handler*/ ctx[75]),
+						listen_dev(input25, "change", /*change_handler_18*/ ctx[76], false, false, false, false),
+						listen_dev(input26, "input", /*input26_input_handler*/ ctx[77]),
+						listen_dev(input26, "input", /*input_handler_10*/ ctx[78], false, false, false, false),
+						listen_dev(input27, "change", /*input27_change_handler*/ ctx[79]),
+						listen_dev(input27, "change", /*change_handler_19*/ ctx[80], false, false, false, false),
+						listen_dev(input28, "input", /*input28_input_handler*/ ctx[81]),
+						listen_dev(input28, "input", /*input_handler_11*/ ctx[82], false, false, false, false),
+						listen_dev(input29, "change", /*input29_change_handler*/ ctx[83]),
+						listen_dev(input29, "change", /*change_handler_20*/ ctx[84], false, false, false, false),
+						listen_dev(input30, "input", /*input30_input_handler*/ ctx[85]),
+						listen_dev(input30, "input", /*input_handler_12*/ ctx[86], false, false, false, false)
 					];
 
 					mounted = true;
@@ -7737,7 +7543,7 @@ var app = (function () {
 					input3.checked = /*localSettings*/ ctx[7].triangulation_filter_enabled;
 				}
 
-				if (/*localSettings*/ ctx[7].triangulation_filter_enabled) {
+				if (/*$settings*/ ctx[1].triangulation_filter_enabled) {
 					if (if_block) {
 						if_block.p(ctx, dirty);
 					} else {
@@ -7947,47 +7753,97 @@ var app = (function () {
 		return block;
 	}
 
-	// (275:4) {#if localSettings.triangulation_filter_enabled}
+	// (275:4) {#if $settings.triangulation_filter_enabled}
 	function create_if_block_4$1(ctx) {
-		let label;
-		let input;
-		let t;
+		let label0;
+		let input0;
+		let t0;
+		let t1;
+		let label1;
+		let input1;
+		let t2;
+		let t3;
+		let label2;
+		let input2;
+		let t4;
 		let mounted;
 		let dispose;
 
 		const block = {
 			c: function create() {
-				label = element("label");
-				input = element("input");
-				t = text("\r\n        Exclude Triangulatable Kills");
-				attr_dev(input, "type", "checkbox");
-				add_location(input, file$6, 276, 8, 7877);
-				attr_dev(label, "class", "svelte-gu7nlb");
-				add_location(label, file$6, 275, 6, 7860);
+				label0 = element("label");
+				input0 = element("input");
+				t0 = text("\r\n        Exclude Triangulatable Kills");
+				t1 = space();
+				label1 = element("label");
+				input1 = element("input");
+				t2 = text("\r\n        Exclude Near-Stargate Kills");
+				t3 = space();
+				label2 = element("label");
+				input2 = element("input");
+				t4 = text("\r\n        Exclude Near-Celestial Kills");
+				attr_dev(input0, "type", "checkbox");
+				add_location(input0, file$6, 276, 8, 7873);
+				attr_dev(label0, "class", "svelte-gu7nlb");
+				add_location(label0, file$6, 275, 6, 7856);
+				attr_dev(input1, "type", "checkbox");
+				add_location(input1, file$6, 289, 8, 8237);
+				attr_dev(label1, "class", "svelte-gu7nlb");
+				add_location(label1, file$6, 288, 6, 8220);
+				attr_dev(input2, "type", "checkbox");
+				add_location(input2, file$6, 302, 8, 8618);
+				attr_dev(label2, "class", "svelte-gu7nlb");
+				add_location(label2, file$6, 301, 6, 8601);
 			},
 			m: function mount(target, anchor) {
-				insert_dev(target, label, anchor);
-				append_dev(label, input);
-				input.checked = /*localSettings*/ ctx[7].triangulation_filter_exclude;
-				append_dev(label, t);
+				insert_dev(target, label0, anchor);
+				append_dev(label0, input0);
+				input0.checked = /*$settings*/ ctx[1].triangulation_filter_exclude;
+				append_dev(label0, t0);
+				insert_dev(target, t1, anchor);
+				insert_dev(target, label1, anchor);
+				append_dev(label1, input1);
+				input1.checked = /*$settings*/ ctx[1].triangulation_filter_near_stargate;
+				append_dev(label1, t2);
+				insert_dev(target, t3, anchor);
+				insert_dev(target, label2, anchor);
+				append_dev(label2, input2);
+				input2.checked = /*$settings*/ ctx[1].triangulation_filter_near_celestial;
+				append_dev(label2, t4);
 
 				if (!mounted) {
 					dispose = [
-						listen_dev(input, "change", /*input_change_handler*/ ctx[27]),
-						listen_dev(input, "change", /*change_handler_3*/ ctx[28], false, false, false, false)
+						listen_dev(input0, "change", /*input0_change_handler_1*/ ctx[27]),
+						listen_dev(input0, "change", /*change_handler_3*/ ctx[28], false, false, false, false),
+						listen_dev(input1, "change", /*input1_change_handler*/ ctx[29]),
+						listen_dev(input1, "change", /*change_handler_4*/ ctx[30], false, false, false, false),
+						listen_dev(input2, "change", /*input2_change_handler_1*/ ctx[31]),
+						listen_dev(input2, "change", /*change_handler_5*/ ctx[32], false, false, false, false)
 					];
 
 					mounted = true;
 				}
 			},
 			p: function update(ctx, dirty) {
-				if (dirty[0] & /*localSettings*/ 128) {
-					input.checked = /*localSettings*/ ctx[7].triangulation_filter_exclude;
+				if (dirty[0] & /*$settings*/ 2) {
+					input0.checked = /*$settings*/ ctx[1].triangulation_filter_exclude;
+				}
+
+				if (dirty[0] & /*$settings*/ 2) {
+					input1.checked = /*$settings*/ ctx[1].triangulation_filter_near_stargate;
+				}
+
+				if (dirty[0] & /*$settings*/ 2) {
+					input2.checked = /*$settings*/ ctx[1].triangulation_filter_near_celestial;
 				}
 			},
 			d: function destroy(detaching) {
 				if (detaching) {
-					detach_dev(label);
+					detach_dev(label0);
+					detach_dev(t1);
+					detach_dev(label1);
+					detach_dev(t3);
+					detach_dev(label2);
 				}
 
 				mounted = false;
@@ -7999,14 +7855,14 @@ var app = (function () {
 			block,
 			id: create_if_block_4$1.name,
 			type: "if",
-			source: "(275:4) {#if localSettings.triangulation_filter_enabled}",
+			source: "(275:4) {#if $settings.triangulation_filter_enabled}",
 			ctx
 		});
 
 		return block;
 	}
 
-	// (613:2) {#if $settings.location_type_filter_enabled}
+	// (639:2) {#if $settings.location_type_filter_enabled}
 	function create_if_block_2$3(ctx) {
 		let div;
 		let label0;
@@ -8054,27 +7910,27 @@ var app = (function () {
 				input4 = element("input");
 				t8 = text("\r\n        Abyssal Space");
 				attr_dev(input0, "type", "checkbox");
-				add_location(input0, file$6, 616, 8, 16913);
+				add_location(input0, file$6, 642, 8, 17667);
 				attr_dev(label0, "class", "svelte-gu7nlb");
-				add_location(label0, file$6, 615, 6, 16896);
+				add_location(label0, file$6, 641, 6, 17650);
 				attr_dev(input1, "type", "checkbox");
-				add_location(input1, file$6, 625, 8, 17181);
+				add_location(input1, file$6, 651, 8, 17935);
 				attr_dev(label1, "class", "svelte-gu7nlb");
-				add_location(label1, file$6, 624, 6, 17164);
+				add_location(label1, file$6, 650, 6, 17918);
 				attr_dev(input2, "type", "checkbox");
-				add_location(input2, file$6, 634, 8, 17455);
+				add_location(input2, file$6, 660, 8, 18209);
 				attr_dev(label2, "class", "svelte-gu7nlb");
-				add_location(label2, file$6, 633, 6, 17438);
+				add_location(label2, file$6, 659, 6, 18192);
 				attr_dev(input3, "type", "checkbox");
-				add_location(input3, file$6, 643, 8, 17731);
+				add_location(input3, file$6, 669, 8, 18485);
 				attr_dev(label3, "class", "svelte-gu7nlb");
-				add_location(label3, file$6, 642, 6, 17714);
+				add_location(label3, file$6, 668, 6, 18468);
 				attr_dev(input4, "type", "checkbox");
-				add_location(input4, file$6, 652, 8, 18007);
+				add_location(input4, file$6, 678, 8, 18761);
 				attr_dev(label4, "class", "svelte-gu7nlb");
-				add_location(label4, file$6, 651, 6, 17990);
+				add_location(label4, file$6, 677, 6, 18744);
 				attr_dev(div, "class", "location-types");
-				add_location(div, file$6, 613, 4, 16819);
+				add_location(div, file$6, 639, 4, 17573);
 			},
 			m: function mount(target, anchor) {
 				insert_dev(target, div, anchor);
@@ -8105,16 +7961,16 @@ var app = (function () {
 
 				if (!mounted) {
 					dispose = [
-						listen_dev(input0, "change", /*input0_change_handler_2*/ ctx[85]),
-						listen_dev(input0, "change", /*change_handler_20*/ ctx[86], false, false, false, false),
-						listen_dev(input1, "change", /*input1_change_handler*/ ctx[87]),
-						listen_dev(input1, "change", /*change_handler_21*/ ctx[88], false, false, false, false),
-						listen_dev(input2, "change", /*input2_change_handler_1*/ ctx[89]),
-						listen_dev(input2, "change", /*change_handler_22*/ ctx[90], false, false, false, false),
-						listen_dev(input3, "change", /*input3_change_handler_1*/ ctx[91]),
-						listen_dev(input3, "change", /*change_handler_23*/ ctx[92], false, false, false, false),
-						listen_dev(input4, "change", /*input4_change_handler_1*/ ctx[93]),
-						listen_dev(input4, "change", /*change_handler_24*/ ctx[94], false, false, false, false)
+						listen_dev(input0, "change", /*input0_change_handler_3*/ ctx[89]),
+						listen_dev(input0, "change", /*change_handler_22*/ ctx[90], false, false, false, false),
+						listen_dev(input1, "change", /*input1_change_handler_1*/ ctx[91]),
+						listen_dev(input1, "change", /*change_handler_23*/ ctx[92], false, false, false, false),
+						listen_dev(input2, "change", /*input2_change_handler_2*/ ctx[93]),
+						listen_dev(input2, "change", /*change_handler_24*/ ctx[94], false, false, false, false),
+						listen_dev(input3, "change", /*input3_change_handler_1*/ ctx[95]),
+						listen_dev(input3, "change", /*change_handler_25*/ ctx[96], false, false, false, false),
+						listen_dev(input4, "change", /*input4_change_handler_1*/ ctx[97]),
+						listen_dev(input4, "change", /*change_handler_26*/ ctx[98], false, false, false, false)
 					];
 
 					mounted = true;
@@ -8155,14 +8011,14 @@ var app = (function () {
 			block,
 			id: create_if_block_2$3.name,
 			type: "if",
-			source: "(613:2) {#if $settings.location_type_filter_enabled}",
+			source: "(639:2) {#if $settings.location_type_filter_enabled}",
 			ctx
 		});
 
 		return block;
 	}
 
-	// (689:2) {#if localSettings.combat_label_filter_enabled}
+	// (715:2) {#if localSettings.combat_label_filter_enabled}
 	function create_if_block_1$4(ctx) {
 		let div;
 		let label0;
@@ -8194,19 +8050,19 @@ var app = (function () {
 				input2 = element("input");
 				t4 = text("\r\n        Padding");
 				attr_dev(input0, "type", "checkbox");
-				add_location(input0, file$6, 691, 8, 19004);
+				add_location(input0, file$6, 717, 8, 19758);
 				attr_dev(label0, "class", "svelte-gu7nlb");
-				add_location(label0, file$6, 690, 6, 18987);
+				add_location(label0, file$6, 716, 6, 19741);
 				attr_dev(input1, "type", "checkbox");
-				add_location(input1, file$6, 700, 8, 19269);
+				add_location(input1, file$6, 726, 8, 20023);
 				attr_dev(label1, "class", "svelte-gu7nlb");
-				add_location(label1, file$6, 699, 6, 19252);
+				add_location(label1, file$6, 725, 6, 20006);
 				attr_dev(input2, "type", "checkbox");
-				add_location(input2, file$6, 709, 8, 19528);
+				add_location(input2, file$6, 735, 8, 20282);
 				attr_dev(label2, "class", "svelte-gu7nlb");
-				add_location(label2, file$6, 708, 6, 19511);
+				add_location(label2, file$6, 734, 6, 20265);
 				attr_dev(div, "class", "combat-labels");
-				add_location(div, file$6, 689, 4, 18952);
+				add_location(div, file$6, 715, 4, 19706);
 			},
 			m: function mount(target, anchor) {
 				insert_dev(target, div, anchor);
@@ -8227,12 +8083,12 @@ var app = (function () {
 
 				if (!mounted) {
 					dispose = [
-						listen_dev(input0, "change", /*input0_change_handler_3*/ ctx[99]),
-						listen_dev(input0, "change", /*change_handler_27*/ ctx[100], false, false, false, false),
-						listen_dev(input1, "change", /*input1_change_handler_2*/ ctx[101]),
-						listen_dev(input1, "change", /*change_handler_28*/ ctx[102], false, false, false, false),
-						listen_dev(input2, "change", /*input2_change_handler_3*/ ctx[103]),
-						listen_dev(input2, "change", /*change_handler_29*/ ctx[104], false, false, false, false)
+						listen_dev(input0, "change", /*input0_change_handler_4*/ ctx[103]),
+						listen_dev(input0, "change", /*change_handler_29*/ ctx[104], false, false, false, false),
+						listen_dev(input1, "change", /*input1_change_handler_3*/ ctx[105]),
+						listen_dev(input1, "change", /*change_handler_30*/ ctx[106], false, false, false, false),
+						listen_dev(input2, "change", /*input2_change_handler_4*/ ctx[107]),
+						listen_dev(input2, "change", /*change_handler_31*/ ctx[108], false, false, false, false)
 					];
 
 					mounted = true;
@@ -8265,14 +8121,14 @@ var app = (function () {
 			block,
 			id: create_if_block_1$4.name,
 			type: "if",
-			source: "(689:2) {#if localSettings.combat_label_filter_enabled}",
+			source: "(715:2) {#if localSettings.combat_label_filter_enabled}",
 			ctx
 		});
 
 		return block;
 	}
 
-	// (732:2) {#if localSettings.webhook_enabled}
+	// (758:2) {#if localSettings.webhook_enabled}
 	function create_if_block$5(ctx) {
 		let label;
 		let t;
@@ -8289,9 +8145,9 @@ var app = (function () {
 				attr_dev(input, "placeholder", "https://discord.com/api/webhooks/...");
 				set_style(input, "width", "100%");
 				set_style(input, "max-width", "500px");
-				add_location(input, file$6, 734, 6, 20154);
+				add_location(input, file$6, 760, 6, 20908);
 				attr_dev(label, "class", "svelte-gu7nlb");
-				add_location(label, file$6, 732, 4, 20119);
+				add_location(label, file$6, 758, 4, 20873);
 			},
 			m: function mount(target, anchor) {
 				insert_dev(target, label, anchor);
@@ -8301,8 +8157,8 @@ var app = (function () {
 
 				if (!mounted) {
 					dispose = [
-						listen_dev(input, "input", /*input_input_handler*/ ctx[107]),
-						listen_dev(input, "input", /*input_handler_13*/ ctx[108], false, false, false, false)
+						listen_dev(input, "input", /*input_input_handler*/ ctx[111]),
+						listen_dev(input, "input", /*input_handler_13*/ ctx[112], false, false, false, false)
 					];
 
 					mounted = true;
@@ -8327,7 +8183,7 @@ var app = (function () {
 			block,
 			id: create_if_block$5.name,
 			type: "if",
-			source: "(732:2) {#if localSettings.webhook_enabled}",
+			source: "(758:2) {#if localSettings.webhook_enabled}",
 			ctx
 		});
 
@@ -8486,66 +8342,66 @@ var app = (function () {
 				t32 = space();
 				create_component(filterlistmanager.$$.fragment);
 				attr_dev(input0, "type", "checkbox");
-				add_location(input0, file$6, 600, 4, 16459);
+				add_location(input0, file$6, 626, 4, 17213);
 				attr_dev(label0, "class", "svelte-gu7nlb");
-				add_location(label0, file$6, 599, 2, 16446);
+				add_location(label0, file$6, 625, 2, 17200);
 				attr_dev(input1, "type", "checkbox");
-				add_location(input1, file$6, 665, 4, 18331);
+				add_location(input1, file$6, 691, 4, 19085);
 				attr_dev(label1, "class", "svelte-gu7nlb");
-				add_location(label1, file$6, 664, 2, 18318);
+				add_location(label1, file$6, 690, 2, 19072);
 				attr_dev(input2, "type", "checkbox");
-				add_location(input2, file$6, 676, 4, 18593);
+				add_location(input2, file$6, 702, 4, 19347);
 				attr_dev(label2, "class", "svelte-gu7nlb");
-				add_location(label2, file$6, 675, 2, 18580);
+				add_location(label2, file$6, 701, 2, 19334);
 				attr_dev(h30, "class", "svelte-gu7nlb");
-				add_location(h30, file$6, 720, 2, 19797);
+				add_location(h30, file$6, 746, 2, 20551);
 				attr_dev(input3, "type", "checkbox");
-				add_location(input3, file$6, 722, 4, 19838);
+				add_location(input3, file$6, 748, 4, 20592);
 				attr_dev(label3, "class", "svelte-gu7nlb");
-				add_location(label3, file$6, 721, 2, 19825);
+				add_location(label3, file$6, 747, 2, 20579);
 				attr_dev(h31, "class", "svelte-gu7nlb");
-				add_location(h31, file$6, 744, 2, 20458);
+				add_location(h31, file$6, 770, 2, 21212);
 				attr_dev(input4, "placeholder", "New list name");
-				add_location(input4, file$6, 746, 4, 20504);
+				add_location(input4, file$6, 772, 4, 21258);
 				attr_dev(input5, "placeholder", "Comma-separated IDs");
-				add_location(input5, file$6, 747, 4, 20572);
+				add_location(input5, file$6, 773, 4, 21326);
 				attr_dev(input6, "type", "checkbox");
-				add_location(input6, file$6, 749, 6, 20660);
+				add_location(input6, file$6, 775, 6, 21414);
 				attr_dev(label4, "class", "svelte-gu7nlb");
-				add_location(label4, file$6, 748, 4, 20645);
+				add_location(label4, file$6, 774, 4, 21399);
 				option0.__value = "";
 				set_input_value(option0, option0.__value);
-				add_location(option0, file$6, 753, 6, 20799);
+				add_location(option0, file$6, 779, 6, 21553);
 				option1.__value = "attacker_alliance";
 				set_input_value(option1, option1.__value);
-				add_location(option1, file$6, 754, 6, 20851);
+				add_location(option1, file$6, 780, 6, 21605);
 				option2.__value = "attacker_corporation";
 				set_input_value(option2, option2.__value);
-				add_location(option2, file$6, 755, 6, 20919);
+				add_location(option2, file$6, 781, 6, 21673);
 				option3.__value = "attacker_ship_type";
 				set_input_value(option3, option3.__value);
-				add_location(option3, file$6, 756, 6, 20993);
+				add_location(option3, file$6, 782, 6, 21747);
 				option4.__value = "victim_alliance";
 				set_input_value(option4, option4.__value);
-				add_location(option4, file$6, 757, 6, 21063);
+				add_location(option4, file$6, 783, 6, 21817);
 				option5.__value = "victim_corporation";
 				set_input_value(option5, option5.__value);
-				add_location(option5, file$6, 758, 6, 21127);
+				add_location(option5, file$6, 784, 6, 21881);
 				option6.__value = "ship_type";
 				set_input_value(option6, option6.__value);
-				add_location(option6, file$6, 759, 6, 21197);
+				add_location(option6, file$6, 785, 6, 21951);
 				option7.__value = "solar_system";
 				set_input_value(option7, option7.__value);
-				add_location(option7, file$6, 760, 6, 21249);
+				add_location(option7, file$6, 786, 6, 22003);
 				option8.__value = "region";
 				set_input_value(option8, option8.__value);
-				add_location(option8, file$6, 761, 6, 21307);
+				add_location(option8, file$6, 787, 6, 22061);
 				attr_dev(select, "class", "svelte-gu7nlb");
-				if (/*newListFilterType*/ ctx[5] === void 0) add_render_callback(() => /*select_change_handler*/ ctx[112].call(select));
-				add_location(select, file$6, 752, 4, 20752);
+				if (/*newListFilterType*/ ctx[5] === void 0) add_render_callback(() => /*select_change_handler*/ ctx[116].call(select));
+				add_location(select, file$6, 778, 4, 21506);
 				attr_dev(button, "class", "svelte-gu7nlb");
-				add_location(button, file$6, 763, 4, 21366);
-				add_location(div0, file$6, 745, 2, 20493);
+				add_location(button, file$6, 789, 4, 22120);
+				add_location(div0, file$6, 771, 2, 21247);
 				attr_dev(div1, "class", "settings-manager svelte-gu7nlb");
 				add_location(div1, file$6, 215, 0, 6266);
 			},
@@ -8619,18 +8475,18 @@ var app = (function () {
 
 				if (!mounted) {
 					dispose = [
-						listen_dev(input0, "change", /*input0_change_handler_1*/ ctx[83]),
-						listen_dev(input0, "change", /*change_handler_19*/ ctx[84], false, false, false, false),
-						listen_dev(input1, "change", /*input1_change_handler_1*/ ctx[95]),
-						listen_dev(input1, "change", /*change_handler_25*/ ctx[96], false, false, false, false),
-						listen_dev(input2, "change", /*input2_change_handler_2*/ ctx[97]),
-						listen_dev(input2, "change", /*change_handler_26*/ ctx[98], false, false, false, false),
-						listen_dev(input3, "change", /*input3_change_handler_2*/ ctx[105]),
-						listen_dev(input3, "change", /*change_handler_30*/ ctx[106], false, false, false, false),
-						listen_dev(input4, "input", /*input4_input_handler*/ ctx[109]),
-						listen_dev(input5, "input", /*input5_input_handler_1*/ ctx[110]),
-						listen_dev(input6, "change", /*input6_change_handler*/ ctx[111]),
-						listen_dev(select, "change", /*select_change_handler*/ ctx[112]),
+						listen_dev(input0, "change", /*input0_change_handler_2*/ ctx[87]),
+						listen_dev(input0, "change", /*change_handler_21*/ ctx[88], false, false, false, false),
+						listen_dev(input1, "change", /*input1_change_handler_2*/ ctx[99]),
+						listen_dev(input1, "change", /*change_handler_27*/ ctx[100], false, false, false, false),
+						listen_dev(input2, "change", /*input2_change_handler_3*/ ctx[101]),
+						listen_dev(input2, "change", /*change_handler_28*/ ctx[102], false, false, false, false),
+						listen_dev(input3, "change", /*input3_change_handler_2*/ ctx[109]),
+						listen_dev(input3, "change", /*change_handler_32*/ ctx[110], false, false, false, false),
+						listen_dev(input4, "input", /*input4_input_handler*/ ctx[113]),
+						listen_dev(input5, "input", /*input5_input_handler_1*/ ctx[114]),
+						listen_dev(input6, "change", /*input6_change_handler*/ ctx[115]),
+						listen_dev(select, "change", /*select_change_handler*/ ctx[116]),
 						listen_dev(button, "click", /*createFilterList*/ ctx[9], false, false, false, false)
 					];
 
@@ -9030,19 +8886,33 @@ var app = (function () {
 
 		const change_handler_2 = () => updateSetting("triangulation_filter_enabled", localSettings.triangulation_filter_enabled);
 
-		function input_change_handler() {
-			localSettings.triangulation_filter_exclude = this.checked;
-			($$invalidate(7, localSettings), $$invalidate(1, $settings));
+		function input0_change_handler_1() {
+			$settings.triangulation_filter_exclude = this.checked;
+			settings.set($settings);
 		}
 
-		const change_handler_3 = () => updateSetting("triangulation_filter_exclude", localSettings.triangulation_filter_exclude);
+		const change_handler_3 = () => updateSetting("triangulation_filter_exclude", $settings.triangulation_filter_exclude);
+
+		function input1_change_handler() {
+			$settings.triangulation_filter_near_stargate = this.checked;
+			settings.set($settings);
+		}
+
+		const change_handler_4 = () => updateSetting("triangulation_filter_near_stargate", $settings.triangulation_filter_near_stargate);
+
+		function input2_change_handler_1() {
+			$settings.triangulation_filter_near_celestial = this.checked;
+			settings.set($settings);
+		}
+
+		const change_handler_5 = () => updateSetting("triangulation_filter_near_celestial", $settings.triangulation_filter_near_celestial);
 
 		function input4_change_handler() {
 			localSettings.item_type_filter_enabled = this.checked;
 			($$invalidate(7, localSettings), $$invalidate(1, $settings));
 		}
 
-		const change_handler_4 = () => updateSetting("item_type_filter_enabled", localSettings.item_type_filter_enabled);
+		const change_handler_6 = () => updateSetting("item_type_filter_enabled", localSettings.item_type_filter_enabled);
 
 		function input5_input_handler() {
 			localSettings.item_type_filter = to_number(this.value);
@@ -9063,7 +8933,7 @@ var app = (function () {
 			($$invalidate(7, localSettings), $$invalidate(1, $settings));
 		}
 
-		const change_handler_5 = () => updateSetting("points_enabled", localSettings.points_enabled);
+		const change_handler_7 = () => updateSetting("points_enabled", localSettings.points_enabled);
 
 		function input8_input_handler() {
 			localSettings.points = to_number(this.value);
@@ -9077,28 +8947,28 @@ var app = (function () {
 			($$invalidate(7, localSettings), $$invalidate(1, $settings));
 		}
 
-		const change_handler_6 = () => updateSetting("npc_only", localSettings.npc_only);
+		const change_handler_8 = () => updateSetting("npc_only", localSettings.npc_only);
 
 		function input10_change_handler() {
 			localSettings.solo = this.checked;
 			($$invalidate(7, localSettings), $$invalidate(1, $settings));
 		}
 
-		const change_handler_7 = () => updateSetting("solo", localSettings.solo);
+		const change_handler_9 = () => updateSetting("solo", localSettings.solo);
 
 		function input11_change_handler() {
 			localSettings.awox_only = this.checked;
 			($$invalidate(7, localSettings), $$invalidate(1, $settings));
 		}
 
-		const change_handler_8 = () => updateSetting("awox_only", localSettings.awox_only);
+		const change_handler_10 = () => updateSetting("awox_only", localSettings.awox_only);
 
 		function input12_change_handler() {
 			localSettings.location_filter_enabled = this.checked;
 			($$invalidate(7, localSettings), $$invalidate(1, $settings));
 		}
 
-		const change_handler_9 = () => updateSetting("location_filter_enabled", localSettings.location_filter_enabled);
+		const change_handler_11 = () => updateSetting("location_filter_enabled", localSettings.location_filter_enabled);
 
 		function input13_input_handler() {
 			localSettings.location_filter = to_number(this.value);
@@ -9112,7 +8982,7 @@ var app = (function () {
 			($$invalidate(7, localSettings), $$invalidate(1, $settings));
 		}
 
-		const change_handler_10 = () => updateSetting("ship_type_filter_enabled", localSettings.ship_type_filter_enabled);
+		const change_handler_12 = () => updateSetting("ship_type_filter_enabled", localSettings.ship_type_filter_enabled);
 
 		function input15_input_handler() {
 			localSettings.ship_type_filter = to_number(this.value);
@@ -9126,7 +8996,7 @@ var app = (function () {
 			($$invalidate(7, localSettings), $$invalidate(1, $settings));
 		}
 
-		const change_handler_11 = () => updateSetting("time_threshold_enabled", localSettings.time_threshold_enabled);
+		const change_handler_13 = () => updateSetting("time_threshold_enabled", localSettings.time_threshold_enabled);
 
 		function input17_input_handler() {
 			localSettings.time_threshold = to_number(this.value);
@@ -9140,14 +9010,14 @@ var app = (function () {
 			($$invalidate(7, localSettings), $$invalidate(1, $settings));
 		}
 
-		const change_handler_12 = () => updateSetting("audio_alerts_enabled", localSettings.audio_alerts_enabled);
+		const change_handler_14 = () => updateSetting("audio_alerts_enabled", localSettings.audio_alerts_enabled);
 
 		function input19_change_handler() {
 			localSettings.attacker_alliance_filter_enabled = this.checked;
 			($$invalidate(7, localSettings), $$invalidate(1, $settings));
 		}
 
-		const change_handler_13 = () => updateSetting("attacker_alliance_filter_enabled", localSettings.attacker_alliance_filter_enabled);
+		const change_handler_15 = () => updateSetting("attacker_alliance_filter_enabled", localSettings.attacker_alliance_filter_enabled);
 
 		function input20_input_handler() {
 			localSettings.attacker_alliance_filter = to_number(this.value);
@@ -9161,7 +9031,7 @@ var app = (function () {
 			($$invalidate(7, localSettings), $$invalidate(1, $settings));
 		}
 
-		const change_handler_14 = () => updateSetting("attacker_corporation_filter_enabled", localSettings.attacker_corporation_filter_enabled);
+		const change_handler_16 = () => updateSetting("attacker_corporation_filter_enabled", localSettings.attacker_corporation_filter_enabled);
 
 		function input22_input_handler() {
 			localSettings.attacker_corporation_filter = to_number(this.value);
@@ -9175,7 +9045,7 @@ var app = (function () {
 			($$invalidate(7, localSettings), $$invalidate(1, $settings));
 		}
 
-		const change_handler_15 = () => updateSetting("attacker_ship_type_filter_enabled", localSettings.attacker_ship_type_filter_enabled);
+		const change_handler_17 = () => updateSetting("attacker_ship_type_filter_enabled", localSettings.attacker_ship_type_filter_enabled);
 
 		function input24_input_handler() {
 			localSettings.attacker_ship_type_filter = to_number(this.value);
@@ -9189,7 +9059,7 @@ var app = (function () {
 			($$invalidate(7, localSettings), $$invalidate(1, $settings));
 		}
 
-		const change_handler_16 = () => updateSetting("victim_alliance_filter_enabled", localSettings.victim_alliance_filter_enabled);
+		const change_handler_18 = () => updateSetting("victim_alliance_filter_enabled", localSettings.victim_alliance_filter_enabled);
 
 		function input26_input_handler() {
 			localSettings.victim_alliance_filter = to_number(this.value);
@@ -9203,7 +9073,7 @@ var app = (function () {
 			($$invalidate(7, localSettings), $$invalidate(1, $settings));
 		}
 
-		const change_handler_17 = () => updateSetting("victim_corporation_filter_enabled", localSettings.victim_corporation_filter_enabled);
+		const change_handler_19 = () => updateSetting("victim_corporation_filter_enabled", localSettings.victim_corporation_filter_enabled);
 
 		function input28_input_handler() {
 			localSettings.victim_corporation_filter = to_number(this.value);
@@ -9217,7 +9087,7 @@ var app = (function () {
 			($$invalidate(7, localSettings), $$invalidate(1, $settings));
 		}
 
-		const change_handler_18 = () => updateSetting("solar_system_filter_enabled", localSettings.solar_system_filter_enabled);
+		const change_handler_20 = () => updateSetting("solar_system_filter_enabled", localSettings.solar_system_filter_enabled);
 
 		function input30_input_handler() {
 			localSettings.solar_system_filter = to_number(this.value);
@@ -9226,89 +9096,89 @@ var app = (function () {
 
 		const input_handler_12 = () => updateSetting("solar_system_filter", localSettings.solar_system_filter);
 
-		function input0_change_handler_1() {
+		function input0_change_handler_2() {
 			localSettings.location_type_filter_enabled = this.checked;
 			($$invalidate(7, localSettings), $$invalidate(1, $settings));
 		}
 
-		const change_handler_19 = () => updateSetting("location_type_filter_enabled", localSettings.location_type_filter_enabled);
+		const change_handler_21 = () => updateSetting("location_type_filter_enabled", localSettings.location_type_filter_enabled);
 
-		function input0_change_handler_2() {
+		function input0_change_handler_3() {
 			$settings.location_types.highsec = this.checked;
 			settings.set($settings);
 		}
 
-		const change_handler_20 = () => updateSetting("location_types", $settings.location_types);
+		const change_handler_22 = () => updateSetting("location_types", $settings.location_types);
 
-		function input1_change_handler() {
+		function input1_change_handler_1() {
 			localSettings.location_types.lowsec = this.checked;
 			($$invalidate(7, localSettings), $$invalidate(1, $settings));
 		}
 
-		const change_handler_21 = () => updateSetting("location_types", localSettings.location_types);
+		const change_handler_23 = () => updateSetting("location_types", localSettings.location_types);
 
-		function input2_change_handler_1() {
+		function input2_change_handler_2() {
 			localSettings.location_types.nullsec = this.checked;
 			($$invalidate(7, localSettings), $$invalidate(1, $settings));
 		}
 
-		const change_handler_22 = () => updateSetting("location_types", localSettings.location_types);
+		const change_handler_24 = () => updateSetting("location_types", localSettings.location_types);
 
 		function input3_change_handler_1() {
 			localSettings.location_types.wspace = this.checked;
 			($$invalidate(7, localSettings), $$invalidate(1, $settings));
 		}
 
-		const change_handler_23 = () => updateSetting("location_types", localSettings.location_types);
+		const change_handler_25 = () => updateSetting("location_types", localSettings.location_types);
 
 		function input4_change_handler_1() {
 			localSettings.location_types.abyssal = this.checked;
 			($$invalidate(7, localSettings), $$invalidate(1, $settings));
 		}
 
-		const change_handler_24 = () => updateSetting("location_types", localSettings.location_types);
+		const change_handler_26 = () => updateSetting("location_types", localSettings.location_types);
 
-		function input1_change_handler_1() {
+		function input1_change_handler_2() {
 			localSettings.capitals_only = this.checked;
 			($$invalidate(7, localSettings), $$invalidate(1, $settings));
 		}
 
-		const change_handler_25 = () => updateSetting("capitals_only", localSettings.capitals_only);
+		const change_handler_27 = () => updateSetting("capitals_only", localSettings.capitals_only);
 
-		function input2_change_handler_2() {
+		function input2_change_handler_3() {
 			localSettings.combat_label_filter_enabled = this.checked;
 			($$invalidate(7, localSettings), $$invalidate(1, $settings));
 		}
 
-		const change_handler_26 = () => updateSetting("combat_label_filter_enabled", localSettings.combat_label_filter_enabled);
+		const change_handler_28 = () => updateSetting("combat_label_filter_enabled", localSettings.combat_label_filter_enabled);
 
-		function input0_change_handler_3() {
+		function input0_change_handler_4() {
 			localSettings.combat_labels.ganked = this.checked;
 			($$invalidate(7, localSettings), $$invalidate(1, $settings));
 		}
 
-		const change_handler_27 = () => updateSetting("combat_labels", localSettings.combat_labels);
+		const change_handler_29 = () => updateSetting("combat_labels", localSettings.combat_labels);
 
-		function input1_change_handler_2() {
+		function input1_change_handler_3() {
 			localSettings.combat_labels.pvp = this.checked;
 			($$invalidate(7, localSettings), $$invalidate(1, $settings));
 		}
 
-		const change_handler_28 = () => updateSetting("combat_labels", localSettings.combat_labels);
+		const change_handler_30 = () => updateSetting("combat_labels", localSettings.combat_labels);
 
-		function input2_change_handler_3() {
+		function input2_change_handler_4() {
 			localSettings.combat_labels.padding = this.checked;
 			($$invalidate(7, localSettings), $$invalidate(1, $settings));
 		}
 
-		const change_handler_29 = () => updateSetting("combat_labels", localSettings.combat_labels);
+		const change_handler_31 = () => updateSetting("combat_labels", localSettings.combat_labels);
 
 		function input3_change_handler_2() {
 			localSettings.webhook_enabled = this.checked;
 			($$invalidate(7, localSettings), $$invalidate(1, $settings));
 		}
 
-		const change_handler_30 = () => updateSetting("webhook_enabled", localSettings.webhook_enabled);
+		const change_handler_32 = () => updateSetting("webhook_enabled", localSettings.webhook_enabled);
 
 		function input_input_handler() {
 			localSettings.webhook_url = this.value;
@@ -9436,86 +9306,90 @@ var app = (function () {
 			change_handler_1,
 			input3_change_handler,
 			change_handler_2,
-			input_change_handler,
+			input0_change_handler_1,
 			change_handler_3,
-			input4_change_handler,
+			input1_change_handler,
 			change_handler_4,
+			input2_change_handler_1,
+			change_handler_5,
+			input4_change_handler,
+			change_handler_6,
 			input5_input_handler,
 			input_handler_1,
 			input6_input_handler,
 			input_handler_2,
 			input7_change_handler,
-			change_handler_5,
+			change_handler_7,
 			input8_input_handler,
 			input_handler_3,
 			input9_change_handler,
-			change_handler_6,
-			input10_change_handler,
-			change_handler_7,
-			input11_change_handler,
 			change_handler_8,
-			input12_change_handler,
+			input10_change_handler,
 			change_handler_9,
+			input11_change_handler,
+			change_handler_10,
+			input12_change_handler,
+			change_handler_11,
 			input13_input_handler,
 			input_handler_4,
 			input14_change_handler,
-			change_handler_10,
+			change_handler_12,
 			input15_input_handler,
 			input_handler_5,
 			input16_change_handler,
-			change_handler_11,
+			change_handler_13,
 			input17_input_handler,
 			input_handler_6,
 			input18_change_handler,
-			change_handler_12,
+			change_handler_14,
 			input19_change_handler,
-			change_handler_13,
+			change_handler_15,
 			input20_input_handler,
 			input_handler_7,
 			input21_change_handler,
-			change_handler_14,
+			change_handler_16,
 			input22_input_handler,
 			input_handler_8,
 			input23_change_handler,
-			change_handler_15,
+			change_handler_17,
 			input24_input_handler,
 			input_handler_9,
 			input25_change_handler,
-			change_handler_16,
+			change_handler_18,
 			input26_input_handler,
 			input_handler_10,
 			input27_change_handler,
-			change_handler_17,
+			change_handler_19,
 			input28_input_handler,
 			input_handler_11,
 			input29_change_handler,
-			change_handler_18,
+			change_handler_20,
 			input30_input_handler,
 			input_handler_12,
-			input0_change_handler_1,
-			change_handler_19,
 			input0_change_handler_2,
-			change_handler_20,
-			input1_change_handler,
 			change_handler_21,
-			input2_change_handler_1,
-			change_handler_22,
-			input3_change_handler_1,
-			change_handler_23,
-			input4_change_handler_1,
-			change_handler_24,
-			input1_change_handler_1,
-			change_handler_25,
-			input2_change_handler_2,
-			change_handler_26,
 			input0_change_handler_3,
-			change_handler_27,
+			change_handler_22,
+			input1_change_handler_1,
+			change_handler_23,
+			input2_change_handler_2,
+			change_handler_24,
+			input3_change_handler_1,
+			change_handler_25,
+			input4_change_handler_1,
+			change_handler_26,
 			input1_change_handler_2,
-			change_handler_28,
+			change_handler_27,
 			input2_change_handler_3,
+			change_handler_28,
+			input0_change_handler_4,
 			change_handler_29,
-			input3_change_handler_2,
+			input1_change_handler_3,
 			change_handler_30,
+			input2_change_handler_4,
+			change_handler_31,
+			input3_change_handler_2,
+			change_handler_32,
 			input_input_handler,
 			input_handler_13,
 			input4_input_handler,
@@ -68756,6 +68630,42 @@ void main() {
 		}
 	}
 
+	// src/campStore.js
+
+	// Create stores
+	const activeCamps = writable([]);
+
+	socket.on("initialCamps", (camps) => {
+	  activeCamps.set(camps);
+	});
+
+	socket.on("campUpdate", (camps) => {
+	  activeCamps.set(camps);
+	});
+
+	const filteredCamps = derived([activeCamps], ([$activeCamps]) => {
+	  return $activeCamps
+	    .filter((camp) => {
+	      const nonCapsuleKills = camp.kills.filter(
+	        (k) => k.killmail.victim.ship_type_id !== 670
+	      );
+	      return nonCapsuleKills.length >= 2 && camp.probability >= 30;
+	    })
+	    .map((camp) => ({
+	      ...camp,
+	      numAttackers: camp.character_ids.size,
+	      numCorps: camp.corporation_ids.size,
+	      numAlliances: camp.alliance_ids.size,
+	    }))
+	    .sort((a, b) => b.probability - a.probability);
+	});
+
+	// module.exports = {
+	//   isGateCamp,
+	//   updateCamps,
+	//   CAMP_TIMEOUT,
+	// };
+
 	/* src\ActiveCamps.svelte generated by Svelte v4.2.19 */
 	const file$1 = "src\\ActiveCamps.svelte";
 
@@ -68765,7 +68675,7 @@ void main() {
 		return child_ctx;
 	}
 
-	// (102:14) {#if hasInterdictor(camp.kills)}
+	// (101:14) {#if hasInterdictor(camp.kills)}
 	function create_if_block_2$1(ctx) {
 		let span;
 
@@ -68775,7 +68685,7 @@ void main() {
 				span.textContent = "⚠️";
 				attr_dev(span, "class", "interdictor-badge svelte-1m3hpql");
 				attr_dev(span, "title", "Interdictor/HICTOR present");
-				add_location(span, file$1, 102, 16, 3395);
+				add_location(span, file$1, 101, 16, 3366);
 			},
 			m: function mount(target, anchor) {
 				insert_dev(target, span, anchor);
@@ -68791,14 +68701,14 @@ void main() {
 			block,
 			id: create_if_block_2$1.name,
 			type: "if",
-			source: "(102:14) {#if hasInterdictor(camp.kills)}",
+			source: "(101:14) {#if hasInterdictor(camp.kills)}",
 			ctx
 		});
 
 		return block;
 	}
 
-	// (122:14) {#if camp.numAlliances > 0}
+	// (121:14) {#if camp.numAlliances > 0}
 	function create_if_block_1$1(ctx) {
 		let t0;
 		let t1_value = /*camp*/ ctx[3].numAlliances + "";
@@ -68832,14 +68742,14 @@ void main() {
 			block,
 			id: create_if_block_1$1.name,
 			type: "if",
-			source: "(122:14) {#if camp.numAlliances > 0}",
+			source: "(121:14) {#if camp.numAlliances > 0}",
 			ctx
 		});
 
 		return block;
 	}
 
-	// (62:4) {#each camps as camp}
+	// (61:4) {#each camps as camp}
 	function create_each_block(ctx) {
 		let button;
 		let div0;
@@ -68962,48 +68872,48 @@ void main() {
 				span10 = element("span");
 				t30 = text(t30_value);
 				attr_dev(h3, "class", "svelte-1m3hpql");
-				add_location(h3, file$1, 79, 10, 2555);
+				add_location(h3, file$1, 78, 10, 2526);
 				attr_dev(span0, "class", "probability svelte-1m3hpql");
 				set_style(span0, "background-color", getProbabilityColor(/*camp*/ ctx[3].probability));
-				add_location(span0, file$1, 80, 10, 2595);
+				add_location(span0, file$1, 79, 10, 2566);
 				attr_dev(div0, "class", "camp-header svelte-1m3hpql");
-				add_location(div0, file$1, 78, 8, 2518);
+				add_location(div0, file$1, 77, 8, 2489);
 				attr_dev(span1, "class", "stat-label svelte-1m3hpql");
-				add_location(span1, file$1, 90, 12, 2900);
+				add_location(span1, file$1, 89, 12, 2871);
 				attr_dev(span2, "class", "stat-value");
-				add_location(span2, file$1, 91, 12, 2953);
+				add_location(span2, file$1, 90, 12, 2924);
 				attr_dev(div1, "class", "stat-row svelte-1m3hpql");
-				add_location(div1, file$1, 89, 10, 2864);
+				add_location(div1, file$1, 88, 10, 2835);
 				attr_dev(span3, "class", "stat-label svelte-1m3hpql");
-				add_location(span3, file$1, 98, 12, 3175);
+				add_location(span3, file$1, 97, 12, 3146);
 				attr_dev(span4, "class", "stat-value");
-				add_location(span4, file$1, 99, 12, 3230);
+				add_location(span4, file$1, 98, 12, 3201);
 				attr_dev(div2, "class", "stat-row svelte-1m3hpql");
-				add_location(div2, file$1, 97, 10, 3139);
+				add_location(div2, file$1, 96, 10, 3110);
 				attr_dev(span5, "class", "stat-label svelte-1m3hpql");
-				add_location(span5, file$1, 111, 12, 3637);
+				add_location(span5, file$1, 110, 12, 3608);
 				attr_dev(span6, "class", "stat-value value svelte-1m3hpql");
-				add_location(span6, file$1, 112, 12, 3689);
+				add_location(span6, file$1, 111, 12, 3660);
 				attr_dev(div3, "class", "stat-row svelte-1m3hpql");
-				add_location(div3, file$1, 110, 10, 3601);
+				add_location(div3, file$1, 109, 10, 3572);
 				attr_dev(span7, "class", "stat-label svelte-1m3hpql");
-				add_location(span7, file$1, 118, 12, 3859);
+				add_location(span7, file$1, 117, 12, 3830);
 				attr_dev(span8, "class", "stat-value");
-				add_location(span8, file$1, 119, 12, 3917);
+				add_location(span8, file$1, 118, 12, 3888);
 				attr_dev(div4, "class", "stat-row svelte-1m3hpql");
-				add_location(div4, file$1, 117, 10, 3823);
+				add_location(div4, file$1, 116, 10, 3794);
 				attr_dev(span9, "class", "stat-label svelte-1m3hpql");
-				add_location(span9, file$1, 128, 12, 4214);
+				add_location(span9, file$1, 127, 12, 4185);
 				attr_dev(span10, "class", "stat-value time svelte-1m3hpql");
-				add_location(span10, file$1, 129, 12, 4274);
+				add_location(span10, file$1, 128, 12, 4245);
 				attr_dev(div5, "class", "stat-row svelte-1m3hpql");
-				add_location(div5, file$1, 127, 10, 4178);
+				add_location(div5, file$1, 126, 10, 4149);
 				attr_dev(div6, "class", "camp-stats svelte-1m3hpql");
-				add_location(div6, file$1, 88, 8, 2828);
+				add_location(div6, file$1, 87, 8, 2799);
 				attr_dev(button, "class", "camp-card svelte-1m3hpql");
 				attr_dev(button, "type", "button");
 				set_style(button, "border-color", getProbabilityColor(/*camp*/ ctx[3].probability));
-				add_location(button, file$1, 62, 6, 1728);
+				add_location(button, file$1, 61, 6, 1699);
 			},
 			m: function mount(target, anchor) {
 				insert_dev(target, button, anchor);
@@ -69124,14 +69034,14 @@ void main() {
 			block,
 			id: create_each_block.name,
 			type: "each",
-			source: "(62:4) {#each camps as camp}",
+			source: "(61:4) {#each camps as camp}",
 			ctx
 		});
 
 		return block;
 	}
 
-	// (136:4) {#if camps.length === 0}
+	// (135:4) {#if camps.length === 0}
 	function create_if_block$1(ctx) {
 		let p;
 
@@ -69140,7 +69050,7 @@ void main() {
 				p = element("p");
 				p.textContent = "No active gate camps detected";
 				attr_dev(p, "class", "no-camps svelte-1m3hpql");
-				add_location(p, file$1, 136, 6, 4442);
+				add_location(p, file$1, 135, 6, 4413);
 			},
 			m: function mount(target, anchor) {
 				insert_dev(target, p, anchor);
@@ -69156,7 +69066,7 @@ void main() {
 			block,
 			id: create_if_block$1.name,
 			type: "if",
-			source: "(136:4) {#if camps.length === 0}",
+			source: "(135:4) {#if camps.length === 0}",
 			ctx
 		});
 
@@ -69193,11 +69103,11 @@ void main() {
 				t2 = space();
 				if (if_block) if_block.c();
 				attr_dev(h2, "class", "svelte-1m3hpql");
-				add_location(h2, file$1, 59, 2, 1640);
+				add_location(h2, file$1, 58, 2, 1611);
 				attr_dev(div0, "class", "camp-grid svelte-1m3hpql");
-				add_location(div0, file$1, 60, 2, 1670);
+				add_location(div0, file$1, 59, 2, 1641);
 				attr_dev(div1, "class", "active-camps svelte-1m3hpql");
-				add_location(div1, file$1, 58, 0, 1610);
+				add_location(div1, file$1, 57, 0, 1581);
 			},
 			l: function claim(nodes) {
 				throw new Error("options.hydrate only works if the component was compiled with the `hydratable: true` option");
@@ -69339,7 +69249,6 @@ void main() {
 
 		$$self.$capture_state = () => ({
 			filteredCamps,
-			onMount,
 			camps,
 			formatValue,
 			getTimeAgo,

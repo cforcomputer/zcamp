@@ -1,24 +1,25 @@
-const express = require("express");
-const http = require("http");
-const socketIo = require("socket.io");
-const axios = require("axios");
-const { createClient } = require("@libsql/client");
-const bcrypt = require("bcrypt");
-const { kill } = require("process");
+import express from "express";
+import { createServer } from "http";
+import { Server } from "socket.io";
+import axios from "axios";
+import { createClient } from "@libsql/client";
+import { compare, hash } from "bcrypt";
+import serveStatic from "serve-static";
+// import { kill } from "process";
+// Local imports
+import { isGateCamp, updateCamps } from "./campStore.js";
 
 const app = express();
-const server = http.createServer(app);
-const io = socketIo(server);
+const server = createServer(app);
+const io = new Server(server);
 
-// webhook
-const fetch = (...args) =>
-  import("node-fetch").then(({ default: fetch }) => fetch(...args));
-
-app.use(express.static("public"));
+// Express middleware
 app.use(express.json());
+app.use(serveStatic("public"));
 
 const REDISQ_URL = "https://redisq.zkillboard.com/listen.php?queueID=KM_hunter";
 let killmails = [];
+let activeCamps = new Map();
 
 const db = createClient({
   url: process.env.LIBSQL_URL || "file:km_hunter.db",
@@ -353,15 +354,12 @@ async function addShipCategoriesToKillmail(killmail) {
 async function getFilterListsSize(userId) {
   try {
     const { rows } = await db.execute({
-      sql: "SELECT ids FROM filter_lists WHERE user_id = ?",
+      sql: "SELECT COUNT(*) as count FROM filter_lists WHERE user_id = ?",
       args: [userId],
     });
-    const totalSize = rows.reduce(
-      (sum, row) => sum + JSON.stringify(row).length,
-      0
-    );
-    return totalSize;
+    return rows[0].count;
   } catch (err) {
+    console.error("Error getting filter lists size:", err);
     throw err;
   }
 }
@@ -413,7 +411,7 @@ app.post("/api/login", async (req, res) => {
         .json({ success: false, message: "Invalid credentials" });
     }
 
-    const match = await bcrypt.compare(password, user.password);
+    const match = await compare(password, user.password);
     if (match) {
       const { rows: filterLists } = await db.execute({
         sql: "SELECT * FROM filter_lists WHERE user_id = ?",
@@ -445,7 +443,7 @@ app.post("/api/register", async (req, res) => {
   }
 
   try {
-    const hashedPassword = await bcrypt.hash(password, 10);
+    const hashedPassword = await hash(password, 10);
 
     await db.execute({
       sql: "INSERT INTO users (username, password, settings) VALUES (?, ?, ?)",
@@ -1074,57 +1072,50 @@ io.on("connection", (socket) => {
 
   socket.on(
     "createFilterList",
-    ({ name, ids, enabled, isExclude, filter_type }) => {
+    async ({ name, ids, enabled, isExclude, filter_type }) => {
       if (socket.username) {
-        db.get(
-          "SELECT id FROM users WHERE username = ?",
-          [socket.username],
-          (err, row) => {
-            if (err) {
-              console.error("Error fetching user id:", err);
-            } else if (row) {
-              console.log(
-                "Inserting filter list with filter_type:",
-                filter_type
-              ); // Add this log
-              db.run(
-                "INSERT INTO filter_lists (user_id, name, ids, enabled, is_exclude, filter_type) VALUES (?, ?, ?, ?, ?, ?)",
-                [
-                  row.id,
-                  name,
-                  JSON.stringify(ids),
-                  enabled ? 1 : 0,
-                  isExclude ? 1 : 0,
-                  filter_type,
-                ],
-                function (err) {
-                  if (err) {
-                    console.error("Error creating filter list:", err);
-                  } else {
-                    const newFilterList = {
-                      id: this.lastID,
-                      user_id: row.id,
-                      name,
-                      ids,
-                      enabled: Boolean(enabled),
-                      is_exclude: Boolean(isExclude),
-                      filter_type,
-                    };
-                    console.log("Created new filter list:", newFilterList);
-                    socket.emit("filterListCreated", newFilterList);
-                  }
-                }
-              );
-            }
+        try {
+          const { rows } = await db.execute({
+            sql: "SELECT id FROM users WHERE username = ?",
+            args: [socket.username],
+          });
+
+          if (rows[0]) {
+            console.log("Inserting filter list with filter_type:", filter_type);
+            const result = await db.execute({
+              sql: "INSERT INTO filter_lists (user_id, name, ids, enabled, is_exclude, filter_type) VALUES (?, ?, ?, ?, ?, ?)",
+              args: [
+                rows[0].id,
+                name,
+                JSON.stringify(ids),
+                enabled ? 1 : 0,
+                isExclude ? 1 : 0,
+                filter_type,
+              ],
+            });
+
+            const newFilterList = {
+              id: result.lastInsertId,
+              user_id: rows[0].id,
+              name,
+              ids,
+              enabled: Boolean(enabled),
+              is_exclude: Boolean(isExclude),
+              filter_type,
+            };
+            console.log("Created new filter list:", newFilterList);
+            socket.emit("filterListCreated", newFilterList);
           }
-        );
+        } catch (err) {
+          console.error("Error creating filter list:", err);
+        }
       }
     }
   );
 
   socket.on(
     "updateFilterList",
-    ({ id, name, ids, enabled, is_exclude, filter_type }) => {
+    async ({ id, name, ids, enabled, is_exclude, filter_type }) => {
       // Ensure ids is properly processed
       const processedIds = Array.isArray(ids)
         ? ids
@@ -1132,51 +1123,53 @@ io.on("connection", (socket) => {
         ? JSON.parse(ids)
         : ids;
 
-      db.run(
-        "UPDATE filter_lists SET name = ?, ids = ?, enabled = ?, is_exclude = ?, filter_type = ? WHERE id = ?",
-        [
-          name,
-          JSON.stringify(processedIds), // Use processed ids
-          enabled ? 1 : 0,
-          is_exclude ? 1 : 0,
-          filter_type,
+      try {
+        await db.execute({
+          sql: "UPDATE filter_lists SET name = ?, ids = ?, enabled = ?, is_exclude = ?, filter_type = ? WHERE id = ?",
+          args: [
+            name,
+            JSON.stringify(processedIds),
+            enabled ? 1 : 0,
+            is_exclude ? 1 : 0,
+            filter_type,
+            id,
+          ],
+        });
+
+        console.log("Updated filter list:", {
           id,
-        ],
-        (err) => {
-          if (err) {
-            console.error("Error updating filter list:", err);
-          } else {
-            console.log("Updated filter list:", {
-              id,
-              name,
-              ids: processedIds,
-              enabled,
-              is_exclude,
-              filter_type,
-            });
-            socket.emit("filterListUpdated", {
-              id,
-              name,
-              ids: processedIds,
-              enabled,
-              is_exclude,
-              filter_type,
-            });
-          }
-        }
-      );
+          name,
+          ids: processedIds,
+          enabled,
+          is_exclude,
+          filter_type,
+        });
+
+        socket.emit("filterListUpdated", {
+          id,
+          name,
+          ids: processedIds,
+          enabled,
+          is_exclude,
+          filter_type,
+        });
+      } catch (err) {
+        console.error("Error updating filter list:", err);
+      }
     }
   );
 
-  socket.on("deleteFilterList", ({ id }) => {
-    db.run("DELETE FROM filter_lists WHERE id = ?", [id], (err) => {
-      if (err) {
-        console.error("Error deleting filter list:", err);
-      } else {
-        console.log("Deleted filter list:", id);
-        socket.emit("filterListDeleted", { id });
-      }
-    });
+  socket.on("deleteFilterList", async ({ id }) => {
+    try {
+      await db.execute({
+        sql: "DELETE FROM filter_lists WHERE id = ?",
+        args: [id],
+      });
+      console.log("Deleted filter list:", id);
+      socket.emit("filterListDeleted", { id });
+    } catch (err) {
+      console.error("Error deleting filter list:", err);
+    }
   });
 
   socket.on("saveProfile", async (data) => {
@@ -1242,80 +1235,43 @@ io.on("connection", (socket) => {
   });
 
   async function getUserData(username) {
-    return new Promise((resolve, reject) => {
-      db.get(
-        "SELECT id, settings FROM users WHERE username = ?",
-        [username],
-        async (err, user) => {
-          if (err) {
-            reject(new Error("Database error"));
-            return;
-          }
+    try {
+      const { rows: userRows } = await db.execute({
+        sql: "SELECT id, settings FROM users WHERE username = ?",
+        args: [username],
+      });
 
-          if (!user) {
-            reject(new Error("User not found"));
-            return;
-          }
+      if (!userRows[0]) {
+        throw new Error("User not found");
+      }
 
-          try {
-            const filterLists = await getFilterLists(user.id);
-            const profiles = await getProfiles(user.id);
+      const { rows: filterListRows } = await db.execute({
+        sql: "SELECT * FROM filter_lists WHERE user_id = ?",
+        args: [userRows[0].id],
+      });
 
-            resolve({
-              settings: JSON.parse(user.settings || "{}"),
-              filterLists,
-              profiles,
-            });
-          } catch (error) {
-            reject(error);
-          }
-        }
-      );
-    });
-  }
+      const { rows: profileRows } = await db.execute({
+        sql: "SELECT * FROM user_profiles WHERE user_id = ?",
+        args: [userRows[0].id],
+      });
 
-  async function getFilterLists(userId) {
-    return new Promise((resolve, reject) => {
-      db.all(
-        "SELECT * FROM filter_lists WHERE user_id = ?",
-        [userId],
-        (err, rows) => {
-          if (err) {
-            reject(new Error("Error fetching filter lists"));
-            return;
-          }
-          resolve(
-            rows.map((row) => ({
-              ...row,
-              ids: JSON.parse(row.ids),
-              enabled: Boolean(row.enabled),
-              is_exclude: Boolean(row.is_exclude),
-            }))
-          );
-        }
-      );
-    });
-  }
-
-  async function getProfiles(userId) {
-    return new Promise((resolve, reject) => {
-      db.all(
-        "SELECT * FROM user_profiles WHERE user_id = ?",
-        [userId],
-        (err, rows) => {
-          if (err) {
-            reject(new Error("Error fetching profiles"));
-            return;
-          }
-          resolve(
-            rows.map((row) => ({
-              ...row,
-              settings: JSON.parse(row.settings || "{}"),
-            }))
-          );
-        }
-      );
-    });
+      return {
+        settings: JSON.parse(userRows[0].settings || "{}"),
+        filterLists: filterListRows.map((row) => ({
+          ...row,
+          ids: JSON.parse(row.ids),
+          enabled: Boolean(row.enabled),
+          is_exclude: Boolean(row.is_exclude),
+        })),
+        profiles: profileRows.map((row) => ({
+          ...row,
+          settings: JSON.parse(row.settings || "{}"),
+        })),
+      };
+    } catch (error) {
+      console.error("Error getting user data:", error);
+      throw error;
+    }
   }
 
   socket.on("requestSync", async () => {
@@ -1450,52 +1406,6 @@ async function processKillmail(killmail) {
   };
 }
 
-// async function sendWebhookNotification(killmail, webhookUrl) {
-//   try {
-//     const zkillUrl = `https://zkillboard.com/kill/${killmail.killID}/`;
-
-//     const embed = {
-//       title: "New Kill Detected",
-//       url: zkillUrl,
-//       color: 16711680, // Red
-//       fields: [
-//         {
-//           name: "Ship Type",
-//           value: `ID: ${killmail.killmail.victim.ship_type_id}`,
-//           inline: true,
-//         },
-//         {
-//           name: "Total Value",
-//           value: `${(killmail.zkb.totalValue / 1000000).toFixed(2)}M ISK`,
-//           inline: true,
-//         },
-//         {
-//           name: "System",
-//           value: `ID: ${killmail.killmail.solar_system_id}`,
-//           inline: true,
-//         },
-//       ],
-//       timestamp: killmail.killmail.killmail_time,
-//     };
-
-//     const response = await fetch(webhookUrl, {
-//       method: "POST",
-//       headers: {
-//         "Content-Type": "application/json",
-//       },
-//       body: JSON.stringify({
-//         embeds: [embed],
-//       }),
-//     });
-
-//     if (!response.ok) {
-//       throw new Error(`HTTP error! status: ${response.status}`);
-//     }
-//   } catch (error) {
-//     console.error("Error sending webhook notification:", error);
-//   }
-// }
-
 // Function to poll for new killmails from RedisQ
 // Modify the polling function to use processKillmail
 async function pollRedisQ() {
@@ -1503,39 +1413,38 @@ async function pollRedisQ() {
     const response = await axios.get(REDISQ_URL);
     if (response.status === 200 && response.data.package) {
       const killmail = response.data.package;
-
-      // Check if we already have this killmail
-      const isDuplicate = killmails.some((km) => km.killID === killmail.killID);
       if (
-        !isDuplicate &&
+        !isDuplicate(killmail) &&
         isWithinLast24Hours(killmail.killmail.killmail_time)
       ) {
-        try {
-          // Process the killmail with celestial data
-          const processedKillmail = await processKillmail(killmail);
+        const processedKillmail = await processKillmail(killmail);
+        const enrichedKillmail = await addShipCategoriesToKillmail(
+          processedKillmail
+        );
 
-          // Add ship categories
-          const enrichedKillmail = await addShipCategoriesToKillmail(
-            processedKillmail
-          );
+        killmails.push(enrichedKillmail);
+        io.emit("newKillmail", enrichedKillmail);
 
-          // Store and emit the enriched killmail
-          killmails.push(enrichedKillmail);
-          io.emit("newKillmail", enrichedKillmail);
-        } catch (error) {
-          console.error("Failed to process killmail:", error);
+        if (isGateCamp(enrichedKillmail)) {
+          activeCamps = updateCamps(enrichedKillmail, activeCamps);
+          io.emit("campUpdate", Array.from(activeCamps.values()));
         }
-      } else if (isDuplicate) {
-        console.log(`Skipping duplicate killmail: ${killmail.killID}`);
       }
     }
   } catch (error) {
     console.error("Error polling RedisQ:", error);
   }
-
-  // Always set up the next poll, regardless of what happened
   setTimeout(pollRedisQ, 10);
 }
+
+// There are sometimes duplicate killmails in the RedisQ
+function isDuplicate(killmail) {
+  return killmails.some((km) => km.killID === killmail.killID);
+}
+
+io.on("connection", (socket) => {
+  socket.emit("initialCamps", Array.from(activeCamps.values()));
+});
 
 // Function to clean up old killmails
 function cleanupOldKillmails() {

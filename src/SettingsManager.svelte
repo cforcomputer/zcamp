@@ -272,18 +272,44 @@
       Enable Triangulation Filter
     </label>
 
-    {#if localSettings.triangulation_filter_enabled}
+    {#if $settings.triangulation_filter_enabled}
       <label>
         <input
           type="checkbox"
-          bind:checked={localSettings.triangulation_filter_exclude}
+          bind:checked={$settings.triangulation_filter_exclude}
           on:change={() =>
             updateSetting(
               "triangulation_filter_exclude",
-              localSettings.triangulation_filter_exclude
+              $settings.triangulation_filter_exclude
             )}
         />
         Exclude Triangulatable Kills
+      </label>
+
+      <label>
+        <input
+          type="checkbox"
+          bind:checked={$settings.triangulation_filter_near_stargate}
+          on:change={() =>
+            updateSetting(
+              "triangulation_filter_near_stargate",
+              $settings.triangulation_filter_near_stargate
+            )}
+        />
+        Exclude Near-Stargate Kills
+      </label>
+
+      <label>
+        <input
+          type="checkbox"
+          bind:checked={$settings.triangulation_filter_near_celestial}
+          on:change={() =>
+            updateSetting(
+              "triangulation_filter_near_celestial",
+              $settings.triangulation_filter_near_celestial
+            )}
+        />
+        Exclude Near-Celestial Kills
       </label>
     {/if}
 

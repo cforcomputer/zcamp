@@ -1,7 +1,6 @@
 <!-- src/ActiveCamps.svelte -->
 <script>
-  import { filteredCamps } from "./campStore.js";
-  import { onMount } from "svelte";
+  import { filteredCamps } from "../server/campStore.js";
 
   let camps = [];
 

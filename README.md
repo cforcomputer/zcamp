@@ -46,3 +46,10 @@ Tech stack:
 - Easily copy and paste your single discord webhook into the app. It's like a discord bot with zero setup!
 - Also use it as a normal killfeed for your corporation, just make you keep it running in a browser tab.
 
+### Save your filter settings as preset profiles to your account
+
+- Pick up where you left off, or save many profiles to rapidly change your presets to hunt for different things.
+
+### 
+
+-
