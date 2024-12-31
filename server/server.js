@@ -952,23 +952,10 @@ io.on("connection", (socket) => {
       const user = rows[0];
 
       if (user) {
-        const { rows: filterLists } = await db.execute({
-          sql: "SELECT * FROM filter_lists WHERE user_id = ?",
-          args: [user.id],
-        });
+        // Add this line to set the socket username
+        socket.username = username;
 
-        // Clean cache before sending
-        killmails = cleanKillmailsCache(killmails);
-
-        // Send initial data including cached kills and camps
-        socket.emit("initialData", {
-          killmails: killmails, // Send all cached killmails
-          settings: JSON.parse(user.settings),
-          filterLists,
-          activeCamps: Array.from(activeCamps.values()), // Send active camps
-        });
-      } else {
-        socket.emit("loginError", { message: "User not found" });
+        // Rest of login code...
       }
     } catch (err) {
       console.error("Error during login:", err);
@@ -976,79 +963,69 @@ io.on("connection", (socket) => {
     }
   });
 
-  socket.on("fetchProfiles", () => {
-    if (socket.username) {
-      db.get(
-        "SELECT id FROM users WHERE username = ?",
-        [socket.username],
-        (err, row) => {
-          if (err) {
-            console.error("Error fetching user id:", err);
-          } else if (row) {
-            db.all(
-              "SELECT id, name FROM user_profiles WHERE user_id = ?",
-              [row.id],
-              (err, profiles) => {
-                if (err) {
-                  console.error("Error fetching profiles:", err);
-                } else {
-                  console.log("Fetched profiles:", profiles);
-                  socket.emit("profilesFetched", profiles);
-                }
-              }
-            );
-          }
-        }
-      );
+  socket.on("fetchProfiles", async () => {
+    if (!socket.username) {
+      socket.emit("error", { message: "Not logged in" });
+      return;
+    }
+
+    try {
+      // First get the user ID
+      const { rows: userRows } = await db.execute({
+        sql: "SELECT id FROM users WHERE username = ?",
+        args: [socket.username],
+      });
+
+      if (!userRows[0]) {
+        socket.emit("error", { message: "User not found" });
+        return;
+      }
+
+      // Then get the profiles
+      const { rows: profiles } = await db.execute({
+        sql: "SELECT id, name FROM user_profiles WHERE user_id = ?",
+        args: [userRows[0].id],
+      });
+
+      console.log("Fetched profiles:", profiles);
+      socket.emit("profilesFetched", profiles);
+    } catch (error) {
+      console.error("Error fetching profiles:", error);
+      socket.emit("error", { message: "Error fetching profiles" });
     }
   });
 
-  socket.on("deleteProfile", ({ id }) => {
+  socket.on("deleteProfile", async ({ id }) => {
     console.log("Server: Received deleteProfile request for id:", id);
-    if (socket.username) {
-      db.get(
-        "SELECT id FROM users WHERE username = ?",
-        [socket.username],
-        (err, row) => {
-          if (err) {
-            console.error("Server: Error fetching user id:", err);
-            socket.emit("error", { message: "Error deleting profile" });
-          } else if (row) {
-            db.run(
-              "DELETE FROM user_profiles WHERE id = ? AND user_id = ?",
-              [id, row.id],
-              function (err) {
-                if (err) {
-                  console.error("Server: Error deleting profile:", err);
-                  socket.emit("error", { message: "Error deleting profile" });
-                } else {
-                  console.log(
-                    "Server: Deleted profile:",
-                    id,
-                    "Changes:",
-                    this.changes
-                  );
-                  if (this.changes > 0) {
-                    socket.emit("profileDeleted", id);
-                  } else {
-                    console.log("Server: No profile found with id:", id);
-                    socket.emit("error", { message: "Profile not found" });
-                  }
-                }
-              }
-            );
-          } else {
-            console.log(
-              "Server: User not found for username:",
-              socket.username
-            );
-            socket.emit("error", { message: "User not found" });
-          }
-        }
-      );
-    } else {
-      console.log("Server: No username associated with socket");
+    if (!socket.username) {
       socket.emit("error", { message: "Not logged in" });
+      return;
+    }
+
+    try {
+      const { rows } = await db.execute({
+        sql: "SELECT id FROM users WHERE username = ?",
+        args: [socket.username],
+      });
+
+      if (!rows[0]) {
+        socket.emit("error", { message: "User not found" });
+        return;
+      }
+
+      const result = await db.execute({
+        sql: "DELETE FROM user_profiles WHERE id = ? AND user_id = ?",
+        args: [id, rows[0].id],
+      });
+
+      if (result.rowsAffected > 0) {
+        socket.emit("profileDeleted", id);
+      } else {
+        socket.emit("error", { message: "Profile not found" });
+      }
+    } catch (error) {
+      console.error("Server: Error deleting profile:", error);
+      socket.emit("error", { message: "Error deleting profile" });
     }
   });
 

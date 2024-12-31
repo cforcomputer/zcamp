@@ -1,6 +1,5 @@
 <script>
-  import { createEventDispatcher, afterUpdate } from "svelte";
-  import { profiles as profilesStore } from "./store.js";
+  import { createEventDispatcher } from "svelte";
 
   const dispatch = createEventDispatcher();
 
@@ -9,20 +8,10 @@
 
   let newProfileName = "";
 
-  $: {
-    console.log("ProfileListManager.svelte - profiles updated:", profiles);
-  }
-
-  afterUpdate(() => {
-    console.log("ProfileListManager.svelte - afterUpdate. Profiles:", profiles);
-  });
-
   function saveProfile() {
     if (newProfileName) {
       dispatch("saveProfile", { name: newProfileName });
       newProfileName = ""; // Clear the input after saving
-    } else {
-      console.log("No profile name provided");
     }
   }
 
@@ -34,11 +23,8 @@
 
   function deleteProfile() {
     if (selectedProfile) {
-      console.log("ProfileListManager: Deleting profile:", selectedProfile);
       dispatch("deleteProfile", { id: selectedProfile });
-      selectedProfile = null; // Reset selection after delete
-    } else {
-      console.log("ProfileListManager: No profile selected for deletion");
+      selectedProfile = null;
     }
   }
 

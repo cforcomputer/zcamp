@@ -149,36 +149,34 @@
   });
 
   socket.on("profileLoaded", (data) => {
-    console.log("Profile loaded:", data);
-
     // Update settings
-    settings.update((currentSettings) => ({
-      ...currentSettings,
+    settings.set({
+      ...DEFAULT_SETTINGS,
       ...data.settings,
-    }));
-
-    // Update filter lists
-    filterLists.update((currentLists) => {
-      // Remove any lists that no longer exist
-      const validLists = currentLists.filter((list) =>
-        data.filterLists.some((newList) => newList.id === list.id)
-      );
-
-      // Add or update lists from the loaded profile
-      data.filterLists.forEach((newList) => {
-        const index = validLists.findIndex((list) => list.id === newList.id);
-        if (index !== -1) {
-          validLists[index] = { ...validLists[index], ...newList };
-        } else {
-          validLists.push(newList);
-        }
-      });
-
-      return validLists;
     });
 
-    console.log("Profile loaded successfully");
-    // You might want to add a UI notification here
+    // Update filter lists
+    filterLists.set(
+      data.filterLists.map((list) => ({
+        ...list,
+        ids: JSON.parse(list.ids),
+        enabled: Boolean(list.enabled),
+        is_exclude: Boolean(list.is_exclude),
+      }))
+    );
+
+    // Update profiles store
+    profiles.update((currentProfiles) => {
+      const existingIndex = currentProfiles.findIndex((p) => p.id === data.id);
+      if (existingIndex !== -1) {
+        currentProfiles[existingIndex] = data;
+        return [...currentProfiles];
+      }
+      return [...currentProfiles, data];
+    });
+
+    // Force UI update
+    selectedProfile = data.id;
   });
 
   socket.on("profilesFetched", (fetchedProfiles) => {
@@ -187,16 +185,10 @@
   });
 
   socket.on("profileDeleted", (deletedId) => {
-    console.log("SettingsManager: Profile deleted:", deletedId);
-    profiles.update((profs) => {
-      const updatedProfs = profs.filter((p) => p.id !== deletedId);
-      console.log("SettingsManager: Updated profiles:", updatedProfs);
-      return updatedProfs;
-    });
+    profiles.update((profs) => profs.filter((p) => p.id !== deletedId));
     if (selectedProfile === deletedId) {
       selectedProfile = null;
     }
-    fetchProfiles(); // Fetch updated list of profiles
   });
 
   socket.on("filterListCreated", (newList) => {
@@ -215,7 +207,7 @@
 
 <div class="settings-manager">
   <ProfileListManager
-    profiles={localProfiles || []}
+    profiles={localProfiles}
     bind:selectedProfile
     on:saveProfile={saveProfile}
     on:loadProfile={loadProfile}

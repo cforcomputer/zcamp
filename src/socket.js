@@ -1,71 +1,45 @@
 import { io } from "socket.io-client";
 import { get } from "svelte/store";
 import { addKillmailToBattles } from "./battleStore.js";
-// import { addKillmailToCamps } from "../server/campStore.js";
-import {
-  killmails,
-  settings,
-  filterLists,
-  profiles,
-  filteredKillmails,
-} from "./store.js";
+import { killmails, settings, filteredKillmails } from "./store.js";
 
-const socket = io("http://localhost:3000");
+const socket = io("http://localhost:3000", {
+  reconnection: true,
+  reconnectionAttempts: 5,
+  reconnectionDelay: 1000,
+  transports: ["websocket"],
+});
 
-let audio;
+const audio =
+  typeof Audio !== "undefined" ? new Audio("audio_files/alert.wav") : null;
 
-if (typeof Audio !== "undefined") {
-  audio = new Audio("audio_files/alert.wav");
-}
+socket.once("connect", () => console.log("Socket connected"));
 
 socket.on("newKillmail", (killmail) => {
-  console.log("Socket.js - Processing killmail:", killmail.killID);
-
   killmails.update((currentKillmails) => {
-    // Ensure we have an array to work with
     const existingKillmails = Array.isArray(currentKillmails)
       ? currentKillmails
       : [];
-
-    // Check if this killmail already exists
-    const isDuplicate = existingKillmails.some(
-      (km) => km.killID === killmail.killID
-    );
-
-    if (isDuplicate) {
-      console.log("Socket.js - Duplicate killmail detected:", killmail.killID);
+    if (existingKillmails.some((km) => km.killID === killmail.killID))
       return existingKillmails;
-    }
 
-    // Get current filtered length for sound alerts
     const prevFilteredLength = get(filteredKillmails).length;
-
-    // Process for battles and camps
     addKillmailToBattles(killmail);
-    // addKillmailToCamps(killmail);
 
-    // Add new killmail and sort chronologically
-    const updatedKillmails = [...existingKillmails, killmail].sort((a, b) => {
-      const timeA = new Date(a.killmail.killmail_time).getTime();
-      const timeB = new Date(b.killmail.killmail_time).getTime();
-      if (timeA === timeB) {
-        return b.killID - a.killID; // Use killID as tiebreaker
-      }
-      return timeB - timeA;
-    });
-
-    // Handle sound alerts after update
     setTimeout(() => {
-      const newFilteredLength = get(filteredKillmails).length;
-      if (newFilteredLength > prevFilteredLength) {
-        const settingsValue = get(settings);
-        if (settingsValue.audio_alerts_enabled) {
-          playSound();
-        }
+      if (
+        get(filteredKillmails).length > prevFilteredLength &&
+        get(settings).audio_alerts_enabled
+      ) {
+        audio?.play().catch((err) => console.error("Audio error:", err));
       }
     }, 0);
 
-    return updatedKillmails;
+    return [...existingKillmails, killmail].sort(
+      (a, b) =>
+        new Date(b.killmail.killmail_time) -
+          new Date(a.killmail.killmail_time) || b.killID - a.killID
+    );
   });
 });
 
@@ -73,11 +47,5 @@ socket.on("killmailsCleared", () => {
   killmails.set([]);
   filteredKillmails.set([]);
 });
-
-function playSound() {
-  audio.play().catch((err) => {
-    console.error("Error playing audio:", err);
-  });
-}
 
 export default socket;
