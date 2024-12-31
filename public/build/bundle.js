@@ -68596,7 +68596,7 @@ void main() {
 		return child_ctx;
 	}
 
-	// (101:14) {#if hasInterdictor(camp.kills)}
+	// (115:14) {#if hasInterdictor(camp.kills)}
 	function create_if_block_2$1(ctx) {
 		let span;
 
@@ -68606,7 +68606,7 @@ void main() {
 				span.textContent = "⚠️";
 				attr_dev(span, "class", "interdictor-badge svelte-1m3hpql");
 				attr_dev(span, "title", "Interdictor/HICTOR present");
-				add_location(span, file$1, 101, 16, 3366);
+				add_location(span, file$1, 115, 16, 3863);
 			},
 			m: function mount(target, anchor) {
 				insert_dev(target, span, anchor);
@@ -68622,14 +68622,14 @@ void main() {
 			block,
 			id: create_if_block_2$1.name,
 			type: "if",
-			source: "(101:14) {#if hasInterdictor(camp.kills)}",
+			source: "(115:14) {#if hasInterdictor(camp.kills)}",
 			ctx
 		});
 
 		return block;
 	}
 
-	// (122:14) {#if camp.involvedAlliances.size > 0}
+	// (136:14) {#if camp.involvedAlliances.size > 0}
 	function create_if_block_1$1(ctx) {
 		let t0;
 		let t1_value = /*camp*/ ctx[3].involvedAlliances.size + "";
@@ -68663,14 +68663,14 @@ void main() {
 			block,
 			id: create_if_block_1$1.name,
 			type: "if",
-			source: "(122:14) {#if camp.involvedAlliances.size > 0}",
+			source: "(136:14) {#if camp.involvedAlliances.size > 0}",
 			ctx
 		});
 
 		return block;
 	}
 
-	// (61:4) {#each camps as camp}
+	// (75:4) {#each camps as camp}
 	function create_each_block(ctx) {
 		let button;
 		let div0;
@@ -68793,48 +68793,48 @@ void main() {
 				span10 = element("span");
 				t30 = text(t30_value);
 				attr_dev(h3, "class", "svelte-1m3hpql");
-				add_location(h3, file$1, 78, 10, 2526);
+				add_location(h3, file$1, 92, 10, 3023);
 				attr_dev(span0, "class", "probability svelte-1m3hpql");
 				set_style(span0, "background-color", getProbabilityColor(/*camp*/ ctx[3].probability));
-				add_location(span0, file$1, 79, 10, 2566);
+				add_location(span0, file$1, 93, 10, 3063);
 				attr_dev(div0, "class", "camp-header svelte-1m3hpql");
-				add_location(div0, file$1, 77, 8, 2489);
+				add_location(div0, file$1, 91, 8, 2986);
 				attr_dev(span1, "class", "stat-label svelte-1m3hpql");
-				add_location(span1, file$1, 89, 12, 2871);
+				add_location(span1, file$1, 103, 12, 3368);
 				attr_dev(span2, "class", "stat-value");
-				add_location(span2, file$1, 90, 12, 2924);
+				add_location(span2, file$1, 104, 12, 3421);
 				attr_dev(div1, "class", "stat-row svelte-1m3hpql");
-				add_location(div1, file$1, 88, 10, 2835);
+				add_location(div1, file$1, 102, 10, 3332);
 				attr_dev(span3, "class", "stat-label svelte-1m3hpql");
-				add_location(span3, file$1, 97, 12, 3146);
+				add_location(span3, file$1, 111, 12, 3643);
 				attr_dev(span4, "class", "stat-value");
-				add_location(span4, file$1, 98, 12, 3201);
+				add_location(span4, file$1, 112, 12, 3698);
 				attr_dev(div2, "class", "stat-row svelte-1m3hpql");
-				add_location(div2, file$1, 96, 10, 3110);
+				add_location(div2, file$1, 110, 10, 3607);
 				attr_dev(span5, "class", "stat-label svelte-1m3hpql");
-				add_location(span5, file$1, 110, 12, 3608);
+				add_location(span5, file$1, 124, 12, 4105);
 				attr_dev(span6, "class", "stat-value value svelte-1m3hpql");
-				add_location(span6, file$1, 111, 12, 3660);
+				add_location(span6, file$1, 125, 12, 4157);
 				attr_dev(div3, "class", "stat-row svelte-1m3hpql");
-				add_location(div3, file$1, 109, 10, 3572);
+				add_location(div3, file$1, 123, 10, 4069);
 				attr_dev(span7, "class", "stat-label svelte-1m3hpql");
-				add_location(span7, file$1, 117, 12, 3830);
+				add_location(span7, file$1, 131, 12, 4327);
 				attr_dev(span8, "class", "stat-value");
-				add_location(span8, file$1, 118, 12, 3888);
+				add_location(span8, file$1, 132, 12, 4385);
 				attr_dev(div4, "class", "stat-row svelte-1m3hpql");
-				add_location(div4, file$1, 116, 10, 3794);
+				add_location(div4, file$1, 130, 10, 4291);
 				attr_dev(span9, "class", "stat-label svelte-1m3hpql");
-				add_location(span9, file$1, 128, 12, 4255);
+				add_location(span9, file$1, 142, 12, 4752);
 				attr_dev(span10, "class", "stat-value time svelte-1m3hpql");
-				add_location(span10, file$1, 129, 12, 4315);
+				add_location(span10, file$1, 143, 12, 4812);
 				attr_dev(div5, "class", "stat-row svelte-1m3hpql");
-				add_location(div5, file$1, 127, 10, 4219);
+				add_location(div5, file$1, 141, 10, 4716);
 				attr_dev(div6, "class", "camp-stats svelte-1m3hpql");
-				add_location(div6, file$1, 87, 8, 2799);
+				add_location(div6, file$1, 101, 8, 3296);
 				attr_dev(button, "class", "camp-card svelte-1m3hpql");
 				attr_dev(button, "type", "button");
 				set_style(button, "border-color", getProbabilityColor(/*camp*/ ctx[3].probability));
-				add_location(button, file$1, 61, 6, 1699);
+				add_location(button, file$1, 75, 6, 2196);
 			},
 			m: function mount(target, anchor) {
 				insert_dev(target, button, anchor);
@@ -68955,14 +68955,14 @@ void main() {
 			block,
 			id: create_each_block.name,
 			type: "each",
-			source: "(61:4) {#each camps as camp}",
+			source: "(75:4) {#each camps as camp}",
 			ctx
 		});
 
 		return block;
 	}
 
-	// (136:4) {#if camps.length === 0}
+	// (150:4) {#if camps.length === 0}
 	function create_if_block$1(ctx) {
 		let p;
 
@@ -68971,7 +68971,7 @@ void main() {
 				p = element("p");
 				p.textContent = "No active gate camps detected";
 				attr_dev(p, "class", "no-camps svelte-1m3hpql");
-				add_location(p, file$1, 136, 6, 4483);
+				add_location(p, file$1, 150, 6, 4980);
 			},
 			m: function mount(target, anchor) {
 				insert_dev(target, p, anchor);
@@ -68987,7 +68987,7 @@ void main() {
 			block,
 			id: create_if_block$1.name,
 			type: "if",
-			source: "(136:4) {#if camps.length === 0}",
+			source: "(150:4) {#if camps.length === 0}",
 			ctx
 		});
 
@@ -69024,11 +69024,11 @@ void main() {
 				t2 = space();
 				if (if_block) if_block.c();
 				attr_dev(h2, "class", "svelte-1m3hpql");
-				add_location(h2, file$1, 58, 2, 1611);
+				add_location(h2, file$1, 72, 2, 2108);
 				attr_dev(div0, "class", "camp-grid svelte-1m3hpql");
-				add_location(div0, file$1, 59, 2, 1641);
+				add_location(div0, file$1, 73, 2, 2138);
 				attr_dev(div1, "class", "active-camps svelte-1m3hpql");
-				add_location(div1, file$1, 57, 0, 1581);
+				add_location(div1, file$1, 71, 0, 2078);
 			},
 			l: function claim(nodes) {
 				throw new Error("options.hydrate only works if the component was compiled with the `hydratable: true` option");
@@ -69135,9 +69135,24 @@ void main() {
 	}
 
 	function getKillFrequency(kills) {
-		const timeSpan = new Date(kills[kills.length - 1].killmail.killmail_time) - new Date(kills[0].killmail.killmail_time);
+		if (kills.length < 2) return "N/A"; // Not enough data for frequency calculation
+
+		// Initialize variables for finding the oldest and newest timestamps
+		let earliest = Infinity;
+
+		let latest = -Infinity;
+
+		// Loop through kills to find the oldest and newest kill times
+		for (const kill of kills) {
+			const killTime = new Date(kill.killmail.killmail_time).getTime();
+			if (killTime < earliest) earliest = killTime;
+			if (killTime > latest) latest = killTime;
+		}
+
+		const timeSpan = latest - earliest;
 		const minutes = timeSpan / (1000 * 60);
-		const rate = kills.length / (minutes || 1);
+		if (minutes <= 0) return "0 kills/min"; // Avoid division by zero or negative rates
+		const rate = kills.length / minutes;
 		return `${rate.toFixed(1)} kills/min`;
 	}
 

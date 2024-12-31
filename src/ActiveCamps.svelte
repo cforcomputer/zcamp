@@ -34,11 +34,25 @@
   }
 
   function getKillFrequency(kills) {
-    const timeSpan =
-      new Date(kills[kills.length - 1].killmail.killmail_time) -
-      new Date(kills[0].killmail.killmail_time);
+    if (kills.length < 2) return "N/A"; // Not enough data for frequency calculation
+
+    // Initialize variables for finding the oldest and newest timestamps
+    let earliest = Infinity;
+    let latest = -Infinity;
+
+    // Loop through kills to find the oldest and newest kill times
+    for (const kill of kills) {
+      const killTime = new Date(kill.killmail.killmail_time).getTime();
+      if (killTime < earliest) earliest = killTime;
+      if (killTime > latest) latest = killTime;
+    }
+
+    const timeSpan = latest - earliest;
     const minutes = timeSpan / (1000 * 60);
-    const rate = kills.length / (minutes || 1);
+
+    if (minutes <= 0) return "0 kills/min"; // Avoid division by zero or negative rates
+
+    const rate = kills.length / minutes;
     return `${rate.toFixed(1)} kills/min`;
   }
 
