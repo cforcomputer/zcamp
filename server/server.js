@@ -4,6 +4,7 @@ const socketIo = require("socket.io");
 const axios = require("axios");
 const { createClient } = require("@libsql/client");
 const bcrypt = require("bcrypt");
+const { kill } = require("process");
 
 const app = express();
 const server = http.createServer(app);
@@ -92,11 +93,15 @@ const SHIP_CATEGORIES = {
 
 // Parent market group IDs for ship categories
 const PARENT_MARKET_GROUPS = {
-  FRIGATES: 1361,
-  DESTROYERS: 1372,
-  CRUISERS: 1367,
-  BATTLECRUISERS: 1374,
-  BATTLESHIPS: 1376,
+  STRUCTURES: [477, 99, 383, 1320], //deployables, structures, and starbases
+  FIGHTERS: [157], // Fighters
+  SHUTTLES: [391, 1618], // INCLUDES SPECIAL EDITION
+  CORVETTES: 1815,
+  FRIGATES: [1361, 1838, 1619], // includes special edition
+  DESTROYERS: [1372, 2350], // includes special edition
+  CRUISERS: [1367, 1837], // includes special edition
+  BATTLECRUISERS: [1374, 1698], // includes special edition
+  BATTLESHIPS: [1376, 1620], // includes special edition
   CAPITALS: [1381, 2288], // Capital Ships & Supercapital Ships
   INDUSTRIAL: 1382, // Haulers and Industrial Ships
   MINING: 1384, // Mining Barges
@@ -110,30 +115,45 @@ function isWithinLast24Hours(killmailTime) {
   return timeDiff <= 24 * 60 * 60 * 1000; // 24 hours in milliseconds
 }
 
-function isNPC(killmail) {
-  // First check victim
+function isNPC(shipTypeID, killmail) {
   const victim = killmail.killmail.victim;
-  if (
-    !victim.character_id &&
-    victim.corporation_id > 1 &&
-    victim.corporation_id < 1999999
-  ) {
-    return true;
+
+  // Check victim ship type
+  if (victim.ship_type_id === shipTypeID) {
+    if (
+      !victim.character_id &&
+      victim.corporation_id > 1 &&
+      victim.corporation_id < 1999999
+    ) {
+      return true;
+    }
+
+    if (victim.character_id > 3999999) {
+      return false;
+    }
+
+    if (victim.corporation_id > 1999999) {
+      return false;
+    }
   }
 
-  // Then check all attackers
+  // Check attackers for the specific ship type
   for (const attacker of killmail.killmail.attackers) {
-    // If attacker has a character ID > 3999999, not an NPC
-    if (attacker.character_id > 3999999) {
-      return false;
-    }
-    // If attacker corp ID > 1999999, not an NPC
-    if (attacker.corporation_id > 1999999) {
-      return false;
+    if (attacker.ship_type_id === shipTypeID) {
+      if (attacker.character_id > 3999999) {
+        return false;
+      }
+
+      if (attacker.corporation_id > 1999999) {
+        return false;
+      }
+
+      if (!attacker.character_id) {
+        return true;
+      }
     }
   }
 
-  // If we haven't returned false by now, it's an NPC
   return true;
 }
 
@@ -200,14 +220,19 @@ async function determineShipCategory(typeId, killmail) {
       return "concord";
     }
 
-    // Check if it's an NPC based on killmail data
-    if (killmail && isNPC(killmail)) {
-      return "npc";
+    if (response.data.group_id === 29) {
+      return "capsule";
     }
 
     // Check AT ships
     if (SHIP_CATEGORIES.AT_SHIP_IDS.includes(typeId)) {
       return "at_ship";
+    }
+
+    // Check if it's an NPC based on killmail data
+    // Fixed version
+    if (killmail && isNPC(typeId, killmail)) {
+      return "npc";
     }
 
     let marketGroupId = response.data.market_group_id;
@@ -223,15 +248,23 @@ async function determineShipCategory(typeId, killmail) {
 
       if (PARENT_MARKET_GROUPS.CAPITALS.includes(marketGroupId)) {
         return "capital";
-      } else if (marketGroupId === PARENT_MARKET_GROUPS.FRIGATES) {
+      } else if (PARENT_MARKET_GROUPS.STRUCTURES.includes(marketGroupId)) {
+        return "structure";
+      } else if (PARENT_MARKET_GROUPS.SHUTTLES.includes(marketGroupId)) {
+        return "shuttle";
+      } else if (PARENT_MARKET_GROUPS.FIGHTERS.includes(marketGroupId)) {
+        return "fighter";
+      } else if (marketGroupId === PARENT_MARKET_GROUPS.CORVETTES) {
+        return "corvette";
+      } else if (PARENT_MARKET_GROUPS.FRIGATES.includes(marketGroupId)) {
         return "frigate";
-      } else if (marketGroupId === PARENT_MARKET_GROUPS.DESTROYERS) {
+      } else if (PARENT_MARKET_GROUPS.DESTROYERS.includes(marketGroupId)) {
         return "destroyer";
-      } else if (marketGroupId === PARENT_MARKET_GROUPS.CRUISERS) {
+      } else if (PARENT_MARKET_GROUPS.CRUISERS.includes(marketGroupId)) {
         return "cruiser";
-      } else if (marketGroupId === PARENT_MARKET_GROUPS.BATTLECRUISERS) {
+      } else if (PARENT_MARKET_GROUPS.BATTLECRUISERS.includes(marketGroupId)) {
         return "battlecruiser";
-      } else if (marketGroupId === PARENT_MARKET_GROUPS.BATTLESHIPS) {
+      } else if (PARENT_MARKET_GROUPS.BATTLESHIPS.includes(marketGroupId)) {
         return "battleship";
       } else if (marketGroupId === PARENT_MARKET_GROUPS.INDUSTRIAL) {
         return "industrial";
@@ -249,7 +282,7 @@ async function determineShipCategory(typeId, killmail) {
   }
 }
 
-async function getShipCategory(shipTypeId) {
+async function getShipCategory(shipTypeId, killmail) {
   if (!shipTypeId) return null;
 
   try {
@@ -258,7 +291,7 @@ async function getShipCategory(shipTypeId) {
 
     // If not in database, determine category and store it
     if (!category) {
-      category = await determineShipCategory(shipTypeId);
+      category = await determineShipCategory(shipTypeId, killmail);
       // Ensure we wait for the storage operation to complete
       await storeShipCategory(shipTypeId, category);
       console.log(`Stored new ship category for ${shipTypeId}: ${category}`);
@@ -273,25 +306,38 @@ async function getShipCategory(shipTypeId) {
 
 async function addShipCategoriesToKillmail(killmail) {
   try {
-    // Get victim ship category - ensure we await the full process
+    // Get victim ship category with killmail for NPC/structure checks
     const victimCategory = await getShipCategory(
-      killmail.killmail.victim.ship_type_id
+      killmail.killmail.victim.ship_type_id,
+      killmail
     );
 
-    // Initialize categories object
+    // Initialize categories object only if a valid category is found
+    if (!victimCategory) {
+      return killmail;
+    }
+
     killmail.shipCategories = {
       victim: victimCategory,
       attackers: [],
     };
 
-    // Process attacker ships sequentially to avoid race conditions
-    for (const attacker of killmail.killmail.attackers) {
-      if (attacker.ship_type_id) {
-        const category = await getShipCategory(attacker.ship_type_id);
+    // Process only ship types, not weapon types
+    const attackerShipTypes = killmail.killmail.attackers
+      .map((attacker) => attacker.ship_type_id)
+      .filter((shipTypeId) => shipTypeId); // Remove any null/undefined ship types
+
+    // Process unique ship types to avoid redundant API calls
+    const uniqueShipTypes = [...new Set(attackerShipTypes)];
+
+    for (const shipTypeId of uniqueShipTypes) {
+      const category = await getShipCategory(shipTypeId, killmail);
+
+      // Only add if a valid category is found
+      if (category) {
         killmail.shipCategories.attackers.push({
-          attackerId: attacker.character_id,
-          shipTypeId: attacker.ship_type_id,
-          category: category,
+          shipTypeId,
+          category,
         });
       }
     }
