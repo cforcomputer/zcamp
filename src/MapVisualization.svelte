@@ -321,9 +321,9 @@
   async function fetchCelestials(killmailId, retryCount = 3) {
     for (let i = 0; i < retryCount; i++) {
       try {
-        console.log(
-          `Fetching celestials for killmail: ${killmailId} (attempt ${i + 1})`
-        );
+        // console.log(
+        //   `Fetching celestials for killmail: ${killmailId} (attempt ${i + 1})`
+        // );
         const response = await fetch(`/api/celestials/${killmailId}`);
 
         if (!response.ok) {

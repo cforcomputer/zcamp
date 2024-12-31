@@ -221,12 +221,12 @@
 
   function formatValue(value) {
     if (value >= 1000000000) {
-      return (value / 1000000000).toFixed(2) + "B";
+      return (value / 1000000000).toFixed(0) + "B";
     }
     if (value >= 1000000) {
-      return (value / 1000000).toFixed(2) + "M";
+      return (value / 1000000).toFixed(0) + "M";
     }
-    return (value / 1000).toFixed(2) + "K";
+    return (value / 1000).toFixed(0) + "K";
   }
 
   function handleClick(event) {
@@ -266,13 +266,13 @@
   // In animate function
   function animate() {
     if (!canvas || !ctx) {
-      console.log("Canvas or context not available");
+      // console.log("Canvas or context not available");
       return;
     }
 
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    console.log("Drawing bubbles:", bubbles.size);
+    // console.log("Drawing bubbles:", bubbles.size);
 
     bubbles.forEach((bubble) => {
       if (bubble.needsPositioning && canvas) {
@@ -338,7 +338,7 @@
       });
     }
 
-    console.log("Processing filtered battles:", battles.length);
+    // console.log("Processing filtered battles:", battles.length);
 
     // Generate unique IDs based on system and first kill if battleId not present
     battles.forEach((battle) => {
@@ -357,7 +357,7 @@
     // Create new bubbles for battles that don't have them
     battles.forEach((battle) => {
       if (!bubbles.has(battle.id)) {
-        console.log("Creating new bubble for battle:", battle.id);
+        // console.log("Creating new bubble for battle:", battle.id);
         bubbles.set(battle.id, new Bubble(battle));
       } else {
         // Update existing bubble with new battle data

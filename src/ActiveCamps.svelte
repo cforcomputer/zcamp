@@ -117,9 +117,10 @@
           <div class="stat-row">
             <span class="stat-label">Composition:</span>
             <span class="stat-value">
-              {camp.numAttackers} pilots from {camp.numCorps} corps
-              {#if camp.numAlliances > 0}
-                in {camp.numAlliances} alliances
+              {camp.involvedCharacters.length} pilots from {camp
+                .involvedCorporations.length} corps
+              {#if camp.involvedAlliances.size > 0}
+                in {camp.involvedAlliances.size} alliances
               {/if}
             </span>
           </div>

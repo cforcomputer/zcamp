@@ -1,60 +1,12 @@
-// src/campStore.js
-
 import { writable, derived } from "svelte/store";
 import socket from "../src/socket.js";
 
-// Create stores
-export const activeCamps = writable([]);
+// Constants
 export const CAMP_TIMEOUT = 60 * 60 * 1000;
+export const CAPSULE_ID = 670;
 
-socket.on("initialCamps", (camps) => {
-  activeCamps.set(camps);
-});
-
-socket.on("campUpdate", (camps) => {
-  activeCamps.set(camps);
-});
-
-export const filteredCamps = derived([activeCamps], ([$activeCamps]) => {
-  return $activeCamps
-    .filter((camp) => {
-      const nonCapsuleKills = camp.kills.filter(
-        (k) => k.killmail.victim.ship_type_id !== 670
-      );
-      return nonCapsuleKills.length >= 2 && camp.probability >= 30;
-    })
-    .map((camp) => ({
-      ...camp,
-      numAttackers: camp.character_ids.size,
-      numCorps: camp.corporation_ids.size,
-      numAlliances: camp.alliance_ids.size,
-    }))
-    .sort((a, b) => b.probability - a.probability);
-});
-
-const CAPSULE_ID = 670;
-
-export function isGateCamp(killmail) {
-  if (!killmail.pinpoints?.nearestCelestial) return false;
-  return (
-    killmail.pinpoints.nearestCelestial.name
-      .toLowerCase()
-      .includes("stargate") ||
-    killmail.pinpoints.nearestCelestial.name.toLowerCase().includes("gate to")
-  );
-}
-
-function getAttackerIds(attackers) {
-  return {
-    character_ids: new Set(
-      attackers.map((a) => a.character_id).filter(Boolean)
-    ),
-    corporation_ids: new Set(
-      attackers.map((a) => a.corporation_id).filter(Boolean)
-    ),
-    alliance_ids: new Set(attackers.map((a) => a.alliance_id).filter(Boolean)),
-  };
-}
+// Private camp tracking
+const camps = new Map();
 
 function getAttackerOverlap(kills) {
   const firstAttackers = {
@@ -72,21 +24,18 @@ function getAttackerOverlap(kills) {
       if (
         attacker.character_id &&
         firstAttackers.characters.has(attacker.character_id)
-      ) {
+      )
         overlap.characters++;
-      }
       if (
         attacker.corporation_id &&
         firstAttackers.corporations.has(attacker.corporation_id)
-      ) {
+      )
         overlap.corporations++;
-      }
       if (
         attacker.alliance_id &&
         firstAttackers.alliances.has(attacker.alliance_id)
-      ) {
+      )
         overlap.alliances++;
-      }
     });
   }
 
@@ -94,11 +43,6 @@ function getAttackerOverlap(kills) {
 }
 
 function calculateCampProbability(camp) {
-  const now = new Date().getTime();
-  const lastKillTime = new Date(
-    camp.kills[camp.kills.length - 1].killmail.killmail_time
-  ).getTime();
-
   if (camp.kills.every((k) => k.zkb.npc)) return 0;
 
   const nonCapsuleKills = camp.kills.filter(
@@ -108,80 +52,147 @@ function calculateCampProbability(camp) {
 
   let probability = 0;
 
-  const hasIndustrials = camp.kills.some(
-    (k) => k.shipCategories?.victim === "industrial"
+  // Combat presence
+  const hasInterdictor = camp.kills.some((kill) =>
+    kill.killmail.attackers.some((a) =>
+      [22456, 22464, 22452, 22460, 12013, 12017, 12021, 12025].includes(
+        a.ship_type_id
+      )
+    )
   );
-  if (hasIndustrials) probability += 20;
+  if (hasInterdictor) probability += 40;
 
-  camp.kills.forEach((kill) => {
-    const attackerCategories = kill.shipCategories?.attackers || [];
-    const hasCapitals = attackerCategories.some(
-      (a) => a.category === "capital"
-    );
-    if (hasCapitals) probability += 25;
+  // Attacker overlap check
+  const overlap = getAttackerOverlap(camp.kills);
+  if (overlap.characters > 0) probability += 40;
+  else if (overlap.corporations > 0) probability += 20;
 
-    const combatShips = attackerCategories.filter(
-      (a) => a.category === "combat"
-    );
-    if (combatShips.length >= 3) probability += 15;
-  });
+  // Victim type check
+  if (camp.kills.some((k) => k.shipCategories?.victim === "industrial"))
+    probability += 20;
 
-  const attackerOverlap = getAttackerOverlap(camp.kills);
-  if (attackerOverlap.characters > 0) probability += 30;
-  else if (attackerOverlap.corporations > 0) probability += 20;
-  else if (attackerOverlap.alliances > 0) probability += 10;
-
-  return Math.min(100, Math.max(0, probability));
+  return Math.min(100, probability);
 }
 
-export function updateCamps(killmail, activeCamps) {
+// Exported Functions
+export function isGateCamp(killmail) {
+  if (!killmail.pinpoints?.nearestCelestial) return false;
+  return killmail.pinpoints.nearestCelestial.name
+    .toLowerCase()
+    .includes("stargate");
+}
+
+export function updateCamps(killmail) {
+  let currentCamps = [];
+  activeCamps.subscribe((value) => {
+    currentCamps = value;
+  })();
+
   const systemId = killmail.killmail.solar_system_id;
   const stargateName = killmail.pinpoints.nearestCelestial.name;
   const campId = `${systemId}-${stargateName}`;
+  const now = Date.now();
 
-  const now = new Date().getTime();
-  for (const [id, camp] of activeCamps.entries()) {
-    const age = now - new Date(camp.lastKill).getTime();
-    if (age > CAMP_TIMEOUT) {
-      activeCamps.delete(id);
-    }
-  }
+  currentCamps = currentCamps.filter(
+    (camp) => now - new Date(camp.lastKill).getTime() <= CAMP_TIMEOUT
+  );
 
-  const existingCamp = activeCamps.get(campId);
+  const existingCamp = currentCamps.find((c) => c.id === campId);
+
   if (existingCamp) {
     existingCamp.kills.push(killmail);
     existingCamp.lastKill = killmail.killmail.killmail_time;
     existingCamp.totalValue += killmail.zkb.totalValue;
-
-    const ids = getAttackerIds(killmail.killmail.attackers);
-    ids.character_ids.forEach((id) => existingCamp.character_ids.add(id));
-    ids.corporation_ids.forEach((id) => existingCamp.corporation_ids.add(id));
-    ids.alliance_ids.forEach((id) => existingCamp.alliance_ids.add(id));
-
-    existingCamp.probability = calculateCampProbability(existingCamp);
-    activeCamps.set(campId, existingCamp);
+    existingCamp.involvedCharacters = Array.from(
+      new Set([
+        ...existingCamp.involvedCharacters,
+        ...killmail.killmail.attackers
+          .map((a) => a.character_id)
+          .filter(Boolean),
+        killmail.killmail.victim.character_id,
+      ])
+    );
+    existingCamp.involvedCorporations = Array.from(
+      new Set([
+        ...existingCamp.involvedCorporations,
+        ...killmail.killmail.attackers
+          .map((a) => a.corporation_id)
+          .filter(Boolean),
+        killmail.killmail.victim.corporation_id,
+      ])
+    );
+    existingCamp.involvedAlliances = Array.from(
+      new Set([
+        ...existingCamp.involvedAlliances,
+        ...killmail.killmail.attackers
+          .map((a) => a.alliance_id)
+          .filter(Boolean),
+        killmail.killmail.victim.alliance_id,
+      ])
+    );
+    existingCamp.probability = calculateCampProbability(existingCamp); // Add this
   } else {
-    const ids = getAttackerIds(killmail.killmail.attackers);
     const newCamp = {
+      id: campId,
       systemId,
       stargateName,
       kills: [killmail],
       totalValue: killmail.zkb.totalValue,
       lastKill: killmail.killmail.killmail_time,
-      character_ids: ids.character_ids,
-      corporation_ids: ids.corporation_ids,
-      alliance_ids: ids.alliance_ids,
-      probability: 0,
+      involvedCharacters: Array.from(
+        new Set([
+          killmail.killmail.victim.character_id,
+          ...killmail.killmail.attackers
+            .map((a) => a.character_id)
+            .filter(Boolean),
+        ])
+      ),
+      involvedCorporations: Array.from(
+        new Set([
+          killmail.killmail.victim.corporation_id,
+          ...killmail.killmail.attackers
+            .map((a) => a.corporation_id)
+            .filter(Boolean),
+        ])
+      ),
+      involvedAlliances: Array.from(
+        new Set([
+          killmail.killmail.victim.alliance_id,
+          ...killmail.killmail.attackers
+            .map((a) => a.alliance_id)
+            .filter(Boolean),
+        ])
+      ),
     };
-    newCamp.probability = calculateCampProbability(newCamp);
-    activeCamps.set(campId, newCamp);
+    newCamp.probability = calculateCampProbability(newCamp); // Add this
+    currentCamps.push(newCamp);
   }
 
-  return activeCamps;
+  activeCamps.set(currentCamps);
+  return currentCamps;
 }
+// Svelte Stores
+export const activeCamps = writable([]);
 
-// module.exports = {
-//   isGateCamp,
-//   updateCamps,
-//   CAMP_TIMEOUT,
-// };
+socket.on("initialCamps", (camps) => activeCamps.set(camps));
+socket.on("campUpdate", (camps) => activeCamps.set(camps));
+
+export const filteredCamps = derived([activeCamps], ([$activeCamps]) => {
+  return $activeCamps
+    .filter((camp) => {
+      const nonCapsuleKills = camp.kills.filter(
+        (k) => k.killmail.victim.ship_type_id !== CAPSULE_ID
+      );
+      return nonCapsuleKills.length >= 2 && camp.probability >= 30;
+    })
+    .map((camp) => ({
+      ...camp,
+      numAttackers: camp.involvedCharacters.length, // Changed from character_ids
+      numCorps: camp.involvedCorporations.length, // Changed from corporation_ids
+      numAlliances: camp.involvedAlliances.length, // Changed from alliance_ids
+      lastKillTime: new Date(camp.lastKill).getTime(),
+      age: Date.now() - new Date(camp.lastKill).getTime(),
+      isActive: Date.now() - new Date(camp.lastKill).getTime() <= CAMP_TIMEOUT,
+    }))
+    .sort((a, b) => b.probability - a.probability);
+});

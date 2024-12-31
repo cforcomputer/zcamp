@@ -957,12 +957,15 @@ io.on("connection", (socket) => {
           args: [user.id],
         });
 
+        // Clean cache before sending
+        killmails = cleanKillmailsCache(killmails);
+
+        // Send initial data including cached kills and camps
         socket.emit("initialData", {
-          killmails: killmails.filter((km) =>
-            isWithinLast24Hours(km.killmail.killmail_time)
-          ),
+          killmails: killmails, // Send all cached killmails
           settings: JSON.parse(user.settings),
           filterLists,
+          activeCamps: Array.from(activeCamps.values()), // Send active camps
         });
       } else {
         socket.emit("loginError", { message: "User not found" });
@@ -1348,7 +1351,7 @@ async function ensureCelestialData(systemId) {
 
     if (rows[0]) {
       const celestialData = JSON.parse(rows[0].celestial_data);
-      console.log("Retrieved cached celestial data:", celestialData[0]);
+      // console.log("Retrieved cached celestial data:", celestialData[0]);
       return celestialData;
     }
 
@@ -1413,6 +1416,10 @@ async function pollRedisQ() {
     const response = await axios.get(REDISQ_URL);
     if (response.status === 200 && response.data.package) {
       const killmail = response.data.package;
+
+      // Clean old killmails first
+      killmails = cleanKillmailsCache(killmails);
+
       if (
         !isDuplicate(killmail) &&
         isWithinLast24Hours(killmail.killmail.killmail_time)
@@ -1422,11 +1429,12 @@ async function pollRedisQ() {
           processedKillmail
         );
 
+        // Add to cache
         killmails.push(enrichedKillmail);
         io.emit("newKillmail", enrichedKillmail);
 
         if (isGateCamp(enrichedKillmail)) {
-          activeCamps = updateCamps(enrichedKillmail, activeCamps);
+          activeCamps = updateCamps(enrichedKillmail); // Should only pass killmail
           io.emit("campUpdate", Array.from(activeCamps.values()));
         }
       }
@@ -1446,16 +1454,16 @@ io.on("connection", (socket) => {
   socket.emit("initialCamps", Array.from(activeCamps.values()));
 });
 
-// Function to clean up old killmails
-function cleanupOldKillmails() {
-  killmails = killmails.filter((km) =>
-    isWithinLast24Hours(km.killmail.killmail_time)
-  );
-  console.log(`Cleaned up killmails. Current count: ${killmails.length}`);
+function cleanKillmailsCache(killmails) {
+  const now = new Date();
+  return killmails.filter((km) => {
+    const killTime = new Date(km.killmail.killmail_time);
+    const timeDiff = now - killTime;
+    return timeDiff <= 24 * 60 * 60 * 1000; // 24 hours
+  });
 }
 
 server.listen(3000, () => {
   console.log("Server running on http://localhost:3000");
   pollRedisQ(); // Start polling RedisQ
-  setInterval(cleanupOldKillmails, 60 * 60 * 1000); // Run cleanup every hour
 });
