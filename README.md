@@ -1,7 +1,19 @@
-npm install
+# WreckHunter
 
-npm i postcss-load-config
+## Installation instructions
 
-npm run build
+`npm install`
 
-node .\server\server.js
+`npm i postcss-load-config`
+
+`npm run build`
+
+`node .\server\server.js`
+
+Tech stack:
+
+- LibSQL
+- NodeJS
+- Redis (serve and retrieve)
+- Svelte frontend with shadn/UI
+- ThreeJS for visualizations

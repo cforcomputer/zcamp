@@ -19,18 +19,18 @@
     "three": "^0.168.0"
   },
   "dependencies": {
+    "@libsql/client": "^0.5.6",
     "axios": "^1.7.6",
     "bcrypt": "^5.1.1",
     "dotenv": "^10.0.0",
     "express": "^4.17.1",
     "gsap": "^3.12.5",
+    "node-fetch": "^3.3.0",
     "postcss-load-config": "^6.0.1",
     "socket.io": "^4.1.2",
     "socket.io-client": "^4.1.2",
-    "sqlite3": "^5.1.7",
     "svelte-preprocess": "^6.0.2",
     "ws": "^8.18.0",
-    "xml2js": "^0.6.2",
-    "node-fetch": "^3.3.0"
+    "xml2js": "^0.6.2"
   }
 }
