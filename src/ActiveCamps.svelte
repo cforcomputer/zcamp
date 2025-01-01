@@ -34,26 +34,22 @@
   }
 
   function getKillFrequency(kills) {
-    if (kills.length < 2) return "N/A"; // Not enough data for frequency calculation
+    if (kills.length === 0) return "N/A";
 
-    // Initialize variables for finding the oldest and newest timestamps
-    let earliest = Infinity;
-    let latest = -Infinity;
+    const now = Date.now();
+    const oldestKillTime = new Date(kills[0].killmail.killmail_time).getTime();
 
-    // Loop through kills to find the oldest and newest kill times
-    for (const kill of kills) {
-      const killTime = new Date(kill.killmail.killmail_time).getTime();
-      if (killTime < earliest) earliest = killTime;
-      if (killTime > latest) latest = killTime;
+    const timeSpanMilliseconds = now - oldestKillTime;
+    const timeSpanHours = Math.floor(timeSpanMilliseconds / (1000 * 60 * 60));
+    const timeSpanMinutes = Math.floor(
+      (timeSpanMilliseconds % (1000 * 60 * 60)) / (1000 * 60)
+    );
+
+    if (timeSpanHours > 0) {
+      return `Detected ${timeSpanHours}h ${timeSpanMinutes}m ago`;
+    } else {
+      return `Detected ${timeSpanMinutes}m ago`;
     }
-
-    const timeSpan = latest - earliest;
-    const minutes = timeSpan / (1000 * 60);
-
-    if (minutes <= 0) return "0 kills/min"; // Avoid division by zero or negative rates
-
-    const rate = kills.length / minutes;
-    return `${rate.toFixed(1)} kills/min`;
   }
 
   function hasInterdictor(kills) {
@@ -76,6 +72,7 @@
       <button
         class="camp-card"
         type="button"
+        data-state={camp.state}
         style="border-color: {getProbabilityColor(camp.probability)}"
         on:click={() => {
           const latestKill = camp.kills[camp.kills.length - 1];
@@ -128,23 +125,41 @@
             >
           </div>
 
-          <div class="stat-row">
-            <span class="stat-label">Composition:</span>
-            <span class="stat-value">
-              {camp.involvedCharacters.length} pilots from {camp
-                .involvedCorporations.length} corps
-              {#if camp.involvedAlliances.size > 0}
-                in {camp.involvedAlliances.size} alliances
-              {/if}
-            </span>
-          </div>
+          <div class="camp-stats">
+            <div class="stat-row">
+              <span class="stat-label">Composition:</span>
+              <span class="stat-value">
+                {#if camp.composition}
+                  {camp.composition.activeCount}/{camp.composition
+                    .originalCount} active campers
+                  {#if camp.composition.killedCount > 0}
+                    <span class="killed-count"
+                      >(-{camp.composition.killedCount})</span
+                    >
+                  {/if}
+                  {#if camp.numCorps > 0}
+                    from {camp.numCorps} corps
+                    {#if camp.numAlliances > 0}
+                      in {camp.numAlliances} alliances
+                    {/if}
+                  {/if}
+                {:else}
+                  Computing...
+                {/if}
+              </span>
+            </div>
 
-          <div class="stat-row">
-            <span class="stat-label">Last Activity:</span>
-            <span class="stat-value time">{getTimeAgo(camp.lastKill)}</span>
+            {#if camp.state === "CRASHED"}
+              <div class="crashed-banner">CRASHED</div>
+            {/if}
+
+            <div class="stat-row">
+              <span class="stat-label">Last Activity:</span>
+              <span class="stat-value time">{getTimeAgo(camp.lastKill)}</span>
+            </div>
           </div>
-        </div>
-      </button>
+        </div></button
+      >
     {/each}
 
     {#if camps.length === 0}
@@ -177,6 +192,29 @@
     color: white;
     appearance: none;
     margin: 0;
+  }
+
+  .killed-count {
+    color: #ff4444;
+    font-weight: bold;
+  }
+
+  .crashed-banner {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%) rotate(-15deg);
+    background: #ff4444;
+    color: white;
+    padding: 0.5em 1em;
+    font-weight: bold;
+    border-radius: 4px;
+    z-index: 1;
+  }
+
+  .camp-card[data-state="CRASHED"] {
+    opacity: 0.7;
+    filter: grayscale(0.7);
   }
 
   .camp-card:hover {

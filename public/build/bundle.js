@@ -6041,7 +6041,7 @@ var app = (function () {
 	}
 
 	// (59:2) {:else}
-	function create_else_block$2(ctx) {
+	function create_else_block$3(ctx) {
 		let each_blocks = [];
 		let each_1_lookup = new Map();
 		let each_1_anchor;
@@ -6092,7 +6092,7 @@ var app = (function () {
 
 		dispatch_dev("SvelteRegisterBlock", {
 			block,
-			id: create_else_block$2.name,
+			id: create_else_block$3.name,
 			type: "else",
 			source: "(59:2) {:else}",
 			ctx
@@ -6292,7 +6292,7 @@ var app = (function () {
 
 		function select_block_type(ctx, dirty) {
 			if (/*localFilterLists*/ ctx[0].length === 0) return create_if_block$6;
-			return create_else_block$2;
+			return create_else_block$3;
 		}
 
 		let current_block_type = select_block_type(ctx);
@@ -6813,7 +6813,7 @@ var app = (function () {
 	const file$6 = "src\\SettingsManager.svelte";
 
 	// (218:2) {#if localSettings}
-	function create_if_block_3$1(ctx) {
+	function create_if_block_3$2(ctx) {
 		let label0;
 		let input0;
 		let t0;
@@ -6946,7 +6946,7 @@ var app = (function () {
 		let input30;
 		let mounted;
 		let dispose;
-		let if_block = /*$settings*/ ctx[1].triangulation_filter_enabled && create_if_block_4$1(ctx);
+		let if_block = /*$settings*/ ctx[1].triangulation_filter_enabled && create_if_block_4$2(ctx);
 
 		const block = {
 			c: function create() {
@@ -7482,7 +7482,7 @@ var app = (function () {
 					if (if_block) {
 						if_block.p(ctx, dirty);
 					} else {
-						if_block = create_if_block_4$1(ctx);
+						if_block = create_if_block_4$2(ctx);
 						if_block.c();
 						if_block.m(t8.parentNode, t8);
 					}
@@ -7679,7 +7679,7 @@ var app = (function () {
 
 		dispatch_dev("SvelteRegisterBlock", {
 			block,
-			id: create_if_block_3$1.name,
+			id: create_if_block_3$2.name,
 			type: "if",
 			source: "(218:2) {#if localSettings}",
 			ctx
@@ -7689,7 +7689,7 @@ var app = (function () {
 	}
 
 	// (267:4) {#if $settings.triangulation_filter_enabled}
-	function create_if_block_4$1(ctx) {
+	function create_if_block_4$2(ctx) {
 		let label0;
 		let input0;
 		let t0;
@@ -7788,7 +7788,7 @@ var app = (function () {
 
 		dispatch_dev("SvelteRegisterBlock", {
 			block,
-			id: create_if_block_4$1.name,
+			id: create_if_block_4$2.name,
 			type: "if",
 			source: "(267:4) {#if $settings.triangulation_filter_enabled}",
 			ctx
@@ -8201,7 +8201,7 @@ var app = (function () {
 		profilelistmanager.$on("loadProfile", /*loadProfile*/ ctx[12]);
 		profilelistmanager.$on("fetchProfiles", /*fetchProfiles*/ ctx[14]);
 		profilelistmanager.$on("deleteProfile", /*deleteProfile*/ ctx[13]);
-		let if_block0 = /*localSettings*/ ctx[7] && create_if_block_3$1(ctx);
+		let if_block0 = /*localSettings*/ ctx[7] && create_if_block_3$2(ctx);
 		let if_block1 = /*$settings*/ ctx[1].location_type_filter_enabled && create_if_block_2$3(ctx);
 		let if_block2 = /*localSettings*/ ctx[7].combat_label_filter_enabled && create_if_block_1$4(ctx);
 		let if_block3 = /*localSettings*/ ctx[7].webhook_enabled && create_if_block$5(ctx);
@@ -8444,7 +8444,7 @@ var app = (function () {
 					if (if_block0) {
 						if_block0.p(ctx, dirty);
 					} else {
-						if_block0 = create_if_block_3$1(ctx);
+						if_block0 = create_if_block_3$2(ctx);
 						if_block0.c();
 						if_block0.m(div1, t1);
 					}
@@ -65202,7 +65202,7 @@ void main() {
 	const file$5 = "src\\MapVisualization.svelte";
 
 	// (1196:20) 
-	function create_if_block_6(ctx) {
+	function create_if_block_6$1(ctx) {
 		let div;
 		let t;
 
@@ -65229,7 +65229,7 @@ void main() {
 
 		dispatch_dev("SvelteRegisterBlock", {
 			block,
-			id: create_if_block_6.name,
+			id: create_if_block_6$1.name,
 			type: "if",
 			source: "(1196:20) ",
 			ctx
@@ -65239,7 +65239,7 @@ void main() {
 	}
 
 	// (1194:4) {#if loading}
-	function create_if_block_5(ctx) {
+	function create_if_block_5$1(ctx) {
 		let div;
 
 		const block = {
@@ -65262,7 +65262,7 @@ void main() {
 
 		dispatch_dev("SvelteRegisterBlock", {
 			block,
-			id: create_if_block_5.name,
+			id: create_if_block_5$1.name,
 			type: "if",
 			source: "(1194:4) {#if loading}",
 			ctx
@@ -65272,7 +65272,7 @@ void main() {
 	}
 
 	// (1202:4) {#if kill.pinpoints}
-	function create_if_block_4(ctx) {
+	function create_if_block_4$1(ctx) {
 		let pre;
 		let t_value = JSON.stringify(/*kill*/ ctx[0].pinpoints, null, 2) + "";
 		let t;
@@ -65300,7 +65300,7 @@ void main() {
 
 		dispatch_dev("SvelteRegisterBlock", {
 			block,
-			id: create_if_block_4.name,
+			id: create_if_block_4$1.name,
 			type: "if",
 			source: "(1202:4) {#if kill.pinpoints}",
 			ctx
@@ -65310,7 +65310,7 @@ void main() {
 	}
 
 	// (1242:4) {:else}
-	function create_else_block$1(ctx) {
+	function create_else_block$2(ctx) {
 		let p;
 
 		const block = {
@@ -65333,7 +65333,7 @@ void main() {
 
 		dispatch_dev("SvelteRegisterBlock", {
 			block,
-			id: create_else_block$1.name,
+			id: create_else_block$2.name,
 			type: "else",
 			source: "(1242:4) {:else}",
 			ctx
@@ -65343,7 +65343,7 @@ void main() {
 	}
 
 	// (1236:88) 
-	function create_if_block_3(ctx) {
+	function create_if_block_3$1(ctx) {
 		let p;
 		let t0;
 		let t1_value = /*kill*/ ctx[0].pinpoints.nearestCelestial.name + "";
@@ -65385,7 +65385,7 @@ void main() {
 
 		dispatch_dev("SvelteRegisterBlock", {
 			block,
-			id: create_if_block_3.name,
+			id: create_if_block_3$1.name,
 			type: "if",
 			source: "(1236:88) ",
 			ctx
@@ -65649,20 +65649,20 @@ void main() {
 		let dispose;
 
 		function select_block_type(ctx, dirty) {
-			if (/*loading*/ ctx[3]) return create_if_block_5;
-			if (/*error*/ ctx[2]) return create_if_block_6;
+			if (/*loading*/ ctx[3]) return create_if_block_5$1;
+			if (/*error*/ ctx[2]) return create_if_block_6$1;
 		}
 
 		let current_block_type = select_block_type(ctx);
 		let if_block0 = current_block_type && current_block_type(ctx);
-		let if_block1 = /*kill*/ ctx[0].pinpoints && create_if_block_4(ctx);
+		let if_block1 = /*kill*/ ctx[0].pinpoints && create_if_block_4$1(ctx);
 
 		function select_block_type_1(ctx, dirty) {
 			if (/*kill*/ ctx[0].pinpoints?.atCelestial) return create_if_block$4;
 			if (/*kill*/ ctx[0].pinpoints?.nearestCelestial && /*kill*/ ctx[0].pinpoints?.triangulationPossible) return create_if_block_1$3;
 			if (/*kill*/ ctx[0].pinpoints?.hasTetrahedron && /*kill*/ ctx[0].pinpoints.points.length >= 4) return create_if_block_2$2;
-			if (/*kill*/ ctx[0].pinpoints?.triangulationPossible && /*kill*/ ctx[0].pinpoints?.nearestCelestial) return create_if_block_3;
-			return create_else_block$1;
+			if (/*kill*/ ctx[0].pinpoints?.triangulationPossible && /*kill*/ ctx[0].pinpoints?.nearestCelestial) return create_if_block_3$1;
+			return create_else_block$2;
 		}
 
 		let current_block_type_1 = select_block_type_1(ctx);
@@ -65763,7 +65763,7 @@ void main() {
 					if (if_block1) {
 						if_block1.p(ctx, dirty);
 					} else {
-						if_block1 = create_if_block_4(ctx);
+						if_block1 = create_if_block_4$1(ctx);
 						if_block1.c();
 						if_block1.m(div2, t5);
 					}
@@ -68561,12 +68561,42 @@ void main() {
 	// Constants
 	const CAMP_TIMEOUT = 60 * 60 * 1000;
 	const CAPSULE_ID = 670;
+
+	const DEFAULT_COMPOSITION = {
+	  originalCount: 0,
+	  activeCount: 0,
+	  killedCount: 0,
+	};
+
+	function ensureSets(camp) {
+	  if (!camp.originalAttackers || !(camp.originalAttackers instanceof Set)) {
+	    camp.originalAttackers = new Set(
+	      Array.isArray(camp.originalAttackers) ? camp.originalAttackers : []
+	    );
+	  }
+	  if (!camp.activeAttackers || !(camp.activeAttackers instanceof Set)) {
+	    camp.activeAttackers = new Set(
+	      Array.isArray(camp.activeAttackers) ? camp.activeAttackers : []
+	    );
+	  }
+	  if (!camp.killedAttackers || !(camp.killedAttackers instanceof Set)) {
+	    camp.killedAttackers = new Set(
+	      Array.isArray(camp.killedAttackers) ? camp.killedAttackers : []
+	    );
+	  }
+	  return camp;
+	}
+
+	socket.on("initialCamps", (camps) => {
+	  activeCamps.set(camps.map((camp) => ensureSets(camp)));
+	});
+
+	socket.on("campUpdate", (camps) => {
+	  activeCamps.set(camps.map((camp) => ensureSets(camp)));
+	});
+
 	// Svelte Stores
 	const activeCamps = writable([]);
-
-	socket.on("initialCamps", (camps) => activeCamps.set(camps));
-	socket.on("campUpdate", (camps) => activeCamps.set(camps));
-
 	const filteredCamps = derived([activeCamps], ([$activeCamps]) => {
 	  return $activeCamps
 	    .filter((camp) => {
@@ -68577,9 +68607,7 @@ void main() {
 	    })
 	    .map((camp) => ({
 	      ...camp,
-	      numAttackers: camp.involvedCharacters.length, // Changed from character_ids
-	      numCorps: camp.involvedCorporations.length, // Changed from corporation_ids
-	      numAlliances: camp.involvedAlliances.length, // Changed from alliance_ids
+	      composition: camp.composition || DEFAULT_COMPOSITION,
 	      lastKillTime: new Date(camp.lastKill).getTime(),
 	      age: Date.now() - new Date(camp.lastKill).getTime(),
 	      isActive: Date.now() - new Date(camp.lastKill).getTime() <= CAMP_TIMEOUT,
@@ -68596,17 +68624,17 @@ void main() {
 		return child_ctx;
 	}
 
-	// (115:14) {#if hasInterdictor(camp.kills)}
-	function create_if_block_2$1(ctx) {
+	// (112:14) {#if hasInterdictor(camp.kills)}
+	function create_if_block_6(ctx) {
 		let span;
 
 		const block = {
 			c: function create() {
 				span = element("span");
 				span.textContent = "⚠️";
-				attr_dev(span, "class", "interdictor-badge svelte-1m3hpql");
+				attr_dev(span, "class", "interdictor-badge svelte-1lgjvui");
 				attr_dev(span, "title", "Interdictor/HICTOR present");
-				add_location(span, file$1, 115, 16, 3863);
+				add_location(span, file$1, 112, 16, 3699);
 			},
 			m: function mount(target, anchor) {
 				insert_dev(target, span, anchor);
@@ -68620,19 +68648,246 @@ void main() {
 
 		dispatch_dev("SvelteRegisterBlock", {
 			block,
-			id: create_if_block_2$1.name,
+			id: create_if_block_6.name,
 			type: "if",
-			source: "(115:14) {#if hasInterdictor(camp.kills)}",
+			source: "(112:14) {#if hasInterdictor(camp.kills)}",
 			ctx
 		});
 
 		return block;
 	}
 
-	// (136:14) {#if camp.involvedAlliances.size > 0}
-	function create_if_block_1$1(ctx) {
+	// (146:16) {:else}
+	function create_else_block$1(ctx) {
+		let t;
+
+		const block = {
+			c: function create() {
+				t = text("Computing...");
+			},
+			m: function mount(target, anchor) {
+				insert_dev(target, t, anchor);
+			},
+			p: noop,
+			d: function destroy(detaching) {
+				if (detaching) {
+					detach_dev(t);
+				}
+			}
+		};
+
+		dispatch_dev("SvelteRegisterBlock", {
+			block,
+			id: create_else_block$1.name,
+			type: "else",
+			source: "(146:16) {:else}",
+			ctx
+		});
+
+		return block;
+	}
+
+	// (132:16) {#if camp.composition}
+	function create_if_block_2$1(ctx) {
+		let t0_value = /*camp*/ ctx[3].composition.activeCount + "";
 		let t0;
-		let t1_value = /*camp*/ ctx[3].involvedAlliances.size + "";
+		let t1;
+		let t2_value = /*camp*/ ctx[3].composition.originalCount + "";
+		let t2;
+		let t3;
+		let t4;
+		let if_block1_anchor;
+		let if_block0 = /*camp*/ ctx[3].composition.killedCount > 0 && create_if_block_5(ctx);
+		let if_block1 = /*camp*/ ctx[3].numCorps > 0 && create_if_block_3(ctx);
+
+		const block = {
+			c: function create() {
+				t0 = text(t0_value);
+				t1 = text("/");
+				t2 = text(t2_value);
+				t3 = text(" active campers\r\n                  ");
+				if (if_block0) if_block0.c();
+				t4 = space();
+				if (if_block1) if_block1.c();
+				if_block1_anchor = empty$1();
+			},
+			m: function mount(target, anchor) {
+				insert_dev(target, t0, anchor);
+				insert_dev(target, t1, anchor);
+				insert_dev(target, t2, anchor);
+				insert_dev(target, t3, anchor);
+				if (if_block0) if_block0.m(target, anchor);
+				insert_dev(target, t4, anchor);
+				if (if_block1) if_block1.m(target, anchor);
+				insert_dev(target, if_block1_anchor, anchor);
+			},
+			p: function update(ctx, dirty) {
+				if (dirty & /*camps*/ 1 && t0_value !== (t0_value = /*camp*/ ctx[3].composition.activeCount + "")) set_data_dev(t0, t0_value);
+				if (dirty & /*camps*/ 1 && t2_value !== (t2_value = /*camp*/ ctx[3].composition.originalCount + "")) set_data_dev(t2, t2_value);
+
+				if (/*camp*/ ctx[3].composition.killedCount > 0) {
+					if (if_block0) {
+						if_block0.p(ctx, dirty);
+					} else {
+						if_block0 = create_if_block_5(ctx);
+						if_block0.c();
+						if_block0.m(t4.parentNode, t4);
+					}
+				} else if (if_block0) {
+					if_block0.d(1);
+					if_block0 = null;
+				}
+
+				if (/*camp*/ ctx[3].numCorps > 0) {
+					if (if_block1) {
+						if_block1.p(ctx, dirty);
+					} else {
+						if_block1 = create_if_block_3(ctx);
+						if_block1.c();
+						if_block1.m(if_block1_anchor.parentNode, if_block1_anchor);
+					}
+				} else if (if_block1) {
+					if_block1.d(1);
+					if_block1 = null;
+				}
+			},
+			d: function destroy(detaching) {
+				if (detaching) {
+					detach_dev(t0);
+					detach_dev(t1);
+					detach_dev(t2);
+					detach_dev(t3);
+					detach_dev(t4);
+					detach_dev(if_block1_anchor);
+				}
+
+				if (if_block0) if_block0.d(detaching);
+				if (if_block1) if_block1.d(detaching);
+			}
+		};
+
+		dispatch_dev("SvelteRegisterBlock", {
+			block,
+			id: create_if_block_2$1.name,
+			type: "if",
+			source: "(132:16) {#if camp.composition}",
+			ctx
+		});
+
+		return block;
+	}
+
+	// (135:18) {#if camp.composition.killedCount > 0}
+	function create_if_block_5(ctx) {
+		let span;
+		let t0;
+		let t1_value = /*camp*/ ctx[3].composition.killedCount + "";
+		let t1;
+		let t2;
+
+		const block = {
+			c: function create() {
+				span = element("span");
+				t0 = text("(-");
+				t1 = text(t1_value);
+				t2 = text(")");
+				attr_dev(span, "class", "killed-count svelte-1lgjvui");
+				add_location(span, file$1, 135, 20, 4528);
+			},
+			m: function mount(target, anchor) {
+				insert_dev(target, span, anchor);
+				append_dev(span, t0);
+				append_dev(span, t1);
+				append_dev(span, t2);
+			},
+			p: function update(ctx, dirty) {
+				if (dirty & /*camps*/ 1 && t1_value !== (t1_value = /*camp*/ ctx[3].composition.killedCount + "")) set_data_dev(t1, t1_value);
+			},
+			d: function destroy(detaching) {
+				if (detaching) {
+					detach_dev(span);
+				}
+			}
+		};
+
+		dispatch_dev("SvelteRegisterBlock", {
+			block,
+			id: create_if_block_5.name,
+			type: "if",
+			source: "(135:18) {#if camp.composition.killedCount > 0}",
+			ctx
+		});
+
+		return block;
+	}
+
+	// (140:18) {#if camp.numCorps > 0}
+	function create_if_block_3(ctx) {
+		let t0;
+		let t1_value = /*camp*/ ctx[3].numCorps + "";
+		let t1;
+		let t2;
+		let if_block_anchor;
+		let if_block = /*camp*/ ctx[3].numAlliances > 0 && create_if_block_4(ctx);
+
+		const block = {
+			c: function create() {
+				t0 = text("from ");
+				t1 = text(t1_value);
+				t2 = text(" corps\r\n                    ");
+				if (if_block) if_block.c();
+				if_block_anchor = empty$1();
+			},
+			m: function mount(target, anchor) {
+				insert_dev(target, t0, anchor);
+				insert_dev(target, t1, anchor);
+				insert_dev(target, t2, anchor);
+				if (if_block) if_block.m(target, anchor);
+				insert_dev(target, if_block_anchor, anchor);
+			},
+			p: function update(ctx, dirty) {
+				if (dirty & /*camps*/ 1 && t1_value !== (t1_value = /*camp*/ ctx[3].numCorps + "")) set_data_dev(t1, t1_value);
+
+				if (/*camp*/ ctx[3].numAlliances > 0) {
+					if (if_block) {
+						if_block.p(ctx, dirty);
+					} else {
+						if_block = create_if_block_4(ctx);
+						if_block.c();
+						if_block.m(if_block_anchor.parentNode, if_block_anchor);
+					}
+				} else if (if_block) {
+					if_block.d(1);
+					if_block = null;
+				}
+			},
+			d: function destroy(detaching) {
+				if (detaching) {
+					detach_dev(t0);
+					detach_dev(t1);
+					detach_dev(t2);
+					detach_dev(if_block_anchor);
+				}
+
+				if (if_block) if_block.d(detaching);
+			}
+		};
+
+		dispatch_dev("SvelteRegisterBlock", {
+			block,
+			id: create_if_block_3.name,
+			type: "if",
+			source: "(140:18) {#if camp.numCorps > 0}",
+			ctx
+		});
+
+		return block;
+	}
+
+	// (142:20) {#if camp.numAlliances > 0}
+	function create_if_block_4(ctx) {
+		let t0;
+		let t1_value = /*camp*/ ctx[3].numAlliances + "";
 		let t1;
 		let t2;
 
@@ -68648,7 +68903,7 @@ void main() {
 				insert_dev(target, t2, anchor);
 			},
 			p: function update(ctx, dirty) {
-				if (dirty & /*camps*/ 1 && t1_value !== (t1_value = /*camp*/ ctx[3].involvedAlliances.size + "")) set_data_dev(t1, t1_value);
+				if (dirty & /*camps*/ 1 && t1_value !== (t1_value = /*camp*/ ctx[3].numAlliances + "")) set_data_dev(t1, t1_value);
 			},
 			d: function destroy(detaching) {
 				if (detaching) {
@@ -68661,16 +68916,48 @@ void main() {
 
 		dispatch_dev("SvelteRegisterBlock", {
 			block,
-			id: create_if_block_1$1.name,
+			id: create_if_block_4.name,
 			type: "if",
-			source: "(136:14) {#if camp.involvedAlliances.size > 0}",
+			source: "(142:20) {#if camp.numAlliances > 0}",
 			ctx
 		});
 
 		return block;
 	}
 
-	// (75:4) {#each camps as camp}
+	// (152:12) {#if camp.state === "CRASHED"}
+	function create_if_block_1$1(ctx) {
+		let div;
+
+		const block = {
+			c: function create() {
+				div = element("div");
+				div.textContent = "CRASHED";
+				attr_dev(div, "class", "crashed-banner svelte-1lgjvui");
+				add_location(div, file$1, 152, 14, 5099);
+			},
+			m: function mount(target, anchor) {
+				insert_dev(target, div, anchor);
+			},
+			d: function destroy(detaching) {
+				if (detaching) {
+					detach_dev(div);
+				}
+			}
+		};
+
+		dispatch_dev("SvelteRegisterBlock", {
+			block,
+			id: create_if_block_1$1.name,
+			type: "if",
+			source: "(152:12) {#if camp.state === \\\"CRASHED\\\"}",
+			ctx
+		});
+
+		return block;
+	}
+
+	// (71:4) {#each camps as camp}
 	function create_each_block(ctx) {
 		let button;
 		let div0;
@@ -68683,7 +68970,7 @@ void main() {
 		let t2;
 		let t3;
 		let t4;
-		let div6;
+		let div7;
 		let div1;
 		let span1;
 		let t6;
@@ -68711,27 +68998,32 @@ void main() {
 		let t18;
 		let t19;
 		let t20;
+		let div6;
 		let div4;
 		let span7;
 		let t22;
 		let span8;
-		let t23_value = /*camp*/ ctx[3].involvedCharacters.length + "";
 		let t23;
 		let t24;
-		let t25_value = /*camp*/ ctx[3].involvedCorporations.length + "";
-		let t25;
-		let t26;
-		let t27;
 		let div5;
 		let span9;
-		let t29;
+		let t26;
 		let span10;
-		let t30_value = getTimeAgo(/*camp*/ ctx[3].lastKill) + "";
-		let t30;
+		let t27_value = getTimeAgo(/*camp*/ ctx[3].lastKill) + "";
+		let t27;
+		let button_data_state_value;
 		let mounted;
 		let dispose;
-		let if_block0 = show_if && create_if_block_2$1(ctx);
-		let if_block1 = /*camp*/ ctx[3].involvedAlliances.size > 0 && create_if_block_1$1(ctx);
+		let if_block0 = show_if && create_if_block_6(ctx);
+
+		function select_block_type(ctx, dirty) {
+			if (/*camp*/ ctx[3].composition) return create_if_block_2$1;
+			return create_else_block$1;
+		}
+
+		let current_block_type = select_block_type(ctx);
+		let if_block1 = current_block_type(ctx);
+		let if_block2 = /*camp*/ ctx[3].state === "CRASHED" && create_if_block_1$1(ctx);
 
 		function click_handler() {
 			return /*click_handler*/ ctx[2](/*camp*/ ctx[3]);
@@ -68748,7 +69040,7 @@ void main() {
 				t2 = text(t2_value);
 				t3 = text("% Confidence");
 				t4 = space();
-				div6 = element("div");
+				div7 = element("div");
 				div1 = element("div");
 				span1 = element("span");
 				span1.textContent = "System:";
@@ -68775,66 +69067,68 @@ void main() {
 				t18 = text(t18_value);
 				t19 = text(" ISK");
 				t20 = space();
+				div6 = element("div");
 				div4 = element("div");
 				span7 = element("span");
 				span7.textContent = "Composition:";
 				t22 = space();
 				span8 = element("span");
-				t23 = text(t23_value);
-				t24 = text(" pilots from ");
-				t25 = text(t25_value);
-				t26 = text(" corps\r\n              ");
-				if (if_block1) if_block1.c();
-				t27 = space();
+				if_block1.c();
+				t23 = space();
+				if (if_block2) if_block2.c();
+				t24 = space();
 				div5 = element("div");
 				span9 = element("span");
 				span9.textContent = "Last Activity:";
-				t29 = space();
+				t26 = space();
 				span10 = element("span");
-				t30 = text(t30_value);
-				attr_dev(h3, "class", "svelte-1m3hpql");
-				add_location(h3, file$1, 92, 10, 3023);
-				attr_dev(span0, "class", "probability svelte-1m3hpql");
+				t27 = text(t27_value);
+				attr_dev(h3, "class", "svelte-1lgjvui");
+				add_location(h3, file$1, 89, 10, 2859);
+				attr_dev(span0, "class", "probability svelte-1lgjvui");
 				set_style(span0, "background-color", getProbabilityColor(/*camp*/ ctx[3].probability));
-				add_location(span0, file$1, 93, 10, 3063);
-				attr_dev(div0, "class", "camp-header svelte-1m3hpql");
-				add_location(div0, file$1, 91, 8, 2986);
-				attr_dev(span1, "class", "stat-label svelte-1m3hpql");
-				add_location(span1, file$1, 103, 12, 3368);
+				add_location(span0, file$1, 90, 10, 2899);
+				attr_dev(div0, "class", "camp-header svelte-1lgjvui");
+				add_location(div0, file$1, 88, 8, 2822);
+				attr_dev(span1, "class", "stat-label svelte-1lgjvui");
+				add_location(span1, file$1, 100, 12, 3204);
 				attr_dev(span2, "class", "stat-value");
-				add_location(span2, file$1, 104, 12, 3421);
-				attr_dev(div1, "class", "stat-row svelte-1m3hpql");
-				add_location(div1, file$1, 102, 10, 3332);
-				attr_dev(span3, "class", "stat-label svelte-1m3hpql");
-				add_location(span3, file$1, 111, 12, 3643);
+				add_location(span2, file$1, 101, 12, 3257);
+				attr_dev(div1, "class", "stat-row svelte-1lgjvui");
+				add_location(div1, file$1, 99, 10, 3168);
+				attr_dev(span3, "class", "stat-label svelte-1lgjvui");
+				add_location(span3, file$1, 108, 12, 3479);
 				attr_dev(span4, "class", "stat-value");
-				add_location(span4, file$1, 112, 12, 3698);
-				attr_dev(div2, "class", "stat-row svelte-1m3hpql");
-				add_location(div2, file$1, 110, 10, 3607);
-				attr_dev(span5, "class", "stat-label svelte-1m3hpql");
-				add_location(span5, file$1, 124, 12, 4105);
-				attr_dev(span6, "class", "stat-value value svelte-1m3hpql");
-				add_location(span6, file$1, 125, 12, 4157);
-				attr_dev(div3, "class", "stat-row svelte-1m3hpql");
-				add_location(div3, file$1, 123, 10, 4069);
-				attr_dev(span7, "class", "stat-label svelte-1m3hpql");
-				add_location(span7, file$1, 131, 12, 4327);
+				add_location(span4, file$1, 109, 12, 3534);
+				attr_dev(div2, "class", "stat-row svelte-1lgjvui");
+				add_location(div2, file$1, 107, 10, 3443);
+				attr_dev(span5, "class", "stat-label svelte-1lgjvui");
+				add_location(span5, file$1, 121, 12, 3941);
+				attr_dev(span6, "class", "stat-value value svelte-1lgjvui");
+				add_location(span6, file$1, 122, 12, 3993);
+				attr_dev(div3, "class", "stat-row svelte-1lgjvui");
+				add_location(div3, file$1, 120, 10, 3905);
+				attr_dev(span7, "class", "stat-label svelte-1lgjvui");
+				add_location(span7, file$1, 129, 14, 4203);
 				attr_dev(span8, "class", "stat-value");
-				add_location(span8, file$1, 132, 12, 4385);
-				attr_dev(div4, "class", "stat-row svelte-1m3hpql");
-				add_location(div4, file$1, 130, 10, 4291);
-				attr_dev(span9, "class", "stat-label svelte-1m3hpql");
-				add_location(span9, file$1, 142, 12, 4752);
-				attr_dev(span10, "class", "stat-value time svelte-1m3hpql");
-				add_location(span10, file$1, 143, 12, 4812);
-				attr_dev(div5, "class", "stat-row svelte-1m3hpql");
-				add_location(div5, file$1, 141, 10, 4716);
-				attr_dev(div6, "class", "camp-stats svelte-1m3hpql");
-				add_location(div6, file$1, 101, 8, 3296);
-				attr_dev(button, "class", "camp-card svelte-1m3hpql");
+				add_location(span8, file$1, 130, 14, 4263);
+				attr_dev(div4, "class", "stat-row svelte-1lgjvui");
+				add_location(div4, file$1, 128, 12, 4165);
+				attr_dev(span9, "class", "stat-label svelte-1lgjvui");
+				add_location(span9, file$1, 156, 14, 5213);
+				attr_dev(span10, "class", "stat-value time svelte-1lgjvui");
+				add_location(span10, file$1, 157, 14, 5275);
+				attr_dev(div5, "class", "stat-row svelte-1lgjvui");
+				add_location(div5, file$1, 155, 12, 5175);
+				attr_dev(div6, "class", "camp-stats svelte-1lgjvui");
+				add_location(div6, file$1, 127, 10, 4127);
+				attr_dev(div7, "class", "camp-stats svelte-1lgjvui");
+				add_location(div7, file$1, 98, 8, 3132);
+				attr_dev(button, "class", "camp-card svelte-1lgjvui");
 				attr_dev(button, "type", "button");
+				attr_dev(button, "data-state", button_data_state_value = /*camp*/ ctx[3].state);
 				set_style(button, "border-color", getProbabilityColor(/*camp*/ ctx[3].probability));
-				add_location(button, file$1, 75, 6, 2196);
+				add_location(button, file$1, 71, 6, 1999);
 			},
 			m: function mount(target, anchor) {
 				insert_dev(target, button, anchor);
@@ -68846,14 +69140,14 @@ void main() {
 				append_dev(span0, t2);
 				append_dev(span0, t3);
 				append_dev(button, t4);
-				append_dev(button, div6);
-				append_dev(div6, div1);
+				append_dev(button, div7);
+				append_dev(div7, div1);
 				append_dev(div1, span1);
 				append_dev(div1, t6);
 				append_dev(div1, span2);
 				append_dev(span2, t7);
-				append_dev(div6, t8);
-				append_dev(div6, div2);
+				append_dev(div7, t8);
+				append_dev(div7, div2);
 				append_dev(div2, span3);
 				append_dev(div2, t10);
 				append_dev(div2, span4);
@@ -68862,29 +69156,28 @@ void main() {
 				append_dev(span4, t13);
 				append_dev(span4, t14);
 				if (if_block0) if_block0.m(span4, null);
-				append_dev(div6, t15);
-				append_dev(div6, div3);
+				append_dev(div7, t15);
+				append_dev(div7, div3);
 				append_dev(div3, span5);
 				append_dev(div3, t17);
 				append_dev(div3, span6);
 				append_dev(span6, t18);
 				append_dev(span6, t19);
-				append_dev(div6, t20);
+				append_dev(div7, t20);
+				append_dev(div7, div6);
 				append_dev(div6, div4);
 				append_dev(div4, span7);
 				append_dev(div4, t22);
 				append_dev(div4, span8);
-				append_dev(span8, t23);
-				append_dev(span8, t24);
-				append_dev(span8, t25);
-				append_dev(span8, t26);
-				if (if_block1) if_block1.m(span8, null);
-				append_dev(div6, t27);
+				if_block1.m(span8, null);
+				append_dev(div6, t23);
+				if (if_block2) if_block2.m(div6, null);
+				append_dev(div6, t24);
 				append_dev(div6, div5);
 				append_dev(div5, span9);
-				append_dev(div5, t29);
+				append_dev(div5, t26);
 				append_dev(div5, span10);
-				append_dev(span10, t30);
+				append_dev(span10, t27);
 
 				if (!mounted) {
 					dispose = listen_dev(button, "click", click_handler, false, false, false, false);
@@ -68907,7 +69200,7 @@ void main() {
 
 				if (show_if) {
 					if (if_block0) ; else {
-						if_block0 = create_if_block_2$1(ctx);
+						if_block0 = create_if_block_6(ctx);
 						if_block0.c();
 						if_block0.m(span4, null);
 					}
@@ -68917,23 +69210,35 @@ void main() {
 				}
 
 				if (dirty & /*camps*/ 1 && t18_value !== (t18_value = formatValue(/*camp*/ ctx[3].totalValue) + "")) set_data_dev(t18, t18_value);
-				if (dirty & /*camps*/ 1 && t23_value !== (t23_value = /*camp*/ ctx[3].involvedCharacters.length + "")) set_data_dev(t23, t23_value);
-				if (dirty & /*camps*/ 1 && t25_value !== (t25_value = /*camp*/ ctx[3].involvedCorporations.length + "")) set_data_dev(t25, t25_value);
 
-				if (/*camp*/ ctx[3].involvedAlliances.size > 0) {
+				if (current_block_type === (current_block_type = select_block_type(ctx)) && if_block1) {
+					if_block1.p(ctx, dirty);
+				} else {
+					if_block1.d(1);
+					if_block1 = current_block_type(ctx);
+
 					if (if_block1) {
-						if_block1.p(ctx, dirty);
-					} else {
-						if_block1 = create_if_block_1$1(ctx);
 						if_block1.c();
 						if_block1.m(span8, null);
 					}
-				} else if (if_block1) {
-					if_block1.d(1);
-					if_block1 = null;
 				}
 
-				if (dirty & /*camps*/ 1 && t30_value !== (t30_value = getTimeAgo(/*camp*/ ctx[3].lastKill) + "")) set_data_dev(t30, t30_value);
+				if (/*camp*/ ctx[3].state === "CRASHED") {
+					if (if_block2) ; else {
+						if_block2 = create_if_block_1$1(ctx);
+						if_block2.c();
+						if_block2.m(div6, t24);
+					}
+				} else if (if_block2) {
+					if_block2.d(1);
+					if_block2 = null;
+				}
+
+				if (dirty & /*camps*/ 1 && t27_value !== (t27_value = getTimeAgo(/*camp*/ ctx[3].lastKill) + "")) set_data_dev(t27, t27_value);
+
+				if (dirty & /*camps*/ 1 && button_data_state_value !== (button_data_state_value = /*camp*/ ctx[3].state)) {
+					attr_dev(button, "data-state", button_data_state_value);
+				}
 
 				if (dirty & /*camps*/ 1) {
 					set_style(button, "border-color", getProbabilityColor(/*camp*/ ctx[3].probability));
@@ -68945,7 +69250,8 @@ void main() {
 				}
 
 				if (if_block0) if_block0.d();
-				if (if_block1) if_block1.d();
+				if_block1.d();
+				if (if_block2) if_block2.d();
 				mounted = false;
 				dispose();
 			}
@@ -68955,14 +69261,14 @@ void main() {
 			block,
 			id: create_each_block.name,
 			type: "each",
-			source: "(75:4) {#each camps as camp}",
+			source: "(71:4) {#each camps as camp}",
 			ctx
 		});
 
 		return block;
 	}
 
-	// (150:4) {#if camps.length === 0}
+	// (165:4) {#if camps.length === 0}
 	function create_if_block$1(ctx) {
 		let p;
 
@@ -68970,8 +69276,8 @@ void main() {
 			c: function create() {
 				p = element("p");
 				p.textContent = "No active gate camps detected";
-				attr_dev(p, "class", "no-camps svelte-1m3hpql");
-				add_location(p, file$1, 150, 6, 4980);
+				attr_dev(p, "class", "no-camps svelte-1lgjvui");
+				add_location(p, file$1, 165, 6, 5463);
 			},
 			m: function mount(target, anchor) {
 				insert_dev(target, p, anchor);
@@ -68987,7 +69293,7 @@ void main() {
 			block,
 			id: create_if_block$1.name,
 			type: "if",
-			source: "(150:4) {#if camps.length === 0}",
+			source: "(165:4) {#if camps.length === 0}",
 			ctx
 		});
 
@@ -69023,12 +69329,12 @@ void main() {
 
 				t2 = space();
 				if (if_block) if_block.c();
-				attr_dev(h2, "class", "svelte-1m3hpql");
-				add_location(h2, file$1, 72, 2, 2108);
-				attr_dev(div0, "class", "camp-grid svelte-1m3hpql");
-				add_location(div0, file$1, 73, 2, 2138);
-				attr_dev(div1, "class", "active-camps svelte-1m3hpql");
-				add_location(div1, file$1, 71, 0, 2078);
+				attr_dev(h2, "class", "svelte-1lgjvui");
+				add_location(h2, file$1, 68, 2, 1911);
+				attr_dev(div0, "class", "camp-grid svelte-1lgjvui");
+				add_location(div0, file$1, 69, 2, 1941);
+				attr_dev(div1, "class", "active-camps svelte-1lgjvui");
+				add_location(div1, file$1, 67, 0, 1881);
 			},
 			l: function claim(nodes) {
 				throw new Error("options.hydrate only works if the component was compiled with the `hydratable: true` option");
@@ -69049,7 +69355,7 @@ void main() {
 				if (if_block) if_block.m(div0, null);
 			},
 			p: function update(ctx, [dirty]) {
-				if (dirty & /*getProbabilityColor, camps, Date, String, window, getTimeAgo, formatValue, hasInterdictor, getKillFrequency, Math*/ 1) {
+				if (dirty & /*camps, getProbabilityColor, Date, String, window, getTimeAgo, formatValue, hasInterdictor, getKillFrequency, Math*/ 1) {
 					each_value = ensure_array_like_dev(/*camps*/ ctx[0]);
 					let i;
 
@@ -69135,25 +69441,18 @@ void main() {
 	}
 
 	function getKillFrequency(kills) {
-		if (kills.length < 2) return "N/A"; // Not enough data for frequency calculation
+		if (kills.length === 0) return "N/A";
+		const now = Date.now();
+		const oldestKillTime = new Date(kills[0].killmail.killmail_time).getTime();
+		const timeSpanMilliseconds = now - oldestKillTime;
+		const timeSpanHours = Math.floor(timeSpanMilliseconds / (1000 * 60 * 60));
+		const timeSpanMinutes = Math.floor(timeSpanMilliseconds % (1000 * 60 * 60) / (1000 * 60));
 
-		// Initialize variables for finding the oldest and newest timestamps
-		let earliest = Infinity;
-
-		let latest = -Infinity;
-
-		// Loop through kills to find the oldest and newest kill times
-		for (const kill of kills) {
-			const killTime = new Date(kill.killmail.killmail_time).getTime();
-			if (killTime < earliest) earliest = killTime;
-			if (killTime > latest) latest = killTime;
+		if (timeSpanHours > 0) {
+			return `Detected ${timeSpanHours}h ${timeSpanMinutes}m ago`;
+		} else {
+			return `Detected ${timeSpanMinutes}m ago`;
 		}
-
-		const timeSpan = latest - earliest;
-		const minutes = timeSpan / (1000 * 60);
-		if (minutes <= 0) return "0 kills/min"; // Avoid division by zero or negative rates
-		const rate = kills.length / minutes;
-		return `${rate.toFixed(1)} kills/min`;
 	}
 
 	function hasInterdictor(kills) {
