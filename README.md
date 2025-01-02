@@ -2,6 +2,9 @@
 
 ## Installation instructions (development server)
 
+Install railway.com CLI
+`railway up` to push changes
+
 `npm install`
 
 `npm i postcss-load-config`

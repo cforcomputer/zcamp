@@ -21,9 +21,10 @@ export default {
       },
       preprocess: require("svelte-preprocess")({
         postcss: true,
+        sourceMap: production ? false : true,
       }),
     }),
-    css({ output: "public/build/bundle.css" }),
+    css({ output: "bundle.css" }),
     resolve({
       browser: true,
       dedupe: ["svelte"],

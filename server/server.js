@@ -4,22 +4,48 @@ import { Server } from "socket.io";
 import axios from "axios";
 import { createClient } from "@libsql/client";
 import { compare, hash } from "bcrypt";
-import serveStatic from "serve-static";
-// import { kill } from "process";
-// Local imports
 import { isGateCamp, updateCamps } from "./campStore.js";
-
+import path from "path";
+import { fileURLToPath } from "url";
+import cors from "cors";
+import fs from "fs";
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 const app = express();
 const server = createServer(app);
 const io = new Server(server);
+const PORT = process.env.PORT || 3000;
 
 // Express middleware
 app.use(express.json());
-app.use(serveStatic("public"));
+
+// Allow cross origin requests
+app.use(
+  cors({
+    origin: [
+      "https://eve-content-hunter-production.up.railway.app",
+      "http://localhost:3000",
+    ],
+    credentials: true,
+  })
+);
+
+// Logging middleware
+app.use((req, res, next) => {
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
+  next();
+});
+
+// Ensure build directory exists
+const buildPath = path.join(__dirname, "../public/build");
+if (!fs.existsSync(buildPath)) {
+  fs.mkdirSync(buildPath, { recursive: true });
+}
 
 const REDISQ_URL = "https://redisq.zkillboard.com/listen.php?queueID=KM_hunter";
 let killmails = [];
 let activeCamps = new Map();
+let isDatabaseInitialized = false;
 
 const db = createClient({
   url: process.env.LIBSQL_URL || "file:km_hunter.db",
@@ -28,6 +54,9 @@ const db = createClient({
 
 // Database setup
 async function initializeDatabase() {
+  console.log("Attempting to connect to database:", process.env.LIBSQL_URL);
+  console.log("Auth token present:", !!process.env.LIBSQL_AUTH_TOKEN);
+
   try {
     await db.execute(`
       CREATE TABLE IF NOT EXISTS users (
@@ -79,11 +108,37 @@ async function initializeDatabase() {
     `);
 
     console.log("Database initialized successfully");
+    isDatabaseInitialized = true;
   } catch (err) {
     console.error("Error initializing database:", err);
+    isDatabaseInitialized = false;
   }
 }
-initializeDatabase();
+
+// Add health check endpoint
+app.get("/health", async (_, res) => {
+  try {
+    if (!isDatabaseInitialized) {
+      console.log("Health check failed: Database not yet initialized");
+      return res.status(503).json({ status: "initializing" });
+    }
+
+    // Test database connection with a simple query
+    const result = await db.execute("SELECT 1 as health_check");
+    if (result.rows?.[0]?.health_check === 1) {
+      console.log("Health check passed");
+      return res.status(200).json({ status: "healthy" });
+    } else {
+      throw new Error("Database query returned unexpected result");
+    }
+  } catch (error) {
+    console.error("Health check failed:", error);
+    return res.status(500).json({
+      status: "unhealthy",
+      error: error.message,
+    });
+  }
+});
 
 const SHIP_CATEGORIES = {
   AT_SHIP_IDS: [
@@ -1440,7 +1495,66 @@ function cleanKillmailsCache(killmails) {
   });
 }
 
-server.listen(3000, () => {
-  console.log("Server running on http://localhost:3000");
-  pollRedisQ(); // Start polling RedisQ
+async function startServer() {
+  try {
+    await initializeDatabase();
+    isDatabaseInitialized = true;
+
+    return new Promise((resolve, reject) => {
+      server
+        .listen(PORT, "0.0.0.0", () => {
+          console.log(`Server running on 0.0.0.0:${PORT}`);
+          pollRedisQ();
+          resolve();
+        })
+        .on("error", (err) => {
+          reject(err);
+        });
+    });
+  } catch (err) {
+    console.error("Error starting server:", err);
+    process.exit(1);
+  }
+}
+
+// server.listen(3000, () => {
+//   console.log("Server running on http://localhost:3000");
+//   pollRedisQ(); // Start polling RedisQ
+// });
+
+// Serve build files with strict MIME types
+app.use(
+  "/build",
+  express.static(buildPath, {
+    setHeaders: (res, filePath) => {
+      if (filePath.endsWith(".js")) {
+        res.setHeader("Content-Type", "application/javascript; charset=utf-8");
+      } else if (filePath.endsWith(".css")) {
+        res.setHeader("Content-Type", "text/css; charset=utf-8");
+      } else if (filePath.endsWith(".map")) {
+        res.setHeader("Content-Type", "application/json; charset=utf-8");
+      }
+    },
+    fallthrough: true,
+  })
+);
+
+// Serve public directory
+app.use(express.static(path.join(__dirname, "../public")));
+
+// Error handler
+app.use((err, req, res, next) => {
+  console.error("Static file error:", {
+    url: req.url,
+    error: err.message,
+    stack: err.stack,
+  });
+  next(err);
 });
+
+// SPA fallback - must be last
+app.get("*", (_, res) => {
+  res.sendFile(path.join(__dirname, "../public/index.html"));
+});
+
+startServer();

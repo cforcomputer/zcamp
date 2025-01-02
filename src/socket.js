@@ -3,11 +3,18 @@ import { get } from "svelte/store";
 import { addKillmailToBattles } from "./battleStore.js";
 import { killmails, settings, filteredKillmails } from "./store.js";
 
-const socket = io("http://localhost:3000", {
+// const socket = io("http://localhost:3000", {
+//   reconnection: true,
+//   reconnectionAttempts: 5,
+//   reconnectionDelay: 1000,
+//   transports: ["websocket"],
+// });
+
+const socket = io("https://eve-content-hunter-production.up.railway.app", {
   reconnection: true,
   reconnectionAttempts: 5,
   reconnectionDelay: 1000,
-  transports: ["websocket"],
+  transports: ["websocket", "polling"], // Add polling as fallback
 });
 
 const audio =
