@@ -501,6 +501,50 @@ app.post("/api/eve-sso/state", (req, res) => {
   res.json({ success: true });
 });
 
+app.post("/api/refresh-token", async (req, res) => {
+  try {
+    const { refresh_token } = req.body;
+
+    const tokenResponse = await axios.post(
+      "https://login.eveonline.com/v2/oauth/token",
+      `grant_type=refresh_token&refresh_token=${refresh_token}`,
+      {
+        headers: {
+          Authorization:
+            "Basic " +
+            Buffer.from(
+              `${EVE_SSO_CONFIG.client_id}:${EVE_SSO_CONFIG.client_secret}`
+            ).toString("base64"),
+          "Content-Type": "application/x-www-form-urlencoded",
+          Host: "login.eveonline.com",
+        },
+      }
+    );
+
+    const { access_token, refresh_token: new_refresh_token } =
+      tokenResponse.data;
+
+    // Update user in database
+    if (req.session?.user?.character_id) {
+      await db.execute({
+        sql: `UPDATE users SET access_token = ?, refresh_token = ? WHERE character_id = ?`,
+        args: [access_token, new_refresh_token, req.session.user.character_id],
+      });
+    }
+
+    // Update session
+    req.session.user = {
+      ...req.session.user,
+      access_token,
+    };
+
+    res.json({ access_token, refresh_token: new_refresh_token });
+  } catch (error) {
+    console.error("Token refresh failed:", error);
+    res.status(500).json({ error: "Failed to refresh token" });
+  }
+});
+
 // Account routes
 app.post("/api/login", async (req, res) => {
   const { username, password } = req.body;

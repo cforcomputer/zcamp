@@ -6,30 +6,25 @@ export const locationError = writable(null);
 
 let pollInterval;
 let lastSystemId = null;
-let cachedCelestialData = null;
 
-const POLL_INTERVAL = 30000; // 30 seconds
+const POLL_INTERVAL = 20000; // 20 seconds
 
-async function getCelestialData(systemId) {
-  // Return cached data if system hasn't changed
-  if (systemId === lastSystemId && cachedCelestialData) {
-    console.log("Using cached celestial data for system:", systemId);
-    return cachedCelestialData;
-  }
-
+async function refreshToken(refreshToken) {
   try {
-    console.log("Fetching new celestial data for system:", systemId);
-    const response = await fetch(`/api/celestials/system/${systemId}`);
-    if (!response.ok) throw new Error("Failed to fetch celestial data");
-    const data = await response.json();
+    const response = await fetch("/api/refresh-token", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      credentials: "include",
+      body: JSON.stringify({ refresh_token: refreshToken }),
+    });
 
-    // Cache the new data
-    lastSystemId = systemId;
-    cachedCelestialData = data;
-    return data;
+    if (!response.ok) throw new Error("Failed to refresh token");
+    return await response.json();
   } catch (err) {
-    console.error("Error fetching celestial data:", err);
-    return null;
+    console.error("Token refresh failed:", err);
+    throw err;
   }
 }
 
@@ -38,182 +33,195 @@ async function checkForGateCamps(systemId, celestialData) {
   const unsubscribe = filteredCamps.subscribe((value) => (camps = value));
 
   try {
-    // Check current system camps
+    // Extract stargates from celestial data
+    const stargates = celestialData
+      .filter((cel) => cel.typename?.includes("Stargate"))
+      .map((gate) => ({
+        destination: {
+          system_name: gate.itemname.match(/\(([^)]+)\)/)[1],
+          system_id: gate.destinationid,
+        },
+      }));
+
+    console.log("Found stargates:", stargates);
+
+    // Current system camps
     const currentSystemCamps = camps.filter(
       (camp) => camp.systemId === systemId
     );
-    if (currentSystemCamps.length > 0) {
-      const gateNames = currentSystemCamps
-        .map((camp) => camp.stargateName)
-        .join(", ");
-      const msg = new SpeechSynthesisUtterance(
-        `Warning! Gate camp detected in your current system at ${gateNames}`
-      );
-      window.speechSynthesis.speak(msg);
-      return { current: currentSystemCamps, connected: [] };
-    }
 
-    // Check connected systems
+    // Connected system camps
     const connectedCamps = camps.filter((camp) => {
-      return camp.stargateName.includes(
-        `(${celestialData[0].solarsystemname})`
-      );
+      const campSystem =
+        camp.kills[0]?.pinpoints?.celestialData?.solarsystemname;
+
+      // Check if this camp's system matches any of our stargate destinations
+      const isConnected = stargates.some((gate) => {
+        const matches =
+          campSystem?.toLowerCase() ===
+          gate.destination.system_name.toLowerCase();
+        console.log("Checking system connection:", {
+          gateDestination: gate.destination.system_name.toLowerCase(),
+          campSystem: campSystem?.toLowerCase(),
+          matches,
+        });
+        return matches;
+      });
+
+      return isConnected;
     });
 
-    if (connectedCamps.length > 0) {
-      const campSystems = connectedCamps
-        .map(
-          (camp) =>
-            `${camp.kills[0]?.pinpoints?.celestialData?.solarsystemname} at ${camp.stargateName}`
-        )
-        .filter(Boolean);
+    console.log("Connected camps found:", connectedCamps);
 
-      if (campSystems.length > 0) {
-        const msg = new SpeechSynthesisUtterance(
-          `Warning! Gate camps detected in connected systems: ${campSystems.join(
-            ", "
-          )}`
-        );
-        window.speechSynthesis.speak(msg);
-      }
-      return { current: [], connected: connectedCamps };
-    }
+    return {
+      current: currentSystemCamps,
+      connected: connectedCamps,
+    };
   } finally {
     unsubscribe();
   }
+}
 
-  return { current: [], connected: [] };
+async function pollLocation() {
+  try {
+    const userData = JSON.parse(sessionStorage.getItem("user"));
+    console.log("Starting location poll...");
+
+    // Check if token needs refresh
+    const now = Math.floor(Date.now() / 1000);
+    if (userData.token_expiry && now >= userData.token_expiry) {
+      console.log("Token expired, refreshing...");
+      const newTokens = await refreshToken(userData.refresh_token);
+
+      // Update user data with new tokens
+      userData.access_token = newTokens.access_token;
+      userData.refresh_token = newTokens.refresh_token;
+      userData.token_expiry = now + newTokens.expires_in;
+
+      // Save updated tokens
+      sessionStorage.setItem("user", JSON.stringify(userData));
+    }
+
+    let response = await fetch(
+      `https://esi.evetech.net/latest/characters/${userData.character_id}/location/`,
+      {
+        headers: {
+          Authorization: `Bearer ${userData.access_token}`,
+        },
+      }
+    );
+
+    const locationData = await response.json();
+    console.log(
+      "Current system:",
+      locationData.solar_system_id,
+      "Last system:",
+      lastSystemId
+    );
+
+    if (locationData.solar_system_id !== lastSystemId) {
+      console.log("System change detected!");
+      const systemResponse = await fetch(
+        `/api/celestials/system/${locationData.solar_system_id}`
+      );
+      if (!systemResponse.ok) throw new Error("Failed to fetch system data");
+
+      const celestialData = await systemResponse.json();
+      const systemName = celestialData[0]?.solarsystemname || "Unknown System";
+      const camps = await checkForGateCamps(
+        locationData.solar_system_id,
+        celestialData
+      );
+
+      // Only create announcement if there are camps
+      if (camps.current.length > 0 || camps.connected.length > 0) {
+        let campStatus = "";
+        if (camps.current.length > 0) {
+          campStatus = `Camp detected at: ${camps.current
+            .map((c) => c.stargateName)
+            .join(", ")}`;
+        } else if (camps.connected.length > 0) {
+          const connectedCampInfo = camps.connected
+            .map((camp) => {
+              const systemName =
+                camp.kills[0]?.pinpoints?.celestialData?.solarsystemname;
+              // Extract just the destination name from "Stargate (Destination)"
+              const gateName =
+                camp.stargateName.match(/\(([^)]+)\)/)?.[1] ||
+                camp.stargateName;
+              return systemName
+                ? `${systemName} (${gateName} gate, ${Math.round(
+                    camp.probability
+                  )}% confidence)`
+                : null;
+            })
+            .filter(Boolean);
+          campStatus = `Active camps in connected systems: ${connectedCampInfo.join(
+            ", "
+          )}`;
+        }
+
+        // Only speak if we have a camp status
+        if (campStatus) {
+          const announcement = `System change. Your current system is ${systemName}. ${campStatus}`;
+          console.log("About to speak:", announcement);
+
+          setTimeout(() => {
+            console.log("Attempting speech...");
+            window.speechSynthesis.cancel();
+            const msg = new SpeechSynthesisUtterance(announcement);
+            window.speechSynthesis.speak(msg);
+            console.log("Speech attempt completed");
+          }, 100);
+        }
+      }
+
+      currentLocation.set({
+        solar_system_id: locationData.solar_system_id,
+        systemName,
+        camps,
+      });
+
+      lastSystemId = locationData.solar_system_id;
+    }
+  } catch (err) {
+    console.error("Location polling error:", err);
+    locationError.set(err.message);
+    stopLocationPolling();
+  }
 }
 
 export async function startLocationPolling() {
   try {
-    console.log("Starting location polling...");
-
-    // Get session data first
-    console.log("Fetching session data...");
     const sessionResponse = await fetch("/api/session", {
       credentials: "include",
     });
-
-    console.log("Session response status:", sessionResponse.status);
-
-    // Log raw response
-    const rawResponse = await sessionResponse.text();
-    console.log("Raw session response:", rawResponse);
-
     if (!sessionResponse.ok) {
-      console.error("Session fetch failed:", rawResponse);
-      locationError.set(`Session verification failed: ${rawResponse}`);
-      return false;
+      throw new Error("Session verification failed");
     }
 
-    // Try parsing JSON
-    let sessionData;
-    try {
-      sessionData = JSON.parse(rawResponse);
-      console.log("Parsed session data:", sessionData);
-    } catch (parseError) {
-      console.error("JSON parse error:", parseError);
-      console.error("Failed to parse response:", rawResponse);
-      locationError.set(`Session data parse error: ${parseError.message}`);
-      return false;
-    }
-
-    const { user } = sessionData;
-    console.log("User data:", {
-      hasCharacterId: !!user?.character_id,
-      hasToken: !!user?.access_token,
-      characterName: user?.character_name,
-      tokenLength: user?.access_token?.length,
-    });
-
+    const { user } = await sessionResponse.json();
     if (!user?.character_id || !user?.access_token) {
-      locationError.set(
+      throw new Error(
         "No authenticated character - Please log in with EVE Online"
       );
-      return false;
     }
 
-    // Store valid session data
-    console.log("Storing session data...");
     sessionStorage.setItem("user", JSON.stringify(user));
 
-    async function pollLocation() {
-      try {
-        const userData = JSON.parse(sessionStorage.getItem("user"));
-        console.log("Polling location for character:", userData.character_id);
-
-        const response = await fetch(
-          `https://esi.evetech.net/latest/characters/${userData.character_id}/location/`,
-          {
-            headers: {
-              Authorization: `Bearer ${userData.access_token}`,
-            },
-          }
-        );
-
-        if (!response.ok) {
-          const errorText = await response.text();
-          console.error("Location fetch error:", errorText);
-          throw new Error(`Failed to fetch location: ${errorText}`);
-        }
-
-        const locationData = await response.json();
-        console.log("Location data received:", locationData);
-
-        // Only fetch celestial data if system changed
-        if (
-          locationData.solar_system_id !== lastSystemId ||
-          !cachedCelestialData
-        ) {
-          console.log("System changed, fetching new celestial data");
-          const celestialData = await getCelestialData(
-            locationData.solar_system_id
-          );
-          if (celestialData) {
-            const systemName = celestialData[0]?.solarsystemname;
-            const campData = await checkForGateCamps(
-              locationData.solar_system_id,
-              celestialData
-            );
-
-            currentLocation.set({
-              ...locationData,
-              systemName,
-              celestialData,
-              camps: campData,
-            });
-          }
-        } else {
-          // Use cached data for same system
-          console.log("Using cached data for system:", lastSystemId);
-          const campData = await checkForGateCamps(
-            locationData.solar_system_id,
-            cachedCelestialData
-          );
-
-          currentLocation.set({
-            ...locationData,
-            systemName: cachedCelestialData[0]?.solarsystemname,
-            celestialData: cachedCelestialData,
-            camps: campData,
-          });
-        }
-      } catch (err) {
-        console.error("Location polling error:", err);
-        locationError.set(err.message);
-        stopLocationPolling();
-      }
+    // Initial poll and announcement
+    await pollLocation();
+    if (currentLocation) {
+      const msg = new SpeechSynthesisUtterance(
+        `Tracking enabled for: ${user.character_name}. Your current system is ${currentLocation.systemName}.`
+      );
+      window.speechSynthesis.speak(msg);
     }
 
-    // Initial poll and start interval
-    await pollLocation();
     pollInterval = setInterval(pollLocation, POLL_INTERVAL);
-    console.log("Location polling started successfully");
     return true;
   } catch (err) {
-    console.error("Failed to start location polling:", err);
-    locationError.set(`Failed to start location polling: ${err.message}`);
+    locationError.set(err.message);
     return false;
   }
 }
@@ -224,4 +232,5 @@ export function stopLocationPolling() {
     pollInterval = null;
   }
   currentLocation.set(null);
+  lastSystemId = null;
 }

@@ -7,9 +7,35 @@
   } from "./locationStore";
   import { onMount, onDestroy } from "svelte";
 
+  let selectedVoice = null;
   let isTracking = false;
   let trackedCharacter = null;
+  let lastSystemId = null;
 
+  function initializeVoice() {
+    window.speechSynthesis.onvoiceschanged = () => {
+      const voices = window.speechSynthesis.getVoices();
+      selectedVoice =
+        voices.find((voice) => voice.name.includes("Microsoft Hazel")) ||
+        voices.find((voice) => voice.lang.includes("en-GB"));
+    };
+  }
+
+  function speak(text) {
+    if (!window.speechSynthesis) {
+      console.error("Speech synthesis not supported");
+      return;
+    }
+
+    const msg = new SpeechSynthesisUtterance(text);
+    if (selectedVoice) {
+      msg.voice = selectedVoice;
+      msg.rate = 0.9;
+      msg.pitch = 1.1;
+    }
+    window.speechSynthesis.cancel(); // Cancel any ongoing speech
+    window.speechSynthesis.speak(msg);
+  }
   function getCampSummary(camps) {
     if (!camps) return "No camp data available";
 
@@ -18,16 +44,36 @@
     }
 
     if (camps.connected.length > 0) {
-      return `Warning! Active camps in connected systems: ${camps.connected
-        .map(
-          (c) =>
-            `${c.kills[0]?.pinpoints?.celestialData?.solarsystemname} at ${c.stargateName}`
-        )
-        .join(", ")}`;
+      const connectedCampInfo = camps.connected
+        .map((camp) => {
+          const systemName =
+            camp.kills[0]?.pinpoints?.celestialData?.solarsystemname;
+          const gateName =
+            camp.stargateName.match(/\(([^)]+)\)/)?.[1] || camp.stargateName;
+          return systemName
+            ? `${systemName} (${gateName} gate, ${Math.round(camp.probability)}% confidence)`
+            : null;
+        })
+        .filter(Boolean);
+      return `Warning! Active camps in connected systems: ${connectedCampInfo.join(", ")}`;
     }
 
     return "There are no active camps in your current system or direct system connections. Cleared to jump.";
   }
+
+  // Subscribe to location changes
+  $: if ($currentLocation && isTracking) {
+    if (lastSystemId !== $currentLocation.solar_system_id) {
+      speak(
+        `System change. Your current system is ${$currentLocation.systemName}. ${getCampSummary($currentLocation.camps)}`
+      );
+      lastSystemId = $currentLocation.solar_system_id;
+    }
+  }
+
+  onMount(() => {
+    initializeVoice();
+  });
 
   async function toggleTracking() {
     try {
@@ -38,17 +84,21 @@
           const userData = JSON.parse(sessionStorage.getItem("user"));
           trackedCharacter = userData?.character_name;
 
+          // Force a camp check regardless of current location
           if ($currentLocation) {
-            const msg = new SpeechSynthesisUtterance(
-              `Tracking enabled for: ${trackedCharacter}. Your current system is ${$currentLocation.systemName}. ${getCampSummary($currentLocation.camps)}`
+            const campSummary = getCampSummary($currentLocation.camps);
+            speak(
+              `Tracking enabled for: ${trackedCharacter}. Your current system is ${$currentLocation.systemName}. ${campSummary}`
             );
-            window.speechSynthesis.speak(msg);
+            // Reset lastSystemId to ensure we check camps on next system change
+            lastSystemId = null;
           }
         }
       } else {
         stopLocationPolling();
         isTracking = false;
         trackedCharacter = null;
+        lastSystemId = null;
       }
     } catch (err) {
       console.error("Error toggling tracking:", err);
@@ -80,7 +130,7 @@
 
   {#if $currentLocation}
     <div class="system-info">
-      <p>Current System: {$currentLocation.systemName}</p>
+      <p class="system-name">Current System: {$currentLocation.systemName}</p>
       <p class="camp-status">{getCampSummary($currentLocation.camps)}</p>
     </div>
   {/if}
@@ -104,6 +154,12 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
+  }
+
+  .system-name {
+    font-size: 1.1em;
+    font-weight: 500;
+    color: #ffd700;
   }
 
   .toggle {
@@ -155,15 +211,6 @@
   .system-info {
     color: white;
     margin: 0;
-  }
-
-  .camp-status {
-    color: #00ff00;
-    margin: 0;
-  }
-
-  .camp-status:has(span:contains("Warning")) {
-    color: #ff4444;
   }
 
   .error {

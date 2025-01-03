@@ -16,6 +16,7 @@
     "esi-location.read_location.v1",
     "esi-bookmarks.read_character_bookmarks.v1",
     "esi-fleets.read_fleet.v1",
+    "esi-ui.write_waypoint.v1",
   ];
 
   const dispatch = createEventDispatcher();
@@ -164,7 +165,7 @@
   <!-- EVE Online SSO Login -->
   <button class="eve-login-btn" on:click={handleEveLogin}>
     <img
-      src="/eve-sso-login-black-small.png"
+      src="/eve-sso-login-b.png"
       alt="Log in with EVE Online"
       width="270"
       height="45"
