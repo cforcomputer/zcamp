@@ -9,12 +9,32 @@ import path from "path";
 import { fileURLToPath } from "url";
 import cors from "cors";
 import fs from "fs";
+import session from "express-session";
+
+// dev
+import dotenv from "dotenv";
+dotenv.config();
+
+const stateStore = new Map();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const app = express();
 const server = createServer(app);
 const io = new Server(server);
 const PORT = process.env.PORT || 3000;
+
+// Login session handling
+app.use(
+  session({
+    secret: process.env.SESSION_SECRET || "dev-secret",
+    resave: false,
+    saveUninitialized: false,
+    cookie: {
+      secure: process.env.NODE_ENV === "production",
+      maxAge: 24 * 60 * 60 * 1000, // 24 hours
+    },
+  })
+);
 
 // Express middleware
 app.use(express.json());
@@ -52,6 +72,19 @@ const db = createClient({
   authToken: process.env.LIBSQL_AUTH_TOKEN, // optional, for remote databases
 });
 
+// SSO configuration
+const EVE_SSO_CONFIG = {
+  client_id: process.env.EVE_CLIENT_ID,
+  client_secret: process.env.EVE_CLIENT_SECRET,
+  callback_url:
+    process.env.EVE_CALLBACK_URL || "http://localhost:3000/callback/",
+};
+
+if (!EVE_SSO_CONFIG.client_id || !EVE_SSO_CONFIG.client_secret) {
+  console.error("EVE SSO credentials not found in environment variables");
+  process.exit(1);
+}
+
 // Database setup
 async function initializeDatabase() {
   console.log("Attempting to connect to database:", process.env.LIBSQL_URL);
@@ -63,7 +96,11 @@ async function initializeDatabase() {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         username TEXT UNIQUE,
         password TEXT,
-        settings TEXT
+        settings TEXT,
+        character_id TEXT UNIQUE,
+        character_name TEXT,
+        access_token TEXT,
+        refresh_token TEXT
       )
     `);
 
@@ -424,6 +461,11 @@ async function fetchCelestialData(systemId) {
     const response = await axios.get(
       `https://www.fuzzwork.co.uk/api/mapdata.php?solarsystemid=${systemId}&format=json`
     );
+
+    if (!Array.isArray(response.data)) {
+      throw new Error("Invalid celestial data format");
+    }
+
     return response.data;
   } catch (error) {
     console.error("Error fetching celestial data:", error);
@@ -449,6 +491,15 @@ async function storeCelestialData(systemId, celestialData) {
     throw error;
   }
 }
+
+app.post("/api/eve-sso/state", (req, res) => {
+  const state = req.body.state;
+  if (!state) {
+    return res.status(400).json({ error: "No state provided" });
+  }
+  stateStore.set(state, { timestamp: Date.now() });
+  res.json({ success: true });
+});
 
 // Account routes
 app.post("/api/login", async (req, res) => {
@@ -604,6 +655,194 @@ app.post("/api/filter-list", async (req, res) => {
   } catch (error) {
     console.error("Server error:", error);
     res.status(500).json({ success: false, message: "Server error" });
+  }
+});
+
+app.get("/api/eve-sso-config", (req, res) => {
+  res.json({
+    clientId: process.env.EVE_CLIENT_ID,
+    callbackUrl: process.env.EVE_CALLBACK_URL,
+  });
+});
+
+app.get("/api/session", (req, res) => {
+  // Check if user exists in session
+  if (!req.session?.user) {
+    return res.status(401).json({
+      error: "No active session",
+    });
+  }
+
+  // Return user data as JSON
+  res.json({
+    user: {
+      id: req.session.user.id,
+      character_id: req.session.user.character_id,
+      character_name: req.session.user.character_name,
+      access_token: req.session.user.access_token,
+    },
+  });
+});
+
+function cleanupStates() {
+  const now = Date.now();
+  for (const [state, data] of stateStore.entries()) {
+    if (now - data.timestamp > 5 * 60 * 1000) {
+      stateStore.delete(state);
+    }
+  }
+}
+
+// for user login
+app.get("/callback", async (req, res) => {
+  const { code, state } = req.query;
+  console.log("Received callback with code:", code);
+  console.log("State:", state);
+
+  try {
+    // Validate state
+    if (!stateStore.has(state)) {
+      console.error("Invalid state:", state);
+      return res.redirect("/?login=error&reason=invalid_state");
+    }
+
+    // Remove used state
+    stateStore.delete(state);
+    cleanupStates();
+
+    // Get access token
+    console.log("Requesting access token...");
+    const tokenResponse = await axios.post(
+      "https://login.eveonline.com/v2/oauth/token",
+      `grant_type=authorization_code&code=${code}`,
+      {
+        headers: {
+          Authorization:
+            "Basic " +
+            Buffer.from(
+              `${EVE_SSO_CONFIG.client_id}:${EVE_SSO_CONFIG.client_secret}`
+            ).toString("base64"),
+          "Content-Type": "application/x-www-form-urlencoded",
+          Host: "login.eveonline.com",
+        },
+      }
+    );
+
+    console.log("Token response received:", tokenResponse.data);
+    const { access_token, refresh_token } = tokenResponse.data;
+
+    if (!access_token || !refresh_token) {
+      console.error("Missing token data:", tokenResponse.data);
+      return res.redirect("/?login=error&reason=invalid_token");
+    }
+
+    // Extract character info
+    const tokenParts = access_token.split(".");
+    const tokenPayload = JSON.parse(
+      Buffer.from(tokenParts[1], "base64").toString()
+    );
+
+    const characterId = tokenPayload.sub.split(":")[2];
+    const characterName = tokenPayload.name;
+
+    console.log("Character data extracted:", { characterId, characterName });
+
+    if (!characterId || !characterName) {
+      console.error("Invalid character data:", tokenPayload);
+      return res.redirect("/?login=error&reason=invalid_character");
+    }
+
+    // Database operations
+    try {
+      const { rows: existingUser } = await db.execute({
+        sql: "SELECT * FROM users WHERE character_id = ?",
+        args: [characterId],
+      });
+
+      let userId;
+
+      if (existingUser.length > 0) {
+        // Update existing user
+        await db.execute({
+          sql: `UPDATE users SET access_token = ?, refresh_token = ?, character_name = ? WHERE character_id = ?`,
+          args: [access_token, refresh_token, characterName, characterId],
+        });
+        userId = existingUser[0].id;
+      } else {
+        // Create new user
+        const result = await db.execute({
+          sql: `INSERT INTO users (character_id, character_name, access_token, refresh_token, settings) 
+                VALUES (?, ?, ?, ?, ?)`,
+          args: [characterId, characterName, access_token, refresh_token, "{}"],
+        });
+        userId = result.lastInsertRowid;
+      }
+
+      // Set session data
+      req.session.user = {
+        id: userId,
+        character_id: characterId,
+        character_name: characterName,
+        access_token: access_token,
+      };
+
+      // Save session before redirect
+      req.session.save((err) => {
+        if (err) {
+          console.error("Session save error:", err);
+          return res.redirect("/?login=error&reason=session_error");
+        }
+        res.redirect("/?authenticated=true");
+      });
+    } catch (dbError) {
+      console.error("Database operation failed:", {
+        message: dbError.message,
+        code: dbError.code,
+        stack: dbError.stack,
+      });
+      res.redirect("/?login=error&reason=database_error");
+    }
+  } catch (error) {
+    console.error("EVE SSO Error:", {
+      message: error.message,
+      response: error.response?.data,
+      stack: error.stack,
+    });
+    res.redirect("/?login=error&reason=sso_error");
+  }
+});
+
+app.get("/api/celestials/system/:systemId", async (req, res) => {
+  try {
+    const systemId = req.params.systemId;
+
+    // Check database first
+    const { rows } = await db.execute({
+      sql: "SELECT celestial_data FROM celestial_data WHERE system_id = ?",
+      args: [systemId],
+    });
+
+    if (rows[0]?.celestial_data) {
+      return res.json(JSON.parse(rows[0].celestial_data));
+    }
+
+    // Fetch from API if not in database
+    const celestialData = await fetchCelestialData(systemId);
+    if (!celestialData) {
+      throw new Error("Failed to fetch celestial data");
+    }
+
+    // Store in database
+    await storeCelestialData(systemId, celestialData);
+
+    // Return data
+    res.json(celestialData);
+  } catch (error) {
+    console.error(
+      `Error getting celestial data for system ${req.params.systemId}:`,
+      error
+    );
+    res.status(500).json({ error: "Failed to get celestial data" });
   }
 });
 
@@ -917,11 +1156,11 @@ app.put("/api/filter-list/:id", async (req, res) => {
 
   try {
     // Get the user ID for this filter list
-    const [filterList] = await db.get(
-      "SELECT user_id FROM filter_lists WHERE id = ?",
-      [id]
-    );
-    if (!filterList) {
+    const result = await db.execute({
+      sql: "SELECT user_id FROM filter_lists WHERE id = ?",
+      args: [id],
+    });
+    if (result.rows.length === 0) {
       return res
         .status(404)
         .json({ success: false, message: "Filter list not found" });
@@ -982,17 +1221,18 @@ app.put("/api/filter-list/:id", async (req, res) => {
 });
 
 // Delete a filter list
-app.delete("/api/filter-list/:id", (req, res) => {
-  const id = req.params.id;
-  db.run("DELETE FROM filter_lists WHERE id = ?", [id], function (err) {
-    if (err) {
-      res
-        .status(500)
-        .json({ success: false, message: "Error deleting filter list" });
-    } else {
-      res.json({ success: true });
-    }
-  });
+app.delete("/api/filter-list/:id", async (req, res) => {
+  try {
+    await db.execute({
+      sql: "DELETE FROM filter_lists WHERE id = ?",
+      args: [req.params.id],
+    });
+    res.json({ success: true });
+  } catch (err) {
+    res
+      .status(500)
+      .json({ success: false, message: "Error deleting filter list" });
+  }
 });
 
 io.on("connection", (socket) => {
@@ -1089,19 +1329,17 @@ io.on("connection", (socket) => {
     socket.emit("killmailsCleared"); // Notify the client that kills were cleared
   });
 
-  socket.on("updateSettings", (newSettings) => {
+  socket.on("updateSettings", async (newSettings) => {
     if (socket.username) {
-      db.run(
-        "UPDATE users SET settings = ? WHERE username = ?",
-        [JSON.stringify(newSettings), socket.username],
-        (err) => {
-          if (err) {
-            console.error("Error updating settings:", err);
-          } else {
-            console.log("Settings updated for user:", socket.username);
-          }
-        }
-      );
+      try {
+        await db.execute({
+          sql: "UPDATE users SET settings = ? WHERE username = ?",
+          args: [JSON.stringify(newSettings), socket.username],
+        });
+        console.log("Settings updated for user:", socket.username);
+      } catch (err) {
+        console.error("Error updating settings:", err);
+      }
     }
   });
 

@@ -204,9 +204,9 @@ function calculateCampProbability(camp) {
   const timeSinceLastKill = Date.now() - new Date(camp.lastKill).getTime();
   const inactiveMinutes = Math.max(
     0,
-    Math.floor((timeSinceLastKill - 36 * 60 * 1000) / (60 * 1000))
+    Math.floor((timeSinceLastKill - 30 * 60 * 1000) / (60 * 1000))
   );
-  const timeReduction = Math.min(probability, inactiveMinutes); // Cap reduction at current probability
+  const timeReduction = Math.min(probability, inactiveMinutes); // Reduce by 1% per minute after 30 minutes
 
   probability = Math.max(0, probability - timeReduction);
 
@@ -222,82 +222,43 @@ export function isGateCamp(killmail) {
 }
 
 function updateCampComposition(camp, killmail) {
-  // Initialize tracking properties if not existing
-  if (!camp.originalAttackers) {
-    camp.originalAttackers = new Set();
-    camp.activeAttackers = new Set();
-    camp.killedAttackers = new Set();
-    camp.involvedCorporations = [];
-    camp.involvedAlliances = [];
+  // Ensure Sets exist and are properly initialized
+  camp.originalAttackers = camp.originalAttackers || new Set();
+  camp.activeAttackers = camp.activeAttackers || new Set();
+  camp.killedAttackers = camp.killedAttackers || new Set();
+  camp.involvedCorporations = camp.involvedCorporations || [];
+  camp.involvedAlliances = camp.involvedAlliances || [];
 
-    // Add initial attackers
-    killmail.killmail.attackers.forEach((attacker) => {
-      if (attacker.character_id) {
-        camp.originalAttackers.add(attacker.character_id);
-        camp.activeAttackers.add(attacker.character_id);
-      }
-      if (
-        attacker.corporation_id &&
-        !camp.involvedCorporations.includes(attacker.corporation_id)
-      ) {
-        camp.involvedCorporations.push(attacker.corporation_id);
-      }
-      if (
-        attacker.alliance_id &&
-        !camp.involvedAlliances.includes(attacker.alliance_id)
-      ) {
-        camp.involvedAlliances.push(attacker.alliance_id);
-      }
-    });
-  } else {
-    // Process new killmail attackers
-    const newAttackers = killmail.killmail.attackers.filter(
-      (attacker) =>
-        attacker.character_id &&
-        !camp.originalAttackers.has(attacker.character_id)
-    );
+  // Process all attackers from this killmail
+  killmail.killmail.attackers.forEach((attacker) => {
+    if (!attacker.character_id) return;
 
-    newAttackers.forEach((attacker) => {
-      // Check if this attacker is related to existing campers
-      const isRelated =
-        camp.involvedCorporations.includes(attacker.corporation_id) ||
-        camp.involvedAlliances.includes(attacker.alliance_id) ||
-        killmail.killmail.attackers.some(
-          (a) => a.character_id && camp.originalAttackers.has(a.character_id)
-        );
+    // Add to original attackers if new
+    if (!camp.originalAttackers.has(attacker.character_id)) {
+      camp.originalAttackers.add(attacker.character_id);
+      camp.activeAttackers.add(attacker.character_id);
+    }
 
-      if (isRelated) {
-        camp.originalAttackers.add(attacker.character_id);
-        camp.activeAttackers.add(attacker.character_id);
-      }
+    // Track corporations and alliances
+    if (
+      attacker.corporation_id &&
+      !camp.involvedCorporations.includes(attacker.corporation_id)
+    ) {
+      camp.involvedCorporations.push(attacker.corporation_id);
+    }
+    if (
+      attacker.alliance_id &&
+      !camp.involvedAlliances.includes(attacker.alliance_id)
+    ) {
+      camp.involvedAlliances.push(attacker.alliance_id);
+    }
+  });
 
-      // Add new corps and alliances
-      if (
-        attacker.corporation_id &&
-        !camp.involvedCorporations.includes(attacker.corporation_id)
-      ) {
-        camp.involvedCorporations.push(attacker.corporation_id);
-      }
-      if (
-        attacker.alliance_id &&
-        !camp.involvedAlliances.includes(attacker.alliance_id)
-      ) {
-        camp.involvedAlliances.push(attacker.alliance_id);
-      }
-    });
-  }
-
-  // Check if victim was a camp member
+  // Process victim
   const victimId = killmail.killmail.victim.character_id;
   if (victimId && camp.activeAttackers.has(victimId)) {
     camp.activeAttackers.delete(victimId);
     camp.killedAttackers.add(victimId);
-
-    // Check if camp is crashed (2/3 of original attackers killed)
-    if (camp.killedAttackers.size >= (camp.originalAttackers.size * 2) / 3) {
-      camp.state = CAMP_STATES.CRASHED;
-      camp.crashedTime = new Date().getTime();
-    }
   }
 
   return {
@@ -353,8 +314,7 @@ export function updateCamps(killmail) {
       involvedAlliances: [],
     };
 
-    const composition = updateCampComposition(newCamp, killmail);
-    newCamp.composition = composition;
+    newCamp.composition = updateCampComposition(newCamp, killmail);
     newCamp.probability = calculateCampProbability(newCamp);
     currentCamps.push(newCamp);
   }

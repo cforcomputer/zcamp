@@ -1,6 +1,7 @@
 <!-- src/ActiveCamps.svelte -->
 <script>
   import { filteredCamps } from "../server/campStore.js";
+  import LocationTracker from "./LocationTracker.svelte";
 
   let camps = [];
 
@@ -66,7 +67,10 @@
 </script>
 
 <div class="active-camps">
-  <h2>Active Gate Camps</h2>
+  <div class="header">
+    <h2>Active Gate Camps</h2>
+    <LocationTracker />
+  </div>
   <div class="camp-grid">
     {#each camps as camp}
       <button
@@ -223,6 +227,13 @@
   }
 
   .camp-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1em;
+  }
+
+  .header {
     display: flex;
     justify-content: space-between;
     align-items: center;
