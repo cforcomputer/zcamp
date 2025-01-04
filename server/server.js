@@ -12,7 +12,6 @@ import session from "express-session";
 import RedisStore from "connect-redis";
 import { createClient as createRedisClient } from "redis";
 
-const stateStore = new Map();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const app = express();
@@ -20,11 +19,21 @@ const server = createServer(app);
 const io = new Server(server);
 const PORT = process.env.PORT || 3000;
 
+const REDIS_CONFIG = {
+  development: {
+    url: "redis://localhost:6379",
+    prefix: "km_dev:", // Will result in km_dev:sess:sessionID
+  },
+  production: {
+    url: process.env.REDIS_URL,
+    prefix: "km_prod:", // Will result in km_prod:sess:sessionID
+  },
+};
 // Initialize Redis client
+const redisConfig = REDIS_CONFIG[process.env.NODE_ENV || "development"];
 const redisClient = createRedisClient({
-  url: process.env.REDIS_URL || "redis://localhost:6379",
+  url: redisConfig.url,
 });
-
 redisClient.connect().catch(console.error);
 
 // Express middleware
@@ -69,11 +78,15 @@ const db = createSqlClient({
 // Initialize Redis store
 const redisStore = new RedisStore({
   client: redisClient,
-  prefix: "km_session:",
+  prefix: redisConfig.prefix + "sess:",
   ttl: 86400, // 24 hours in seconds
   disableTouch: false,
   disableTTL: false,
+  cleanup: {
+    interval: 3600, // Run cleanup every hour
+  },
 });
+
 // Session middleware configuration
 const sessionMiddleware = session({
   store: redisStore,
@@ -100,6 +113,21 @@ app.use(sessionMiddleware);
 io.use((socket, next) => {
   sessionMiddleware(socket.request, {}, next);
 });
+
+async function saveState(state) {
+  await redisClient.set(
+    `${redisConfig.prefix}state:${state}`,
+    JSON.stringify({ timestamp: Date.now() }),
+    { EX: 300 } // Expire after 5 minutes
+  );
+}
+
+async function getState(state) {
+  const stateData = await redisClient.get(
+    `${redisConfig.prefix}state:${state}`
+  );
+  return stateData ? JSON.parse(stateData) : null;
+}
 
 // SSO configuration
 const EVE_SSO_CONFIG = {
@@ -129,7 +157,8 @@ async function initializeDatabase() {
         character_id TEXT UNIQUE,
         character_name TEXT,
         access_token TEXT,
-        refresh_token TEXT
+        refresh_token TEXT,
+        token_expiry INTEGER
       )
     `);
 
@@ -521,12 +550,12 @@ async function storeCelestialData(systemId, celestialData) {
   }
 }
 
-app.post("/api/eve-sso/state", (req, res) => {
+app.post("/api/eve-sso/state", async (req, res) => {
   const state = req.body.state;
   if (!state) {
     return res.status(400).json({ error: "No state provided" });
   }
-  stateStore.set(state, { timestamp: Date.now() });
+  await saveState(state);
   res.json({ success: true });
 });
 
@@ -550,24 +579,52 @@ app.post("/api/refresh-token", async (req, res) => {
       }
     );
 
-    const { access_token, refresh_token: new_refresh_token } =
-      tokenResponse.data;
+    const {
+      access_token,
+      refresh_token: new_refresh_token,
+      expires_in,
+    } = tokenResponse.data;
+    const token_expiry = Math.floor(Date.now() / 1000) + expires_in;
 
-    // Update user in database
+    // Update database
     if (req.session?.user?.character_id) {
       await db.execute({
-        sql: `UPDATE users SET access_token = ?, refresh_token = ? WHERE character_id = ?`,
-        args: [access_token, new_refresh_token, req.session.user.character_id],
+        sql: `UPDATE users SET access_token = ?, refresh_token = ?, token_expiry = ? WHERE character_id = ?`,
+        args: [
+          access_token,
+          new_refresh_token,
+          token_expiry,
+          req.session.user.character_id,
+        ],
       });
     }
 
-    // Update session
+    // Update session with new tokens
     req.session.user = {
       ...req.session.user,
       access_token,
+      refresh_token: new_refresh_token,
+      token_expiry,
     };
 
-    res.json({ access_token, refresh_token: new_refresh_token });
+    // Explicitly save session to Redis
+    await new Promise((resolve, reject) => {
+      req.session.save((err) => {
+        if (err) {
+          console.error("Session save error:", err);
+          reject(err);
+          return;
+        }
+        console.log("Session updated in Redis with new tokens");
+        resolve();
+      });
+    });
+
+    res.json({
+      access_token,
+      refresh_token: new_refresh_token,
+      token_expiry,
+    });
   } catch (error) {
     console.error("Token refresh failed:", error);
     res.status(500).json({ error: "Failed to refresh token" });
@@ -731,31 +788,17 @@ app.get("/api/session", async (req, res) => {
   });
 });
 
-function cleanupStates() {
-  const now = Date.now();
-  for (const [state, data] of stateStore.entries()) {
-    if (now - data.timestamp > 5 * 60 * 1000) {
-      stateStore.delete(state);
-    }
-  }
-}
-
 // for user login
 app.get("/callback", async (req, res) => {
   const { code, state } = req.query;
   console.log("Received callback with code:", code);
-  console.log("State:", state);
 
   try {
-    // Validate state
-    if (!stateStore.has(state)) {
+    const stateData = await getState(state);
+    if (!stateData) {
       console.error("Invalid state:", state);
       return res.redirect("/?login=error&reason=invalid_state");
     }
-
-    // Remove used state
-    stateStore.delete(state);
-    cleanupStates();
 
     // Get access token
     console.log("Requesting access token...");
@@ -776,12 +819,15 @@ app.get("/callback", async (req, res) => {
     );
 
     console.log("Token response received:", tokenResponse.data);
-    const { access_token, refresh_token } = tokenResponse.data;
+    const { access_token, refresh_token, expires_in } = tokenResponse.data;
 
     if (!access_token || !refresh_token) {
       console.error("Missing token data:", tokenResponse.data);
       return res.redirect("/?login=error&reason=invalid_token");
     }
+
+    // Calculate token expiry time
+    const token_expiry = Math.floor(Date.now() / 1000) + expires_in;
 
     // Extract character info
     const tokenParts = access_token.split(".");
@@ -811,16 +857,29 @@ app.get("/callback", async (req, res) => {
       if (existingUser.length > 0) {
         console.log("Updating existing user...");
         await db.execute({
-          sql: `UPDATE users SET access_token = ?, refresh_token = ?, character_name = ? WHERE character_id = ?`,
-          args: [access_token, refresh_token, characterName, characterId],
+          sql: `UPDATE users SET access_token = ?, refresh_token = ?, character_name = ?, token_expiry = ? WHERE character_id = ?`,
+          args: [
+            access_token,
+            refresh_token,
+            characterName,
+            token_expiry,
+            characterId,
+          ],
         });
         userId = existingUser[0].id;
       } else {
         console.log("Creating new user...");
         const result = await db.execute({
-          sql: `INSERT INTO users (character_id, character_name, access_token, refresh_token, settings) 
-                VALUES (?, ?, ?, ?, ?)`,
-          args: [characterId, characterName, access_token, refresh_token, "{}"],
+          sql: `INSERT INTO users (character_id, character_name, access_token, refresh_token, token_expiry, settings) 
+                VALUES (?, ?, ?, ?, ?, ?)`,
+          args: [
+            characterId,
+            characterName,
+            access_token,
+            refresh_token,
+            token_expiry,
+            "{}",
+          ],
         });
         userId = result.lastInsertRowid;
       }
@@ -833,6 +892,7 @@ app.get("/callback", async (req, res) => {
         character_name: characterName,
         access_token,
         refresh_token,
+        token_expiry,
       };
 
       // Create new session if it doesn't exist
@@ -843,9 +903,8 @@ app.get("/callback", async (req, res) => {
 
       req.session.user = sessionUser;
 
-      // Save session using promisified approach
-      console.log("Saving session...");
       try {
+        // First save the session
         await new Promise((resolve, reject) => {
           req.session.save((err) => {
             if (err) {
@@ -853,18 +912,25 @@ app.get("/callback", async (req, res) => {
               reject(err);
               return;
             }
-            console.log("Session saved, verifying in Redis...");
+            console.log("Session saved to Redis");
             resolve();
           });
         });
 
-        // Verify session in Redis using promisified get
-        const sessionKey = `km_session:${req.sessionID}`;
+        // Add a small delay to allow Redis to complete the write
+        await new Promise((resolve) => setTimeout(resolve, 100));
+
+        // Now verify the session - use the correct key format
+        const sessionKey = `${redisConfig.prefix}sess:${req.sessionID}`;
         console.log("Checking Redis for session:", sessionKey);
 
         const sessionData = await redisClient.get(sessionKey);
         if (!sessionData) {
-          throw new Error("Session not found in Redis after save");
+          console.error(
+            "Session verification failed - session not found in Redis"
+          );
+          console.error("Tried key:", sessionKey);
+          throw new Error("Session verification failed");
         }
 
         console.log("Session verified in Redis:", {
@@ -872,17 +938,14 @@ app.get("/callback", async (req, res) => {
           hasData: true,
         });
 
-        // Log final session state
-        console.log("Final session state:", {
-          sessionID: req.sessionID,
-          hasUser: !!req.session.user,
-          cookie: req.session.cookie,
-        });
-
         return res.redirect("/?authenticated=true");
       } catch (sessionError) {
-        console.error("Session verification error:", sessionError);
-        throw sessionError;
+        console.error("Session error:", {
+          error: sessionError,
+          sessionID: req.sessionID,
+          redisPrefix: redisConfig.prefix,
+        });
+        throw new Error("Failed to save or verify session");
       }
     } catch (dbError) {
       console.error("Database operation failed:", {
@@ -1332,6 +1395,10 @@ redisClient.on("error", (err) => {
 
 redisClient.on("connect", () => {
   console.log("Connected to Redis");
+});
+
+redisClient.on("reconnecting", () => {
+  console.log("Reconnecting to Redis...");
 });
 
 io.on("connection", (socket) => {
@@ -2007,6 +2074,12 @@ app.use((err, req, res, next) => {
 // SPA fallback - must be last
 app.get("*", (_, res) => {
   res.sendFile(path.join(__dirname, "../public/index.html"));
+});
+
+process.on("SIGTERM", async () => {
+  console.log("SIGTERM received. Closing Redis connection...");
+  await redisClient.quit();
+  process.exit(0);
 });
 
 startServer();

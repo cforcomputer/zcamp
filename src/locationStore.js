@@ -11,6 +11,7 @@ const POLL_INTERVAL = 20000; // 20 seconds
 
 async function refreshToken(refreshToken) {
   try {
+    console.log("Attempting to refresh token");
     const response = await fetch("/api/refresh-token", {
       method: "POST",
       headers: {
@@ -21,7 +22,9 @@ async function refreshToken(refreshToken) {
     });
 
     if (!response.ok) throw new Error("Failed to refresh token");
-    return await response.json();
+    const data = await response.json();
+    console.log("Token refresh successful");
+    return data;
   } catch (err) {
     console.error("Token refresh failed:", err);
     throw err;
@@ -84,32 +87,55 @@ async function checkForGateCamps(systemId, celestialData) {
 
 async function pollLocation() {
   try {
-    const userData = JSON.parse(sessionStorage.getItem("user"));
+    // Get current session data
+    const sessionResponse = await fetch("/api/session", {
+      credentials: "include",
+    });
+
+    if (!sessionResponse.ok) {
+      throw new Error("Failed to get session data");
+    }
+
+    const { user } = await sessionResponse.json();
     console.log("Starting location poll...");
 
     // Check if token needs refresh
     const now = Math.floor(Date.now() / 1000);
-    if (userData.token_expiry && now >= userData.token_expiry) {
+    if (user.token_expiry && now >= user.token_expiry) {
       console.log("Token expired, refreshing...");
-      const newTokens = await refreshToken(userData.refresh_token);
-
-      // Update user data with new tokens
-      userData.access_token = newTokens.access_token;
-      userData.refresh_token = newTokens.refresh_token;
-      userData.token_expiry = now + newTokens.expires_in;
-
-      // Save updated tokens
-      sessionStorage.setItem("user", JSON.stringify(userData));
+      let retryCount = 3;
+      while (retryCount > 0) {
+        try {
+          const refreshResponse = await refreshToken(user.refresh_token);
+          user.access_token = refreshResponse.access_token;
+          user.token_expiry = refreshResponse.token_expiry;
+          console.log("Token refreshed successfully");
+          break;
+        } catch (refreshError) {
+          console.error(
+            `Token refresh attempt failed (${retryCount} remaining):`,
+            refreshError
+          );
+          retryCount--;
+          if (retryCount === 0)
+            throw new Error("Failed to refresh token after multiple attempts");
+          await new Promise((resolve) => setTimeout(resolve, 1000));
+        }
+      }
     }
 
     let response = await fetch(
-      `https://esi.evetech.net/latest/characters/${userData.character_id}/location/`,
+      `https://esi.evetech.net/latest/characters/${user.character_id}/location/`,
       {
         headers: {
-          Authorization: `Bearer ${userData.access_token}`,
+          Authorization: `Bearer ${user.access_token}`,
         },
       }
     );
+
+    if (!response.ok) {
+      throw new Error(`EVE API request failed: ${response.status}`);
+    }
 
     const locationData = await response.json();
     console.log(
@@ -145,7 +171,6 @@ async function pollLocation() {
             .map((camp) => {
               const systemName =
                 camp.kills[0]?.pinpoints?.celestialData?.solarsystemname;
-              // Extract just the destination name from "Stargate (Destination)"
               const gateName =
                 camp.stargateName.match(/\(([^)]+)\)/)?.[1] ||
                 camp.stargateName;
@@ -161,7 +186,6 @@ async function pollLocation() {
           )}`;
         }
 
-        // Only speak if we have a camp status
         if (campStatus) {
           const announcement = `System change. Your current system is ${systemName}. ${campStatus}`;
           console.log("About to speak:", announcement);
@@ -187,6 +211,10 @@ async function pollLocation() {
   } catch (err) {
     console.error("Location polling error:", err);
     locationError.set(err.message);
+    if (err.message.includes("token")) {
+      // Don't stop polling on token errors, just skip this cycle
+      return;
+    }
     stopLocationPolling();
   }
 }
@@ -219,10 +247,12 @@ export async function startLocationPolling() {
       );
     }
 
-    sessionStorage.setItem("user", JSON.stringify(user));
-
-    // Initial poll and announcement
+    // Initial poll
     await pollLocation();
+
+    // Start polling interval
+    pollInterval = setInterval(pollLocation, POLL_INTERVAL);
+
     return true;
   } catch (err) {
     console.error("Location polling start error:", err);
