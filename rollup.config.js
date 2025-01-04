@@ -3,6 +3,7 @@ import resolve from "@rollup/plugin-node-resolve";
 import commonjs from "@rollup/plugin-commonjs";
 import css from "rollup-plugin-css-only";
 import { terser } from "rollup-plugin-terser";
+import copy from "rollup-plugin-copy";
 
 const production = !process.env.ROLLUP_WATCH;
 
@@ -31,6 +32,18 @@ export default {
       exportConditions: ["import", "browser"],
     }),
     commonjs(),
+    copy({
+      targets: [
+        {
+          src: ["public/audio_files/*.wav", "public/audio_files/**/*.wav"],
+          dest: "public/build/audio_files",
+          flatten: true,
+        },
+      ],
+      verbose: true,
+      hook: "writeBundle",
+      copyOnce: true,
+    }),
     production && terser(),
   ],
 };

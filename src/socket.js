@@ -18,7 +18,9 @@ const socket = io("https://eve-content-hunter-production.up.railway.app", {
 });
 
 const audio =
-  typeof Audio !== "undefined" ? new Audio("audio_files/alert.wav") : null;
+  typeof Audio !== "undefined"
+    ? new Audio("/build/audio_files/alert.wav")
+    : null;
 
 socket.once("connect", () => console.log("Socket connected"));
 

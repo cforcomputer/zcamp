@@ -130,3 +130,17 @@ dist
 .pnp.*
 
 *.db
+
+#FUCK
+# Keep these specific build directories and files
+!public/build/
+!public/build/audio_files/
+!public/build/audio_files/*.wav
+!public/audio_files/
+!public/audio_files/*.wav
+
+# Your existing gitignore content...
+# Logs
+logs
+*.log
+# ... rest of your current .gitignore ...

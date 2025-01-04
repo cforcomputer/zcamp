@@ -11,6 +11,7 @@ import fs from "fs";
 import session from "express-session";
 import RedisStore from "connect-redis";
 import { createClient as createRedisClient } from "redis";
+import { compare } from "bcrypt";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -18,6 +19,19 @@ const app = express();
 const server = createServer(app);
 const io = new Server(server);
 const PORT = process.env.PORT || 3000;
+
+const MIME_TYPES = {
+  ".wav": "audio/wav",
+  ".mp3": "audio/mpeg",
+  ".css": "text/css",
+  ".js": "application/javascript",
+  ".json": "application/json",
+  ".ico": "image/x-icon",
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".gif": "image/gif",
+};
 
 const REDIS_CONFIG = {
   development: {
@@ -59,10 +73,17 @@ app.use((req, res, next) => {
   next();
 });
 
+app.use(express.static(path.join(__dirname, "../public")));
+
 // Ensure build directory exists
 const buildPath = path.join(__dirname, "../public/build");
 if (!fs.existsSync(buildPath)) {
   fs.mkdirSync(buildPath, { recursive: true });
+}
+
+const audioPath = path.join(__dirname, "../public/build/audio_files");
+if (!fs.existsSync(audioPath)) {
+  fs.mkdirSync(audioPath, { recursive: true });
 }
 
 const REDISQ_URL = "https://redisq.zkillboard.com/listen.php?queueID=KM_hunter";
@@ -788,12 +809,85 @@ app.get("/api/session", async (req, res) => {
   });
 });
 
+// Normal login route for people who don't want their character tracked.
+app.post("/api/login", async (req, res) => {
+  try {
+    const { username, password } = req.body;
+
+    if (!username || !password) {
+      return res.status(400).json({
+        success: false,
+        message: "Username and password are required",
+      });
+    }
+
+    const { rows } = await db.execute({
+      sql: "SELECT * FROM users WHERE username = ?",
+      args: [username],
+    });
+
+    const user = rows[0];
+
+    if (!user) {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid credentials",
+      });
+    }
+
+    const match = await compare(password, user.password);
+
+    if (!match) {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid credentials",
+      });
+    }
+
+    // Create session user object
+    const sessionUser = {
+      id: user.id,
+      username: user.username,
+      character_id: user.character_id,
+      character_name: user.character_name,
+      access_token: user.access_token,
+    };
+
+    // Set session data
+    req.session.user = sessionUser;
+
+    // Save session explicitly
+    await new Promise((resolve, reject) => {
+      req.session.save((err) => {
+        if (err) {
+          console.error("Session save error:", err);
+          reject(err);
+          return;
+        }
+        resolve();
+      });
+    });
+
+    res.json({
+      success: true,
+      user: sessionUser,
+    });
+  } catch (err) {
+    console.error("Login error:", err);
+    res.status(500).json({
+      success: false,
+      message: "Server error during login",
+    });
+  }
+});
+
 // for user login
 app.get("/callback", async (req, res) => {
   const { code, state } = req.query;
   console.log("Received callback with code:", code);
 
   try {
+    // Check state validity
     const stateData = await getState(state);
     if (!stateData) {
       console.error("Invalid state:", state);
@@ -847,30 +941,36 @@ app.get("/callback", async (req, res) => {
 
     try {
       console.log("Starting database operations...");
+
+      // Single database query to check for existing user
       const { rows: existingUser } = await db.execute({
-        sql: "SELECT * FROM users WHERE character_id = ?",
+        sql: "SELECT id FROM users WHERE character_id = ?",
         args: [characterId],
       });
 
-      let userId;
+      // Prepare user data
+      const userData = {
+        access_token,
+        refresh_token,
+        character_name: characterName,
+        token_expiry,
+      };
 
+      let userId;
       if (existingUser.length > 0) {
         console.log("Updating existing user...");
-        await db.execute({
-          sql: `UPDATE users SET access_token = ?, refresh_token = ?, character_name = ?, token_expiry = ? WHERE character_id = ?`,
-          args: [
-            access_token,
-            refresh_token,
-            characterName,
-            token_expiry,
-            characterId,
-          ],
-        });
         userId = existingUser[0].id;
+        await db.execute({
+          sql: `UPDATE users 
+                SET access_token = ?, refresh_token = ?, character_name = ?, token_expiry = ? 
+                WHERE character_id = ?`,
+          args: [...Object.values(userData), characterId],
+        });
       } else {
         console.log("Creating new user...");
         const result = await db.execute({
-          sql: `INSERT INTO users (character_id, character_name, access_token, refresh_token, token_expiry, settings) 
+          sql: `INSERT INTO users 
+                (character_id, character_name, access_token, refresh_token, token_expiry, settings) 
                 VALUES (?, ?, ?, ?, ?, ?)`,
           args: [
             characterId,
@@ -903,56 +1003,22 @@ app.get("/callback", async (req, res) => {
 
       req.session.user = sessionUser;
 
-      try {
-        // First save the session
-        await new Promise((resolve, reject) => {
-          req.session.save((err) => {
-            if (err) {
-              console.error("Session save error:", err);
-              reject(err);
-              return;
-            }
-            console.log("Session saved to Redis");
-            resolve();
-          });
+      // Save session and redirect
+      await new Promise((resolve, reject) => {
+        req.session.save((err) => {
+          if (err) {
+            console.error("Session save error:", err);
+            reject(err);
+            return;
+          }
+          console.log("Session saved to Redis");
+          resolve();
         });
-
-        // Add a small delay to allow Redis to complete the write
-        await new Promise((resolve) => setTimeout(resolve, 100));
-
-        // Now verify the session - use the correct key format
-        const sessionKey = `${redisConfig.prefix}sess:${req.sessionID}`;
-        console.log("Checking Redis for session:", sessionKey);
-
-        const sessionData = await redisClient.get(sessionKey);
-        if (!sessionData) {
-          console.error(
-            "Session verification failed - session not found in Redis"
-          );
-          console.error("Tried key:", sessionKey);
-          throw new Error("Session verification failed");
-        }
-
-        console.log("Session verified in Redis:", {
-          sessionId: req.sessionID,
-          hasData: true,
-        });
-
-        return res.redirect("/?authenticated=true");
-      } catch (sessionError) {
-        console.error("Session error:", {
-          error: sessionError,
-          sessionID: req.sessionID,
-          redisPrefix: redisConfig.prefix,
-        });
-        throw new Error("Failed to save or verify session");
-      }
-    } catch (dbError) {
-      console.error("Database operation failed:", {
-        message: dbError.message,
-        code: dbError.code,
-        stack: dbError.stack,
       });
+
+      return res.redirect("/?authenticated=true");
+    } catch (error) {
+      console.error("Database/Session error:", error);
       return res.redirect("/?login=error&reason=database_error");
     }
   } catch (error) {
@@ -2036,30 +2102,36 @@ async function startServer() {
   }
 }
 
-// server.listen(3000, () => {
-//   console.log("Server running on http://localhost:3000");
-//   pollRedisQ(); // Start polling RedisQ
-// });
-
 // Serve build files with strict MIME types
 app.use(
   "/build",
-  express.static(buildPath, {
+  express.static(path.join(__dirname, "../public/build"), {
     setHeaders: (res, filePath) => {
-      if (filePath.endsWith(".js")) {
-        res.setHeader("Content-Type", "application/javascript; charset=utf-8");
-      } else if (filePath.endsWith(".css")) {
-        res.setHeader("Content-Type", "text/css; charset=utf-8");
-      } else if (filePath.endsWith(".map")) {
-        res.setHeader("Content-Type", "application/json; charset=utf-8");
+      const ext = path.extname(filePath).toLowerCase();
+      const mimeType = MIME_TYPES[ext];
+      if (mimeType) {
+        res.setHeader("Content-Type", mimeType);
       }
+      // Add cache control for build assets
+      res.setHeader("Cache-Control", "public, max-age=31536000");
     },
-    fallthrough: true,
   })
 );
 
 // Serve public directory
-app.use(express.static(path.join(__dirname, "../public")));
+app.use(
+  express.static(path.join(__dirname, "../public"), {
+    setHeaders: (res, filePath) => {
+      const ext = path.extname(filePath).toLowerCase();
+      const mimeType = MIME_TYPES[ext];
+      if (mimeType) {
+        res.setHeader("Content-Type", mimeType);
+      }
+      // Add cache control for static assets
+      res.setHeader("Cache-Control", "public, max-age=31536000");
+    },
+  })
+);
 
 // Error handler
 app.use((err, req, res, next) => {
@@ -2067,6 +2139,7 @@ app.use((err, req, res, next) => {
     url: req.url,
     error: err.message,
     stack: err.stack,
+    mime: MIME_TYPES[path.extname(req.url).toLowerCase()],
   });
   next(err);
 });
