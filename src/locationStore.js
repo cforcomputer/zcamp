@@ -193,15 +193,27 @@ async function pollLocation() {
 
 export async function startLocationPolling() {
   try {
+    console.log("Starting location polling...");
     const sessionResponse = await fetch("/api/session", {
       credentials: "include",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
     });
+    console.log("Session response status:", sessionResponse.status);
+
     if (!sessionResponse.ok) {
+      const errorData = await sessionResponse.json();
+      console.error("Session verification failed:", errorData);
       throw new Error("Session verification failed");
     }
 
     const { user } = await sessionResponse.json();
+    console.log("Session user data:", user);
+
     if (!user?.character_id || !user?.access_token) {
+      console.error("Missing required user data:", user);
       throw new Error(
         "No authenticated character - Please log in with EVE Online"
       );
@@ -211,16 +223,9 @@ export async function startLocationPolling() {
 
     // Initial poll and announcement
     await pollLocation();
-    if (currentLocation) {
-      const msg = new SpeechSynthesisUtterance(
-        `Tracking enabled for: ${user.character_name}. Your current system is ${currentLocation.systemName}.`
-      );
-      window.speechSynthesis.speak(msg);
-    }
-
-    pollInterval = setInterval(pollLocation, POLL_INTERVAL);
     return true;
   } catch (err) {
+    console.error("Location polling start error:", err);
     locationError.set(err.message);
     return false;
   }

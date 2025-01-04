@@ -4,3 +4,4 @@ public/audio_files/
 package-lock.json
 bundle.js
 node_modules/
+node_modules

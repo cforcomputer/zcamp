@@ -32,9 +32,14 @@
 
   // Handle login event from Login.svelte
   function handleLogin(event) {
-    username = event.detail.username;
-    loggedIn = true;
-    socket.emit("login", { username, password: event.detail.password });
+    if (event.detail.type === "credentials") {
+      username = event.detail.username;
+      loggedIn = true;
+      socket.emit("login", { username, password: event.detail.password });
+    } else if (event.detail.type === "eve") {
+      // EVE SSO login - just set logged in state, session already exists
+      loggedIn = true;
+    }
   }
 
   // Lifecycle hook

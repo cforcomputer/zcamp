@@ -2,18 +2,15 @@ import express from "express";
 import { createServer } from "http";
 import { Server } from "socket.io";
 import axios from "axios";
-import { createClient } from "@libsql/client";
-import { compare, hash } from "bcrypt";
+import { createClient as createSqlClient } from "@libsql/client"; // Rename this oneimport { compare, hash } from "bcrypt";
 import { isGateCamp, updateCamps } from "./campStore.js";
 import path from "path";
 import { fileURLToPath } from "url";
 import cors from "cors";
 import fs from "fs";
 import session from "express-session";
-
-// dev
-import dotenv from "dotenv";
-dotenv.config();
+import RedisStore from "connect-redis";
+import { createClient as createRedisClient } from "redis";
 
 const stateStore = new Map();
 const __filename = fileURLToPath(import.meta.url);
@@ -23,18 +20,12 @@ const server = createServer(app);
 const io = new Server(server);
 const PORT = process.env.PORT || 3000;
 
-// Login session handling
-app.use(
-  session({
-    secret: process.env.SESSION_SECRET || "dev-secret",
-    resave: false,
-    saveUninitialized: false,
-    cookie: {
-      secure: process.env.NODE_ENV === "production",
-      maxAge: 24 * 60 * 60 * 1000, // 24 hours
-    },
-  })
-);
+// Initialize Redis client
+const redisClient = createRedisClient({
+  url: process.env.REDIS_URL || "redis://localhost:6379",
+});
+
+redisClient.connect().catch(console.error);
 
 // Express middleware
 app.use(express.json());
@@ -47,6 +38,9 @@ app.use(
       "http://localhost:3000",
     ],
     credentials: true,
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+    exposedHeaders: ["set-cookie"],
   })
 );
 
@@ -67,9 +61,44 @@ let killmails = [];
 let activeCamps = new Map();
 let isDatabaseInitialized = false;
 
-const db = createClient({
+const db = createSqlClient({
   url: process.env.LIBSQL_URL || "file:km_hunter.db",
-  authToken: process.env.LIBSQL_AUTH_TOKEN, // optional, for remote databases
+  authToken: process.env.LIBSQL_AUTH_TOKEN,
+});
+
+// Initialize Redis store
+const redisStore = new RedisStore({
+  client: redisClient,
+  prefix: "km_session:",
+  ttl: 86400, // 24 hours in seconds
+  disableTouch: false,
+  disableTTL: false,
+});
+// Session middleware configuration
+const sessionMiddleware = session({
+  store: redisStore,
+  secret: process.env.SESSION_SECRET || "dev-secret",
+  resave: false,
+  saveUninitialized: false,
+  name: "km_sid",
+  cookie: {
+    secure: true, // Always true since you're using HTTPS
+    maxAge: 24 * 60 * 60 * 1000,
+    httpOnly: true,
+    sameSite: "lax",
+    domain:
+      process.env.NODE_ENV === "production"
+        ? "eve-content-hunter-production.up.railway.app"
+        : undefined, // Full domain instead of .railway.app
+    path: "/",
+  },
+  proxy: true, // Add this for proper HTTPS handling behind proxy
+});
+app.use(sessionMiddleware);
+
+// Share session middleware with socket.io
+io.use((socket, next) => {
+  sessionMiddleware(socket.request, {}, next);
 });
 
 // SSO configuration
@@ -545,43 +574,6 @@ app.post("/api/refresh-token", async (req, res) => {
   }
 });
 
-// Account routes
-app.post("/api/login", async (req, res) => {
-  const { username, password } = req.body;
-  try {
-    const { rows } = await db.execute({
-      sql: "SELECT * FROM users WHERE username = ?",
-      args: [username],
-    });
-    const user = rows[0];
-
-    if (!user) {
-      return res
-        .status(401)
-        .json({ success: false, message: "Invalid credentials" });
-    }
-
-    const match = await compare(password, user.password);
-    if (match) {
-      const { rows: filterLists } = await db.execute({
-        sql: "SELECT * FROM filter_lists WHERE user_id = ?",
-        args: [user.id],
-      });
-
-      res.json({
-        success: true,
-        settings: JSON.parse(user.settings),
-        filterLists,
-      });
-    } else {
-      res.status(401).json({ success: false, message: "Invalid credentials" });
-    }
-  } catch (err) {
-    console.error("Login error:", err);
-    res.status(500).json({ success: false, message: "Server error" });
-  }
-});
-
 // Account registration route
 app.post("/api/register", async (req, res) => {
   const { username, password } = req.body;
@@ -709,21 +701,32 @@ app.get("/api/eve-sso-config", (req, res) => {
   });
 });
 
-app.get("/api/session", (req, res) => {
-  // Check if user exists in session
+app.get("/api/session", async (req, res) => {
+  console.log("Session check details:", {
+    hasSession: !!req.session,
+    hasUser: !!req.session?.user,
+    sessionID: req.sessionID,
+    sessionData: req.session, // Add this to see full session data
+    cookies: req.headers.cookie, // Add this to check cookie header
+  });
+
   if (!req.session?.user) {
     return res.status(401).json({
       error: "No active session",
+      debug: {
+        hasSession: !!req.session,
+        sessionID: req.sessionID,
+      },
     });
   }
 
-  // Return user data as JSON
   res.json({
     user: {
       id: req.session.user.id,
       character_id: req.session.user.character_id,
       character_name: req.session.user.character_name,
       access_token: req.session.user.access_token,
+      refresh_token: req.session.user.refresh_token,
     },
   });
 });
@@ -796,8 +799,8 @@ app.get("/callback", async (req, res) => {
       return res.redirect("/?login=error&reason=invalid_character");
     }
 
-    // Database operations
     try {
+      console.log("Starting database operations...");
       const { rows: existingUser } = await db.execute({
         sql: "SELECT * FROM users WHERE character_id = ?",
         args: [characterId],
@@ -806,14 +809,14 @@ app.get("/callback", async (req, res) => {
       let userId;
 
       if (existingUser.length > 0) {
-        // Update existing user
+        console.log("Updating existing user...");
         await db.execute({
           sql: `UPDATE users SET access_token = ?, refresh_token = ?, character_name = ? WHERE character_id = ?`,
           args: [access_token, refresh_token, characterName, characterId],
         });
         userId = existingUser[0].id;
       } else {
-        // Create new user
+        console.log("Creating new user...");
         const result = await db.execute({
           sql: `INSERT INTO users (character_id, character_name, access_token, refresh_token, settings) 
                 VALUES (?, ?, ?, ?, ?)`,
@@ -823,28 +826,71 @@ app.get("/callback", async (req, res) => {
       }
 
       // Set session data
-      req.session.user = {
+      console.log("Setting up session data...");
+      const sessionUser = {
         id: userId,
         character_id: characterId,
         character_name: characterName,
-        access_token: access_token,
+        access_token,
+        refresh_token,
       };
 
-      // Save session before redirect
-      req.session.save((err) => {
-        if (err) {
-          console.error("Session save error:", err);
-          return res.redirect("/?login=error&reason=session_error");
+      // Create new session if it doesn't exist
+      if (!req.session) {
+        console.log("Creating new session...");
+        req.session = {};
+      }
+
+      req.session.user = sessionUser;
+
+      // Save session using promisified approach
+      console.log("Saving session...");
+      try {
+        await new Promise((resolve, reject) => {
+          req.session.save((err) => {
+            if (err) {
+              console.error("Session save error:", err);
+              reject(err);
+              return;
+            }
+            console.log("Session saved, verifying in Redis...");
+            resolve();
+          });
+        });
+
+        // Verify session in Redis using promisified get
+        const sessionKey = `km_session:${req.sessionID}`;
+        console.log("Checking Redis for session:", sessionKey);
+
+        const sessionData = await redisClient.get(sessionKey);
+        if (!sessionData) {
+          throw new Error("Session not found in Redis after save");
         }
-        res.redirect("/?authenticated=true");
-      });
+
+        console.log("Session verified in Redis:", {
+          sessionId: req.sessionID,
+          hasData: true,
+        });
+
+        // Log final session state
+        console.log("Final session state:", {
+          sessionID: req.sessionID,
+          hasUser: !!req.session.user,
+          cookie: req.session.cookie,
+        });
+
+        return res.redirect("/?authenticated=true");
+      } catch (sessionError) {
+        console.error("Session verification error:", sessionError);
+        throw sessionError;
+      }
     } catch (dbError) {
       console.error("Database operation failed:", {
         message: dbError.message,
         code: dbError.code,
         stack: dbError.stack,
       });
-      res.redirect("/?login=error&reason=database_error");
+      return res.redirect("/?login=error&reason=database_error");
     }
   } catch (error) {
     console.error("EVE SSO Error:", {
@@ -852,7 +898,7 @@ app.get("/callback", async (req, res) => {
       response: error.response?.data,
       stack: error.stack,
     });
-    res.redirect("/?login=error&reason=sso_error");
+    return res.redirect("/?login=error&reason=sso_error");
   }
 });
 
@@ -1279,22 +1325,71 @@ app.delete("/api/filter-list/:id", async (req, res) => {
   }
 });
 
+// Add Redis error handling
+redisClient.on("error", (err) => {
+  console.error("Redis Client Error:", err);
+});
+
+redisClient.on("connect", () => {
+  console.log("Connected to Redis");
+});
+
 io.on("connection", (socket) => {
   console.log("New client connected");
 
+  socket.emit("initialCamps", Array.from(activeCamps.values()));
+
   socket.on("login", async ({ username, password }) => {
     try {
+      const cleanPassword = String(password);
       const { rows } = await db.execute({
-        sql: "SELECT id, settings FROM users WHERE username = ?",
+        sql: "SELECT * FROM users WHERE username = ?",
         args: [username],
       });
       const user = rows[0];
 
       if (user) {
-        // Add this line to set the socket username
-        socket.username = username;
+        const match = await compare(cleanPassword, user.password);
+        if (match) {
+          socket.request.session.user = {
+            id: user.id,
+            username: user.username,
+            character_id: user.character_id,
+            character_name: user.character_name,
+            access_token: user.access_token,
+          };
 
-        // Rest of login code...
+          await new Promise((resolve, reject) => {
+            socket.request.session.save((err) => {
+              if (err) {
+                console.error("Session save error:", err);
+                reject(err);
+                return;
+              }
+              console.log(
+                "Session saved in socket login:",
+                socket.request.sessionID
+              );
+              resolve();
+            });
+          });
+
+          socket.username = username;
+
+          const { rows: filterLists } = await db.execute({
+            sql: "SELECT * FROM filter_lists WHERE user_id = ?",
+            args: [user.id],
+          });
+
+          socket.emit("loginSuccess", {
+            settings: JSON.parse(user.settings || "{}"),
+            filterLists,
+          });
+        } else {
+          socket.emit("loginError", { message: "Invalid credentials" });
+        }
+      } else {
+        socket.emit("loginError", { message: "User not found" });
       }
     } catch (err) {
       console.error("Error during login:", err);
@@ -1309,7 +1404,6 @@ io.on("connection", (socket) => {
     }
 
     try {
-      // First get the user ID
       const { rows: userRows } = await db.execute({
         sql: "SELECT id FROM users WHERE username = ?",
         args: [socket.username],
@@ -1320,7 +1414,6 @@ io.on("connection", (socket) => {
         return;
       }
 
-      // Then get the profiles
       const { rows: profiles } = await db.execute({
         sql: "SELECT id, name FROM user_profiles WHERE user_id = ?",
         args: [userRows[0].id],
@@ -1369,8 +1462,8 @@ io.on("connection", (socket) => {
   });
 
   socket.on("clearKills", () => {
-    killmails = []; // Clear the server-side memory
-    socket.emit("killmailsCleared"); // Notify the client that kills were cleared
+    killmails = [];
+    socket.emit("killmailsCleared");
   });
 
   socket.on("updateSettings", async (newSettings) => {
@@ -1433,7 +1526,6 @@ io.on("connection", (socket) => {
   socket.on(
     "updateFilterList",
     async ({ id, name, ids, enabled, is_exclude, filter_type }) => {
-      // Ensure ids is properly processed
       const processedIds = Array.isArray(ids)
         ? ids
         : typeof ids === "string"
@@ -1512,14 +1604,12 @@ io.on("connection", (socket) => {
       const { name, settings, filterLists } = data;
       const profileData = JSON.stringify({ settings, filterLists });
 
-      // Check if profile already exists
       const { rows: existingProfile } = await db.execute({
         sql: "SELECT id FROM user_profiles WHERE user_id = ? AND name = ?",
         args: [userId, name],
       });
 
       if (existingProfile[0]) {
-        // Update existing profile
         await db.execute({
           sql: "UPDATE user_profiles SET settings = ? WHERE id = ?",
           args: [profileData, existingProfile[0].id],
@@ -1532,7 +1622,6 @@ io.on("connection", (socket) => {
           message: "Profile updated",
         });
       } else {
-        // Create new profile
         const result = await db.execute({
           sql: "INSERT INTO user_profiles (user_id, name, settings) VALUES (?, ?, ?)",
           args: [userId, name, profileData],
@@ -1551,45 +1640,123 @@ io.on("connection", (socket) => {
     }
   });
 
-  async function getUserData(username) {
+  // Account routes
+  socket.on("login", async ({ username, password }) => {
     try {
-      const { rows: userRows } = await db.execute({
-        sql: "SELECT id, settings FROM users WHERE username = ?",
-        args: [username],
-      });
+      // Log incoming data
+      console.log(
+        "Login attempt - username type:",
+        typeof username,
+        "password type:",
+        typeof password
+      );
 
-      if (!userRows[0]) {
-        throw new Error("User not found");
+      // Ensure clean string values and null checks
+      if (!username || !password) {
+        socket.emit("loginError", {
+          message: "Username and password are required",
+        });
+        return;
       }
 
-      const { rows: filterListRows } = await db.execute({
-        sql: "SELECT * FROM filter_lists WHERE user_id = ?",
-        args: [userRows[0].id],
+      const cleanUsername = String(username).trim();
+      const cleanPassword = String(password).trim();
+
+      // Log the query we're about to execute
+      console.log("Executing user query for username:", cleanUsername);
+
+      const { rows } = await db.execute({
+        sql: "SELECT id, username, password, settings, character_id, character_name, access_token FROM users WHERE username = ?",
+        args: [cleanUsername],
       });
 
-      const { rows: profileRows } = await db.execute({
-        sql: "SELECT * FROM user_profiles WHERE user_id = ?",
-        args: [userRows[0].id],
+      console.log("Query result rows:", rows?.length);
+
+      const user = rows[0];
+
+      if (user) {
+        try {
+          const match = await compare(cleanPassword, user.password);
+
+          if (match) {
+            // Create a clean session user object
+            const sessionUser = {
+              id: Number(user.id),
+              username: String(user.username),
+              character_id: user.character_id
+                ? String(user.character_id)
+                : null,
+              character_name: user.character_name
+                ? String(user.character_name)
+                : null,
+              access_token: user.access_token
+                ? String(user.access_token)
+                : null,
+            };
+
+            // Save to session
+            socket.request.session.user = sessionUser;
+
+            await new Promise((resolve, reject) => {
+              socket.request.session.save((err) => {
+                if (err) {
+                  console.error("Session save error:", err);
+                  reject(err);
+                  return;
+                }
+                console.log("Session saved with user:", sessionUser);
+                resolve();
+              });
+            });
+
+            socket.username = cleanUsername;
+
+            // Fetch filter lists with proper error handling
+            try {
+              const { rows: filterLists } = await db.execute({
+                sql: "SELECT * FROM filter_lists WHERE user_id = ?",
+                args: [sessionUser.id],
+              });
+
+              const settings = user.settings ? JSON.parse(user.settings) : {};
+
+              socket.emit("loginSuccess", {
+                settings,
+                filterLists: filterLists || [],
+              });
+            } catch (filterError) {
+              console.error("Error fetching filter lists:", filterError);
+              // Still emit success but with empty filter lists
+              socket.emit("loginSuccess", {
+                settings: user.settings ? JSON.parse(user.settings) : {},
+                filterLists: [],
+              });
+            }
+          } else {
+            socket.emit("loginError", { message: "Invalid credentials" });
+          }
+        } catch (compareError) {
+          console.error("Password comparison error:", compareError);
+          socket.emit("loginError", { message: "Error verifying credentials" });
+        }
+      } else {
+        socket.emit("loginError", { message: "User not found" });
+      }
+    } catch (err) {
+      console.error("Detailed login error:", {
+        error: err,
+        message: err.message,
+        stack: err.stack,
+        username: username ? "provided" : "missing",
+        password: password ? "provided" : "missing",
       });
 
-      return {
-        settings: JSON.parse(userRows[0].settings || "{}"),
-        filterLists: filterListRows.map((row) => ({
-          ...row,
-          ids: JSON.parse(row.ids),
-          enabled: Boolean(row.enabled),
-          is_exclude: Boolean(row.is_exclude),
-        })),
-        profiles: profileRows.map((row) => ({
-          ...row,
-          settings: JSON.parse(row.settings || "{}"),
-        })),
-      };
-    } catch (error) {
-      console.error("Error getting user data:", error);
-      throw error;
+      socket.emit("loginError", {
+        message: "Error during login",
+        details: err.message,
+      });
     }
-  }
+  });
 
   socket.on("requestSync", async () => {
     if (!socket.username) {
@@ -1628,7 +1795,6 @@ io.on("connection", (socket) => {
       try {
         const profileData = JSON.parse(rows[0].settings);
 
-        // Get valid filter lists
         const { rows: validFilterLists } = await db.execute({
           sql: "SELECT id FROM filter_lists WHERE user_id = (SELECT id FROM users WHERE username = ?)",
           args: [socket.username],
@@ -1652,6 +1818,10 @@ io.on("connection", (socket) => {
       console.error("Error loading profile:", error);
       socket.emit("error", { message: "Error loading profile" });
     }
+  });
+
+  socket.on("disconnect", () => {
+    console.log("Client disconnected");
   });
 });
 

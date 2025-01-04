@@ -25,6 +25,7 @@
     const params = new URLSearchParams(window.location.search);
 
     if (params.get("authenticated") === "true") {
+      // EVE SSO authentication successful
       dispatch("login", { type: "eve" });
       successMessage = "Successfully logged in with EVE Online!";
       window.history.replaceState({}, document.title, "/");
