@@ -1,8 +1,8 @@
 <script>
   import { createEventDispatcher, onMount, afterUpdate } from "svelte";
   import { settings, filterLists, profiles, DEFAULT_SETTINGS } from "./store";
-  import FilterListManager from "./FilterListManager.svelte";
   import ProfileListManager from "./ProfileListManager.svelte";
+  import FilterListManager from "./FilterListManager.svelte";
 
   export let socket;
 
@@ -13,8 +13,24 @@
   let selectedProfile = null;
 
   $: localSettings = $settings;
-  $: localFilterLists = $filterLists;
   $: localProfiles = $profiles;
+
+  function addProfile(profile) {
+    profiles.update((currentProfiles) => {
+      // Check if the profile already exists
+      const existingIndex = currentProfiles.findIndex(
+        (p) => p.id === profile.id
+      );
+      if (existingIndex !== -1) {
+        // Update the existing profile
+        currentProfiles[existingIndex] = profile;
+        return [...currentProfiles];
+      } else {
+        // Add the new profile
+        return [...currentProfiles, profile];
+      }
+    });
+  }
 
   $: {
     console.log(
@@ -24,8 +40,29 @@
   }
 
   onMount(() => {
-    console.log("SettingsManager.svelte - onMount. Fetching initial profiles.");
-    fetchProfiles();
+    socket.on("profilesFetched", (fetchedProfiles) => {
+      console.log("Received profiles:", fetchedProfiles);
+      profiles.set(fetchedProfiles);
+    });
+
+    socket.on("profileSaved", (profile) => {
+      console.log("Profile saved:", profile);
+      addProfile(profile); // Use the addProfile function
+    });
+
+    socket.on("profileDeleted", (id) => {
+      console.log("Profile deleted:", id);
+      deleteProfile(id);
+    });
+
+    // Initial fetch
+    socket.emit("fetchProfiles");
+
+    return () => {
+      socket.off("profilesFetched");
+      socket.off("profileSaved");
+      socket.off("profileDeleted");
+    };
   });
 
   afterUpdate(() => {
@@ -74,7 +111,11 @@
     }
   }
 
-  function createFilterList() {
+  async function createFilterList() {
+    if (!newListName || !newListIds) {
+      return; // Add validation
+    }
+
     const ids = newListIds.split(",").map((id) => id.trim());
     const newList = {
       name: newListName,
@@ -83,16 +124,14 @@
       is_exclude: newListIsExclude,
       filter_type: newListFilterType,
     };
-    console.log("Creating new filter list:", newList);
-    socket.emit("createFilterList", newList);
-    newListName = newListIds = "";
+
+    socket.emit("createFilterList", newList); // Use socket instead of fetch
+
+    // Clear form fields after emitting
+    newListName = "";
+    newListIds = "";
     newListIsExclude = false;
     newListFilterType = "";
-  }
-
-  function handleFilterListsUpdate(event) {
-    filterLists.set(event.detail.filterLists);
-    socket.emit("updateFilterLists", $filterLists);
   }
 
   function saveProfile(event) {
@@ -101,30 +140,32 @@
       const profileData = {
         name,
         settings: $settings,
-        filterLists: $filterLists,
+        filterLists: $filterLists.map((list) => ({
+          ...list,
+          id: list.id.toString(), // Convert BigInt to string
+        })),
       };
       console.log("Sending profile data:", profileData);
       socket.emit("saveProfile", profileData);
-    } else {
-      console.log("No profile name provided");
     }
   }
 
   function loadProfile(event) {
     const profileId = event.detail;
     if (profileId) {
+      console.log("Loading profile:", profileId);
       socket.emit("loadProfile", profileId);
     }
   }
 
   function deleteProfile(event) {
     const { id } = event.detail;
-    console.log("SettingsManager: Deleting profile:", id);
+    console.log("Deleting profile:", id);
     socket.emit("deleteProfile", { id });
   }
 
   function fetchProfiles() {
-    console.log("Fetching profiles from database");
+    console.log("Fetching profiles");
     socket.emit("fetchProfiles");
   }
 
@@ -134,18 +175,21 @@
   });
 
   socket.on("profileSaved", (profile) => {
-    console.log("Profile saved event received:", profile);
-    profiles.update((profs) => {
-      const existingIndex = profs.findIndex((p) => p.id === profile.id);
+    console.log("Profile saved:", profile);
+    profiles.update((currentProfiles) => {
+      // Find and update existing profile or add new one
+      const existingIndex = currentProfiles.findIndex(
+        (p) => p.id === profile.id
+      );
       if (existingIndex !== -1) {
-        profs[existingIndex] = profile;
-      } else {
-        profs = [...profs, profile];
+        currentProfiles[existingIndex] = profile;
+        return [...currentProfiles];
       }
-      return profs;
+      return [...currentProfiles, profile];
     });
-    selectedProfile = profile.id;
-    fetchProfiles(); // Fetch updated list of profiles
+
+    // Trigger a profile fetch to ensure we have latest data
+    fetchProfiles();
   });
 
   socket.on("profileLoaded", (data) => {
@@ -194,11 +238,14 @@
   socket.on("filterListCreated", (newList) => {
     console.log("Received new filter list:", newList);
     filterLists.update((lists) => {
+      // Check if the list already exists
       const existingIndex = lists.findIndex((list) => list.id === newList.id);
       if (existingIndex !== -1) {
+        // Update the existing list
         lists[existingIndex] = newList;
         return [...lists];
       } else {
+        // Add the new list
         return [...lists, newList];
       }
     });
@@ -462,6 +509,18 @@
     </label>
 
     <h3>Attacker Filters</h3>
+    <label>
+      <input
+        type="checkbox"
+        bind:checked={localSettings.attacker_capital_filter_enabled}
+        on:change={() =>
+          updateSetting(
+            "attacker_capital_filter_enabled",
+            localSettings.attacker_capital_filter_enabled
+          )}
+      />
+      Show Only Kills with Capital Ship Attackers
+    </label>
     <label>
       <input
         type="checkbox"
@@ -759,30 +818,7 @@
       />
     </label>
   {/if}
-
-  <h3>Create New Filter List</h3>
-  <div>
-    <input bind:value={newListName} placeholder="New list name" />
-    <input bind:value={newListIds} placeholder="Comma-separated IDs" />
-    <label>
-      <input type="checkbox" bind:checked={newListIsExclude} />
-      Exclude
-    </label>
-    <select bind:value={newListFilterType}>
-      <option value="">Select filter type</option>
-      <option value="attacker_alliance">Attacker Alliance</option>
-      <option value="attacker_corporation">Attacker Corporation</option>
-      <option value="attacker_ship_type">Attacker Ship Type</option>
-      <option value="victim_alliance">Victim Alliance</option>
-      <option value="victim_corporation">Victim Corporation</option>
-      <option value="ship_type">Ship Type</option>
-      <option value="solar_system">Solar System</option>
-      <option value="region">Region</option>
-    </select>
-    <button on:click={createFilterList}>Create New List</button>
-  </div>
-
-  <FilterListManager on:updateFilterLists={handleFilterListsUpdate} />
+  <FilterListManager />
 </div>
 
 <style>
@@ -803,14 +839,5 @@
   h3 {
     margin-top: 20px;
     margin-bottom: 10px;
-  }
-
-  button {
-    margin-top: 10px;
-    margin-right: 10px;
-  }
-
-  select {
-    margin-top: 5px;
   }
 </style>

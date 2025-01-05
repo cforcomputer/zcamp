@@ -17,6 +17,7 @@ export const DEFAULT_SETTINGS = {
   audio_alerts_enabled: false,
   attacker_alliance_filter_enabled: false,
   attacker_corporation_filter_enabled: false,
+  attacker_capital_filter_enabled: false,
   attacker_ship_type_filter_enabled: false,
   victim_alliance_filter_enabled: false,
   victim_corporation_filter_enabled: false,
@@ -75,6 +76,24 @@ export const filteredKillmails = derived(
           if (pinpoints?.triangulationPossible) return false;
         } else {
           if (!pinpoints?.triangulationPossible) return false;
+        }
+      }
+
+      // Capital Ship Attacker Filter
+      if ($settings.attacker_capital_filter_enabled) {
+        const hasCapitalAttacker = killmail.killmail.attackers.some(
+          (attacker) => {
+            // Check if this attacker's ship is in the capital category
+            const attackerShipCategory =
+              killmail.shipCategories?.attackers?.find(
+                (ship) => ship.shipTypeId === attacker.ship_type_id
+              )?.category;
+            return attackerShipCategory === "capital";
+          }
+        );
+
+        if (!hasCapitalAttacker) {
+          return false;
         }
       }
 
@@ -417,7 +436,16 @@ export function deleteFilterList(id) {
 }
 
 export function addProfile(profile) {
-  profiles.update((profs) => [...profs, profile]);
+  profiles.update((existingProfiles) => {
+    const index = existingProfiles.findIndex((p) => p.id === profile.id);
+    if (index !== -1) {
+      // Update existing profile
+      existingProfiles[index] = profile;
+      return [...existingProfiles];
+    }
+    // Add new profile
+    return [...existingProfiles, profile];
+  });
 }
 
 export function updateProfile(updatedProfile) {
@@ -427,7 +455,9 @@ export function updateProfile(updatedProfile) {
 }
 
 export function deleteProfile(id) {
-  profiles.update((profs) => profs.filter((prof) => prof.id !== id));
+  profiles.update((existingProfiles) =>
+    existingProfiles.filter((p) => p.id !== id)
+  );
 }
 
 export function initializeSettings(serverSettings) {

@@ -355,6 +355,19 @@ async function storeShipCategory(shipTypeId, category) {
   }
 }
 
+function serializeData(data) {
+  if (typeof data === "bigint") {
+    return data.toString();
+  } else if (Array.isArray(data)) {
+    return data.map(serializeData);
+  } else if (typeof data === "object" && data !== null) {
+    return Object.fromEntries(
+      Object.entries(data).map(([key, value]) => [key, serializeData(value)])
+    );
+  }
+  return data;
+}
+
 // async function isCapitalShip(marketGroupId) {
 //   try {
 //     while (marketGroupId) {
@@ -683,92 +696,186 @@ app.post("/api/register", async (req, res) => {
   }
 });
 
-// Create a filter list
+// Modify in server.js
 app.post("/api/filter-list", async (req, res) => {
-  const { userId, name, ids, enabled, isExclude, filterType } = req.body;
+  console.log("Received filter list creation request:", req.body);
+
+  if (!req.session?.user?.id) {
+    console.log("User not authenticated");
+    return res
+      .status(401)
+      .json({ success: false, message: "Not authenticated" });
+  }
 
   try {
-    // Check if user has reached the maximum number of filter lists
-    const [listCount] = await db.get(
-      "SELECT COUNT(*) as count FROM filter_lists WHERE user_id = ?",
-      [userId]
-    );
-    if (listCount.count >= 100) {
-      return res.status(400).json({
-        success: false,
-        message: "Maximum number of filter lists reached",
-      });
-    }
+    const { name, ids, enabled, isExclude, filterType } = req.body;
+    const userId = req.session.user.id;
+
+    console.log("Processing filter list creation:", {
+      userId,
+      name,
+      idsLength: ids?.length,
+      enabled,
+      isExclude,
+      filterType,
+    });
 
     // Process IDs based on filter type
     let processedIds;
     if (filterType === "region") {
-      // Handle region IDs - ensure proper array format without extra escaping
       processedIds = Array.isArray(ids) ? ids : ids.split(",");
-
-      // Clean up the array elements
       processedIds = processedIds.map((id) => id.trim());
     } else {
-      // For other filter types, ensure array format
       processedIds = Array.isArray(ids)
         ? ids
         : ids.split(",").map((id) => id.trim());
     }
 
-    // Check size limit
-    const currentSize = await getFilterListsSize(userId);
-    const newListSize = JSON.stringify({
-      name,
-      processedIds,
-      enabled,
-      isExclude,
-      filterType,
-    }).length;
+    console.log("Processed IDs:", processedIds);
 
-    if (currentSize + newListSize > 1024 * 1024) {
-      return res.status(400).json({
-        success: false,
-        message: "Filter lists size limit exceeded",
-      });
-    }
-
-    // Insert into database with processed IDs
-    db.run(
-      "INSERT INTO filter_lists (user_id, name, ids, enabled, is_exclude, filter_type) VALUES (?, ?, ?, ?, ?, ?)",
-      [
+    // Insert into database
+    const result = await db.execute({
+      sql: "INSERT INTO filter_lists (user_id, name, ids, enabled, is_exclude, filter_type) VALUES (?, ?, ?, ?, ?, ?)",
+      args: [
         userId,
         name,
-        JSON.stringify(processedIds), // Single JSON.stringify for all types
+        JSON.stringify(processedIds),
         enabled ? 1 : 0,
         isExclude ? 1 : 0,
         filterType || null,
       ],
-      function (err) {
-        if (err) {
-          console.error("Error creating filter list:", err);
-          res.status(500).json({
-            success: false,
-            message: "Error creating filter list",
-          });
-        } else {
-          const newFilterList = {
-            id: this.lastID,
-            user_id: userId,
-            name,
-            ids: processedIds, // Use the processed array directly in response
-            enabled: Boolean(enabled),
-            is_exclude: Boolean(isExclude),
-            filter_type: filterType || null,
-          };
-          console.log("Created new filter list:", newFilterList);
-          res.json({ success: true, filterList: newFilterList });
-          io.to(userId.toString()).emit("filterListCreated", newFilterList);
-        }
-      }
-    );
+    });
+
+    console.log("Database insert result:", result);
+
+    // Convert BigInt to string for the ID
+    const newFilterList = {
+      id: result.lastInsertRowid.toString(),
+      user_id: userId.toString(),
+      name,
+      ids: processedIds,
+      enabled: Boolean(enabled),
+      is_exclude: Boolean(isExclude),
+      filter_type: filterType || null,
+    };
+
+    console.log("Emitting new filter list to clients:", newFilterList);
+
+    // Emit to connected clients
+    io.to(userId.toString()).emit("filterListCreated", newFilterList);
+
+    res.json({ success: true, filterList: newFilterList });
+  } catch (error) {
+    console.error("Error creating filter list:", error);
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+});
+
+app.put("/api/filter-list/:id", async (req, res) => {
+  const { name, ids, enabled, isExclude, filterType } = req.body;
+  const id = req.params.id;
+
+  try {
+    const { rows } = await db.execute({
+      sql: "SELECT user_id FROM filter_lists WHERE id = ?",
+      args: [id],
+    });
+
+    if (rows.length === 0) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Filter list not found" });
+    }
+
+    const userId = rows[0].user_id;
+
+    await db.execute({
+      sql: "UPDATE filter_lists SET name = ?, ids = ?, enabled = ?, is_exclude = ?, filter_type = ? WHERE id = ?",
+      args: [
+        name,
+        JSON.stringify(ids),
+        enabled ? 1 : 0,
+        isExclude ? 1 : 0,
+        filterType || null,
+        id,
+      ],
+    });
+
+    const updatedList = {
+      id: id.toString(),
+      user_id: userId.toString(),
+      name,
+      ids,
+      enabled: Boolean(enabled),
+      is_exclude: Boolean(isExclude),
+      filter_type: filterType,
+    };
+
+    // Emit updated list
+    io.to(userId.toString()).emit("filterListUpdated", updatedList);
+    res.json({ success: true, filterList: updatedList });
   } catch (error) {
     console.error("Server error:", error);
     res.status(500).json({ success: false, message: "Server error" });
+  }
+});
+
+app.post("/api/profile", async (req, res) => {
+  if (!req.session?.user?.id) {
+    return res
+      .status(401)
+      .json({ success: false, message: "Not authenticated" });
+  }
+
+  try {
+    const { name, settings, filterLists } = req.body;
+    const userId = req.session.user.id;
+    const profileData = JSON.stringify({ settings, filterLists });
+
+    const result = await db.execute({
+      sql: "INSERT INTO user_profiles (user_id, name, settings) VALUES (?, ?, ?)",
+      args: [userId, name, profileData],
+    });
+
+    const newProfile = {
+      id: result.lastInsertRowid, // Use lastInsertRowid instead of lastInsertId
+      name,
+      settings: profileData,
+    };
+
+    // Broadcast to all connected clients for this user
+    io.to(userId.toString()).emit("profileSaved", newProfile);
+
+    res.json({ success: true, profile: newProfile });
+  } catch (error) {
+    console.error("Error saving profile:", error);
+    res.status(500).json({ success: false, message: "Error saving profile" });
+  }
+});
+
+app.get("/api/filter-lists/:userId", async (req, res) => {
+  try {
+    const { rows } = await db.execute({
+      sql: "SELECT * FROM filter_lists WHERE user_id = ?",
+      args: [req.params.userId],
+    });
+
+    const filterLists = rows.map((row) => ({
+      ...row,
+      id: row.id.toString(),
+      user_id: row.user_id.toString(),
+      ids: JSON.parse(row.ids || "[]"),
+      enabled: Boolean(row.enabled),
+      is_exclude: Boolean(row.is_exclude),
+      filter_type: row.filter_type || null,
+    }));
+
+    res.json({ success: true, filterLists });
+  } catch (err) {
+    console.error("Error fetching filter lists:", err);
+    res
+      .status(500)
+      .json({ success: false, message: "Error fetching filter lists" });
   }
 });
 
@@ -784,8 +891,8 @@ app.get("/api/session", async (req, res) => {
     hasSession: !!req.session,
     hasUser: !!req.session?.user,
     sessionID: req.sessionID,
-    sessionData: req.session, // Add this to see full session data
-    cookies: req.headers.cookie, // Add this to check cookie header
+    sessionData: req.session,
+    cookies: req.headers.cookie,
   });
 
   if (!req.session?.user) {
@@ -798,15 +905,37 @@ app.get("/api/session", async (req, res) => {
     });
   }
 
-  res.json({
-    user: {
-      id: req.session.user.id,
-      character_id: req.session.user.character_id,
-      character_name: req.session.user.character_name,
-      access_token: req.session.user.access_token,
-      refresh_token: req.session.user.refresh_token,
-    },
-  });
+  try {
+    // Add filter lists fetch
+    const { rows: filterLists } = await db.execute({
+      sql: "SELECT * FROM filter_lists WHERE user_id = ?",
+      args: [req.session.user.id],
+    });
+
+    const processedFilterLists = filterLists.map((list) => ({
+      ...list,
+      id: list.id.toString(), // Convert ID to string
+      user_id: list.user_id.toString(), // Convert user_id to string
+      ids: JSON.parse(list.ids || "[]"),
+      enabled: Boolean(list.enabled),
+      is_exclude: Boolean(list.is_exclude),
+      filter_type: list.filter_type || null, // Ensure filter_type is included
+    }));
+
+    res.json({
+      user: {
+        id: req.session.user.id,
+        character_id: req.session.user.character_id,
+        character_name: req.session.user.character_name,
+        access_token: req.session.user.access_token,
+        refresh_token: req.session.user.refresh_token,
+      },
+      filterLists: processedFilterLists,
+    });
+  } catch (err) {
+    console.error("Error fetching session data:", err);
+    res.status(500).json({ error: "Server error" });
+  }
 });
 
 // Normal login route for people who don't want their character tracked.
@@ -827,7 +956,6 @@ app.post("/api/login", async (req, res) => {
     });
 
     const user = rows[0];
-
     if (!user) {
       return res.status(401).json({
         success: false,
@@ -836,7 +964,6 @@ app.post("/api/login", async (req, res) => {
     }
 
     const match = await compare(password, user.password);
-
     if (!match) {
       return res.status(401).json({
         success: false,
@@ -844,7 +971,19 @@ app.post("/api/login", async (req, res) => {
       });
     }
 
-    // Create session user object
+    // Get user's filter lists
+    const { rows: filterLists } = await db.execute({
+      sql: "SELECT * FROM filter_lists WHERE user_id = ?",
+      args: [user.id],
+    });
+
+    const processedFilterLists = filterLists.map((list) => ({
+      ...list,
+      ids: JSON.parse(list.ids || "[]"),
+      enabled: Boolean(list.enabled),
+      is_exclude: Boolean(list.is_exclude),
+    }));
+
     const sessionUser = {
       id: user.id,
       username: user.username,
@@ -853,10 +992,8 @@ app.post("/api/login", async (req, res) => {
       access_token: user.access_token,
     };
 
-    // Set session data
     req.session.user = sessionUser;
 
-    // Save session explicitly
     await new Promise((resolve, reject) => {
       req.session.save((err) => {
         if (err) {
@@ -871,6 +1008,7 @@ app.post("/api/login", async (req, res) => {
     res.json({
       success: true,
       user: sessionUser,
+      filterLists: processedFilterLists,
     });
   } catch (err) {
     console.error("Login error:", err);
@@ -984,6 +1122,24 @@ app.get("/callback", async (req, res) => {
         userId = result.lastInsertRowid;
       }
 
+      // Fetch filter lists for the user
+      const { rows: filterLists } = await db.execute({
+        sql: "SELECT * FROM filter_lists WHERE user_id = ?",
+        args: [userId],
+      });
+
+      const processedFilterLists = filterLists.map((list) => ({
+        id: list.id.toString(),
+        user_id: list.user_id.toString(),
+        name: list.name,
+        ids: JSON.parse(list.ids || "[]"),
+        enabled: Boolean(list.enabled),
+        is_exclude: Boolean(list.is_exclude),
+        filter_type: list.filter_type || null,
+      }));
+
+      console.log("Processed filter lists:", processedFilterLists);
+
       // Set session data
       console.log("Setting up session data...");
       const sessionUser = {
@@ -1002,6 +1158,7 @@ app.get("/callback", async (req, res) => {
       }
 
       req.session.user = sessionUser;
+      req.session.filterLists = processedFilterLists;
 
       // Save session and redirect
       await new Promise((resolve, reject) => {
@@ -1014,6 +1171,12 @@ app.get("/callback", async (req, res) => {
           console.log("Session saved to Redis");
           resolve();
         });
+      });
+
+      // Emit to all sockets for this user
+      io.to(userId.toString()).emit("loginSuccess", {
+        settings: {},
+        filterLists: processedFilterLists,
       });
 
       return res.redirect("/?authenticated=true");
@@ -1341,30 +1504,51 @@ function crossProduct(a, b) {
 }
 
 // Get all filter lists for a user
-app.get("/api/filter-lists/:userId", async (req, res) => {
-  const userId = req.params.userId;
+app.put("/api/filter-list/:id", async (req, res) => {
+  const { name, ids, enabled, isExclude, filterType } = req.body;
+  const id = req.params.id;
+
   try {
+    // Get the user ID for this filter list
     const { rows } = await db.execute({
-      sql: "SELECT * FROM filter_lists WHERE user_id = ?",
-      args: [userId],
+      sql: "SELECT user_id FROM filter_lists WHERE id = ?",
+      args: [id],
     });
 
-    const filterLists = rows.map((row) => ({
-      ...row,
-      ids: JSON.parse(row.ids || "[]"),
-      enabled: Boolean(row.enabled),
-      is_exclude: Boolean(row.is_exclude),
-      filter_type: row.filter_type || null,
-    }));
+    if (rows.length === 0) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Filter list not found" });
+    }
 
-    console.log("Fetched filter lists:", filterLists);
-    res.json({ success: true, filterLists });
-  } catch (err) {
-    console.error("Error fetching filter lists:", err);
-    res.status(500).json({
-      success: false,
-      message: "Error fetching filter lists",
+    const userId = rows[0].user_id;
+
+    await db.execute({
+      sql: "UPDATE filter_lists SET name = ?, ids = ?, enabled = ?, is_exclude = ?, filter_type = ? WHERE id = ?",
+      args: [
+        name,
+        JSON.stringify(ids),
+        enabled ? 1 : 0,
+        isExclude ? 1 : 0,
+        filterType || null,
+        id,
+      ],
     });
+
+    const updatedList = {
+      id,
+      user_id: userId,
+      name,
+      ids,
+      enabled: Boolean(enabled),
+      is_exclude: Boolean(isExclude),
+      filter_type: filterType,
+    };
+
+    res.json({ success: true, filterList: updatedList });
+  } catch (error) {
+    console.error("Server error:", error);
+    res.status(500).json({ success: false, message: "Server error" });
   }
 });
 
@@ -1472,87 +1656,24 @@ io.on("connection", (socket) => {
 
   socket.emit("initialCamps", Array.from(activeCamps.values()));
 
-  socket.on("login", async ({ username, password }) => {
-    try {
-      const cleanPassword = String(password);
-      const { rows } = await db.execute({
-        sql: "SELECT * FROM users WHERE username = ?",
-        args: [username],
-      });
-      const user = rows[0];
-
-      if (user) {
-        const match = await compare(cleanPassword, user.password);
-        if (match) {
-          socket.request.session.user = {
-            id: user.id,
-            username: user.username,
-            character_id: user.character_id,
-            character_name: user.character_name,
-            access_token: user.access_token,
-          };
-
-          await new Promise((resolve, reject) => {
-            socket.request.session.save((err) => {
-              if (err) {
-                console.error("Session save error:", err);
-                reject(err);
-                return;
-              }
-              console.log(
-                "Session saved in socket login:",
-                socket.request.sessionID
-              );
-              resolve();
-            });
-          });
-
-          socket.username = username;
-
-          const { rows: filterLists } = await db.execute({
-            sql: "SELECT * FROM filter_lists WHERE user_id = ?",
-            args: [user.id],
-          });
-
-          socket.emit("loginSuccess", {
-            settings: JSON.parse(user.settings || "{}"),
-            filterLists,
-          });
-        } else {
-          socket.emit("loginError", { message: "Invalid credentials" });
-        }
-      } else {
-        socket.emit("loginError", { message: "User not found" });
-      }
-    } catch (err) {
-      console.error("Error during login:", err);
-      socket.emit("loginError", { message: "Error during login" });
-    }
-  });
-
   socket.on("fetchProfiles", async () => {
-    if (!socket.username) {
-      socket.emit("error", { message: "Not logged in" });
+    if (!socket.request.session?.user?.id) {
+      socket.emit("error", { message: "Not authenticated" });
       return;
     }
 
     try {
-      const { rows: userRows } = await db.execute({
-        sql: "SELECT id FROM users WHERE username = ?",
-        args: [socket.username],
+      const { rows } = await db.execute({
+        sql: "SELECT id, name, settings FROM user_profiles WHERE user_id = ?",
+        args: [socket.request.session.user.id],
       });
 
-      if (!userRows[0]) {
-        socket.emit("error", { message: "User not found" });
-        return;
-      }
+      const profiles = rows.map((row) => ({
+        id: row.id,
+        name: row.name,
+        settings: JSON.parse(row.settings),
+      }));
 
-      const { rows: profiles } = await db.execute({
-        sql: "SELECT id, name FROM user_profiles WHERE user_id = ?",
-        args: [userRows[0].id],
-      });
-
-      console.log("Fetched profiles:", profiles);
       socket.emit("profilesFetched", profiles);
     } catch (error) {
       console.error("Error fetching profiles:", error);
@@ -1613,48 +1734,80 @@ io.on("connection", (socket) => {
     }
   });
 
-  socket.on(
-    "createFilterList",
-    async ({ name, ids, enabled, isExclude, filter_type }) => {
-      if (socket.username) {
-        try {
-          const { rows } = await db.execute({
-            sql: "SELECT id FROM users WHERE username = ?",
-            args: [socket.username],
-          });
+  socket.on("createFilterList", async (data) => {
+    console.log("Received createFilterList event:", data);
 
-          if (rows[0]) {
-            console.log("Inserting filter list with filter_type:", filter_type);
-            const result = await db.execute({
-              sql: "INSERT INTO filter_lists (user_id, name, ids, enabled, is_exclude, filter_type) VALUES (?, ?, ?, ?, ?, ?)",
-              args: [
-                rows[0].id,
-                name,
-                JSON.stringify(ids),
-                enabled ? 1 : 0,
-                isExclude ? 1 : 0,
-                filter_type,
-              ],
-            });
-
-            const newFilterList = {
-              id: result.lastInsertId,
-              user_id: rows[0].id,
-              name,
-              ids,
-              enabled: Boolean(enabled),
-              is_exclude: Boolean(isExclude),
-              filter_type,
-            };
-            console.log("Created new filter list:", newFilterList);
-            socket.emit("filterListCreated", newFilterList);
-          }
-        } catch (err) {
-          console.error("Error creating filter list:", err);
-        }
-      }
+    if (!socket.request.session?.user?.id) {
+      console.log("Rejecting createFilterList - user not authenticated");
+      socket.emit("error", { message: "Not authenticated" });
+      return;
     }
-  );
+
+    try {
+      const { name, ids, enabled, is_exclude, filter_type } = data;
+      const userId = socket.request.session.user.id;
+
+      console.log("Processing filter list creation for user:", userId, {
+        name,
+        ids,
+        enabled,
+        is_exclude,
+        filter_type,
+      });
+
+      // Process IDs based on filter type
+      const processedIds = Array.isArray(ids)
+        ? ids
+        : ids.map((id) => id.trim());
+
+      console.log(
+        "Inserting filter list into database with processed IDs:",
+        processedIds
+      );
+
+      const result = await db.execute({
+        sql: "INSERT INTO filter_lists (user_id, name, ids, enabled, is_exclude, filter_type) VALUES (?, ?, ?, ?, ?, ?)",
+        args: [
+          userId,
+          name,
+          JSON.stringify(processedIds),
+          enabled ? 1 : 0,
+          is_exclude ? 1 : 0,
+          filter_type,
+        ],
+      });
+
+      console.log("Database insert result:", result);
+
+      const newFilterList = {
+        id: result.lastInsertRowid.toString(),
+        user_id: userId.toString(),
+        name,
+        ids: processedIds,
+        enabled: Boolean(enabled),
+        is_exclude: Boolean(is_exclude),
+        filter_type,
+      };
+
+      console.log(
+        "Broadcasting new filter list to room:",
+        userId,
+        newFilterList
+      );
+
+      // Emit to user's room
+      io.to(userId.toString()).emit("filterListCreated", newFilterList);
+
+      // Emit success back to sending socket
+      socket.emit("filterListCreated", newFilterList);
+    } catch (error) {
+      console.error("Error creating filter list:", error);
+      socket.emit("error", {
+        message: "Failed to create filter list",
+        details: error.message,
+      });
+    }
+  });
 
   socket.on(
     "updateFilterList",
@@ -1715,58 +1868,58 @@ io.on("connection", (socket) => {
   });
 
   socket.on("saveProfile", async (data) => {
-    console.log("Received saveProfile event:", data);
-
-    if (!socket.username) {
-      socket.emit("error", { message: "Not logged in" });
+    if (!socket.request.session?.user?.id) {
+      socket.emit("error", { message: "Not authenticated" });
       return;
     }
 
     try {
-      const { rows } = await db.execute({
-        sql: "SELECT id FROM users WHERE username = ?",
-        args: [socket.username],
+      const userId = socket.request.session.user.id;
+      const { name, settings, filterLists } = data;
+
+      // Convert BigInt values to strings in filterLists
+      const serializedFilterLists = filterLists.map((list) => ({
+        ...list,
+        id: list.id.toString(), // Convert BigInt to string
+      }));
+
+      const profileData = JSON.stringify({
+        settings,
+        filterLists: serializedFilterLists,
       });
 
-      if (!rows[0]) {
-        socket.emit("error", { message: "User not found" });
-        return;
-      }
-
-      const userId = rows[0].id;
-      const { name, settings, filterLists } = data;
-      const profileData = JSON.stringify({ settings, filterLists });
-
+      // Check if the profile already exists
       const { rows: existingProfile } = await db.execute({
         sql: "SELECT id FROM user_profiles WHERE user_id = ? AND name = ?",
         args: [userId, name],
       });
 
+      let profileId;
       if (existingProfile[0]) {
+        // Update existing profile
         await db.execute({
           sql: "UPDATE user_profiles SET settings = ? WHERE id = ?",
           args: [profileData, existingProfile[0].id],
         });
-
-        console.log("Profile updated successfully");
-        socket.emit("profileSaved", {
-          id: existingProfile[0].id,
-          name,
-          message: "Profile updated",
-        });
+        profileId = existingProfile[0].id;
       } else {
+        // Insert new profile
         const result = await db.execute({
           sql: "INSERT INTO user_profiles (user_id, name, settings) VALUES (?, ?, ?)",
           args: [userId, name, profileData],
         });
-
-        console.log("New profile created successfully");
-        socket.emit("profileSaved", {
-          id: result.lastInsertId,
-          name,
-          message: "New profile created",
-        });
+        profileId = result.lastInsertRowid; // Use lastInsertRowid
       }
+
+      // Create the saved profile object
+      const savedProfile = {
+        id: profileId.toString(), // Convert BigInt to string
+        name,
+        settings: JSON.parse(profileData),
+      };
+
+      // Emit the saved profile to the client
+      socket.emit("profileSaved", savedProfile);
     } catch (error) {
       console.error("Error saving profile:", error);
       socket.emit("error", { message: "Error saving profile" });
@@ -1851,15 +2004,28 @@ io.on("connection", (socket) => {
                 args: [sessionUser.id],
               });
 
-              const settings = user.settings ? JSON.parse(user.settings) : {};
+              // Process filter lists properly
+              const processedFilterLists = filterLists.map((list) => ({
+                id: list.id.toString(),
+                user_id: list.user_id.toString(),
+                name: list.name,
+                ids: JSON.parse(list.ids || "[]"),
+                enabled: Boolean(list.enabled),
+                is_exclude: Boolean(list.is_exclude),
+                filter_type: list.filter_type || null,
+              }));
+
+              console.log(
+                "Sending processed filter lists to client:",
+                processedFilterLists
+              );
 
               socket.emit("loginSuccess", {
-                settings,
-                filterLists: filterLists || [],
+                settings: user.settings ? JSON.parse(user.settings) : {},
+                filterLists: processedFilterLists,
               });
             } catch (filterError) {
               console.error("Error fetching filter lists:", filterError);
-              // Still emit success but with empty filter lists
               socket.emit("loginSuccess", {
                 settings: user.settings ? JSON.parse(user.settings) : {},
                 filterLists: [],
@@ -1906,18 +2072,16 @@ io.on("connection", (socket) => {
   });
 
   socket.on("loadProfile", async (profileId) => {
-    if (!socket.username) {
-      socket.emit("error", { message: "Not logged in" });
+    if (!socket.request.session?.user?.id) {
+      socket.emit("error", { message: "Not authenticated" });
       return;
     }
 
     try {
       const { rows } = await db.execute({
-        sql: `SELECT user_profiles.settings, user_profiles.name 
-              FROM user_profiles 
-              JOIN users ON user_profiles.user_id = users.id 
-              WHERE user_profiles.id = ? AND users.username = ?`,
-        args: [profileId, socket.username],
+        sql: `SELECT settings, name FROM user_profiles 
+              WHERE id = ? AND user_id = ?`,
+        args: [profileId, socket.request.session.user.id],
       });
 
       if (!rows[0]) {
@@ -1925,28 +2089,12 @@ io.on("connection", (socket) => {
         return;
       }
 
-      try {
-        const profileData = JSON.parse(rows[0].settings);
-
-        const { rows: validFilterLists } = await db.execute({
-          sql: "SELECT id FROM filter_lists WHERE user_id = (SELECT id FROM users WHERE username = ?)",
-          args: [socket.username],
-        });
-
-        const validFilterListIds = validFilterLists.map((fl) => fl.id);
-        const filteredFilterLists = profileData.filterLists.filter((fl) =>
-          validFilterListIds.includes(fl.id)
-        );
-
-        socket.emit("profileLoaded", {
-          name: rows[0].name,
-          settings: profileData.settings || {},
-          filterLists: filteredFilterLists,
-        });
-      } catch (parseError) {
-        console.error("Error parsing profile data:", parseError);
-        socket.emit("error", { message: "Error parsing profile data" });
-      }
+      const profileData = JSON.parse(rows[0].settings);
+      socket.emit("profileLoaded", {
+        id: profileId,
+        name: rows[0].name,
+        ...profileData,
+      });
     } catch (error) {
       console.error("Error loading profile:", error);
       socket.emit("error", { message: "Error loading profile" });

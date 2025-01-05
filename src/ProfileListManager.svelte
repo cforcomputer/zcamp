@@ -1,10 +1,10 @@
 <script>
   import { createEventDispatcher } from "svelte";
 
-  const dispatch = createEventDispatcher();
-
   export let profiles = [];
   export let selectedProfile = null;
+
+  const dispatch = createEventDispatcher();
 
   let newProfileName = "";
 
@@ -38,7 +38,7 @@
   <div class="profile-controls">
     <select bind:value={selectedProfile} on:click={handleDropdownClick}>
       <option value={null}>Select a profile</option>
-      {#each profiles || [] as profile (profile.id)}
+      {#each profiles as profile (profile.id)}
         <option value={profile.id}>{profile.name}</option>
       {/each}
     </select>
