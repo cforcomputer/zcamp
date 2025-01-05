@@ -1,9 +1,11 @@
+// new server.js
 import express from "express";
 import { createServer } from "http";
 import { Server } from "socket.io";
 import axios from "axios";
 import { createClient as createSqlClient } from "@libsql/client"; // Rename this oneimport { compare, hash } from "bcrypt";
 import { isGateCamp, updateCamps } from "./campStore.js";
+import roamStore from "./roamStore.js";
 import path from "path";
 import { fileURLToPath } from "url";
 import cors from "cors";
@@ -129,6 +131,7 @@ const sessionMiddleware = session({
   proxy: true, // Add this for proper HTTPS handling behind proxy
 });
 app.use(sessionMiddleware);
+app.set("trust proxy", 1);
 
 // Share session middleware with socket.io
 io.use((socket, next) => {
@@ -811,7 +814,7 @@ app.put("/api/filter-list/:id", async (req, res) => {
       filter_type: filterType,
     };
 
-    // Emit updated list
+    // Emit to all sockets in the user's room
     io.to(userId.toString()).emit("filterListUpdated", updatedList);
     res.json({ success: true, filterList: updatedList });
   } catch (error) {
@@ -1023,16 +1026,17 @@ app.post("/api/login", async (req, res) => {
 app.get("/callback", async (req, res) => {
   const { code, state } = req.query;
   console.log("Received callback with code:", code);
+  console.log("Session at callback:", req.session);
 
   try {
-    // Check state validity
+    // State validation
     const stateData = await getState(state);
     if (!stateData) {
       console.error("Invalid state:", state);
       return res.redirect("/?login=error&reason=invalid_state");
     }
 
-    // Get access token
+    // Token acquisition
     console.log("Requesting access token...");
     const tokenResponse = await axios.post(
       "https://login.eveonline.com/v2/oauth/token",
@@ -1058,10 +1062,10 @@ app.get("/callback", async (req, res) => {
       return res.redirect("/?login=error&reason=invalid_token");
     }
 
-    // Calculate token expiry time
+    // Token expiry calculation
     const token_expiry = Math.floor(Date.now() / 1000) + expires_in;
 
-    // Extract character info
+    // Character info extraction
     const tokenParts = access_token.split(".");
     const tokenPayload = JSON.parse(
       Buffer.from(tokenParts[1], "base64").toString()
@@ -1080,29 +1084,31 @@ app.get("/callback", async (req, res) => {
     try {
       console.log("Starting database operations...");
 
-      // Single database query to check for existing user
+      // User lookup/creation
       const { rows: existingUser } = await db.execute({
-        sql: "SELECT id FROM users WHERE character_id = ?",
+        sql: "SELECT id, settings FROM users WHERE character_id = ?",
         args: [characterId],
       });
 
-      // Prepare user data
-      const userData = {
-        access_token,
-        refresh_token,
-        character_name: characterName,
-        token_expiry,
-      };
-
       let userId;
+      let userSettings = {};
+
       if (existingUser.length > 0) {
         console.log("Updating existing user...");
         userId = existingUser[0].id;
+        userSettings = JSON.parse(existingUser[0].settings || "{}");
+
         await db.execute({
           sql: `UPDATE users 
                 SET access_token = ?, refresh_token = ?, character_name = ?, token_expiry = ? 
                 WHERE character_id = ?`,
-          args: [...Object.values(userData), characterId],
+          args: [
+            access_token,
+            refresh_token,
+            characterName,
+            token_expiry,
+            characterId,
+          ],
         });
       } else {
         console.log("Creating new user...");
@@ -1122,7 +1128,7 @@ app.get("/callback", async (req, res) => {
         userId = result.lastInsertRowid;
       }
 
-      // Fetch filter lists for the user
+      // Fetch filter lists
       const { rows: filterLists } = await db.execute({
         sql: "SELECT * FROM filter_lists WHERE user_id = ?",
         args: [userId],
@@ -1140,8 +1146,12 @@ app.get("/callback", async (req, res) => {
 
       console.log("Processed filter lists:", processedFilterLists);
 
-      // Set session data
-      console.log("Setting up session data...");
+      // Session setup
+      if (!req.session) {
+        console.log("Creating new session...");
+        req.session = {};
+      }
+
       const sessionUser = {
         id: userId,
         character_id: characterId,
@@ -1149,18 +1159,13 @@ app.get("/callback", async (req, res) => {
         access_token,
         refresh_token,
         token_expiry,
+        settings: userSettings,
       };
-
-      // Create new session if it doesn't exist
-      if (!req.session) {
-        console.log("Creating new session...");
-        req.session = {};
-      }
 
       req.session.user = sessionUser;
       req.session.filterLists = processedFilterLists;
 
-      // Save session and redirect
+      // Explicit session save
       await new Promise((resolve, reject) => {
         req.session.save((err) => {
           if (err) {
@@ -1173,9 +1178,9 @@ app.get("/callback", async (req, res) => {
         });
       });
 
-      // Emit to all sockets for this user
+      // Socket notification
       io.to(userId.toString()).emit("loginSuccess", {
-        settings: {},
+        settings: userSettings,
         filterLists: processedFilterLists,
       });
 
@@ -1503,55 +1508,6 @@ function crossProduct(a, b) {
   };
 }
 
-// Get all filter lists for a user
-app.put("/api/filter-list/:id", async (req, res) => {
-  const { name, ids, enabled, isExclude, filterType } = req.body;
-  const id = req.params.id;
-
-  try {
-    // Get the user ID for this filter list
-    const { rows } = await db.execute({
-      sql: "SELECT user_id FROM filter_lists WHERE id = ?",
-      args: [id],
-    });
-
-    if (rows.length === 0) {
-      return res
-        .status(404)
-        .json({ success: false, message: "Filter list not found" });
-    }
-
-    const userId = rows[0].user_id;
-
-    await db.execute({
-      sql: "UPDATE filter_lists SET name = ?, ids = ?, enabled = ?, is_exclude = ?, filter_type = ? WHERE id = ?",
-      args: [
-        name,
-        JSON.stringify(ids),
-        enabled ? 1 : 0,
-        isExclude ? 1 : 0,
-        filterType || null,
-        id,
-      ],
-    });
-
-    const updatedList = {
-      id,
-      user_id: userId,
-      name,
-      ids,
-      enabled: Boolean(enabled),
-      is_exclude: Boolean(isExclude),
-      filter_type: filterType,
-    };
-
-    res.json({ success: true, filterList: updatedList });
-  } catch (error) {
-    console.error("Server error:", error);
-    res.status(500).json({ success: false, message: "Server error" });
-  }
-});
-
 // Update a filter list
 app.put("/api/filter-list/:id", async (req, res) => {
   const { name, ids, enabled, isExclude, filterType } = req.body;
@@ -1655,6 +1611,12 @@ io.on("connection", (socket) => {
   console.log("New client connected");
 
   socket.emit("initialCamps", Array.from(activeCamps.values()));
+
+  if (socket.request.session?.user?.id) {
+    const userId = socket.request.session.user.id.toString();
+    socket.join(userId);
+    console.log(`User ${userId} joined their socket room`);
+  }
 
   socket.on("fetchProfiles", async () => {
     if (!socket.request.session?.user?.id) {
@@ -1800,6 +1762,7 @@ io.on("connection", (socket) => {
 
       // Emit success back to sending socket
       socket.emit("filterListCreated", newFilterList);
+      socket.emit("initialRoams", roamStore.getRoams());
     } catch (error) {
       console.error("Error creating filter list:", error);
       socket.emit("error", {
@@ -1819,6 +1782,16 @@ io.on("connection", (socket) => {
         : ids;
 
       try {
+        const { rows } = await db.execute({
+          sql: "SELECT user_id FROM filter_lists WHERE id = ?",
+          args: [id],
+        });
+
+        if (rows.length === 0) {
+          socket.emit("error", { message: "Filter list not found" });
+          return;
+        }
+
         await db.execute({
           sql: "UPDATE filter_lists SET name = ?, ids = ?, enabled = ?, is_exclude = ?, filter_type = ? WHERE id = ?",
           args: [
@@ -1831,29 +1804,28 @@ io.on("connection", (socket) => {
           ],
         });
 
-        console.log("Updated filter list:", {
-          id,
+        const updatedList = {
+          id: id.toString(),
+          user_id: rows[0].user_id.toString(),
           name,
           ids: processedIds,
-          enabled,
-          is_exclude,
+          enabled: Boolean(enabled),
+          is_exclude: Boolean(is_exclude),
           filter_type,
-        });
+        };
 
-        socket.emit("filterListUpdated", {
-          id,
-          name,
-          ids: processedIds,
-          enabled,
-          is_exclude,
-          filter_type,
-        });
+        // Emit to specific user's room
+        io.to(rows[0].user_id.toString()).emit(
+          "filterListUpdated",
+          updatedList
+        );
+        socket.emit("filterListUpdated", updatedList);
       } catch (err) {
         console.error("Error updating filter list:", err);
+        socket.emit("error", { message: "Failed to update filter list" });
       }
     }
   );
-
   socket.on("deleteFilterList", async ({ id }) => {
     try {
       await db.execute({
@@ -2199,7 +2171,7 @@ async function pollRedisQ() {
         io.emit("newKillmail", enrichedKillmail);
 
         if (isGateCamp(enrichedKillmail)) {
-          activeCamps = updateCamps(enrichedKillmail); // Should only pass killmail
+          activeCamps = updateCamps(enrichedKillmail);
           io.emit("campUpdate", Array.from(activeCamps.values()));
         }
       }
@@ -2214,10 +2186,6 @@ async function pollRedisQ() {
 function isDuplicate(killmail) {
   return killmails.some((km) => km.killID === killmail.killID);
 }
-
-io.on("connection", (socket) => {
-  socket.emit("initialCamps", Array.from(activeCamps.values()));
-});
 
 function cleanKillmailsCache(killmails) {
   const now = new Date();

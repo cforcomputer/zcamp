@@ -1,7 +1,9 @@
-<!-- src/ActiveCamps.svelte -->
+<!-- new src/ActiveCamps.svelte -->
 <script>
   import { filteredCamps } from "../server/campStore.js";
   import LocationTracker from "./LocationTracker.svelte";
+  import { CAMP_PROBABILITY_FACTORS } from "../server/campStore.js";
+  const { THREAT_SHIPS } = CAMP_PROBABILITY_FACTORS;
 
   let camps = [];
 
@@ -53,6 +55,29 @@
     }
   }
 
+  function getShipIcon(category) {
+    const icons = {
+      dictor: "🔲",
+      hic: "⬛",
+      ewar: "📡",
+      tackle: "🔗",
+      dps: "⚔️",
+      smartbomb: "⚡",
+    };
+    return icons[category] || "🚀";
+  }
+
+  function getShipName(shipId) {
+    return THREAT_SHIPS[shipId]?.name || `Ship ID ${shipId}`;
+  }
+
+  function getShipThreatColor(weight) {
+    if (weight >= 40) return "#ff4444";
+    if (weight >= 30) return "#ff8c00";
+    if (weight >= 20) return "#ffd700";
+    return "#90ee90";
+  }
+
   function hasInterdictor(kills) {
     return kills.some((kill) =>
       kill.killmail.attackers.some(
@@ -82,7 +107,14 @@
           const latestKill = camp.kills[camp.kills.length - 1];
           if (latestKill) {
             const killTime = new Date(latestKill.killmail.killmail_time);
-            const formattedTime = `${killTime.getUTCFullYear()}${String(killTime.getUTCMonth() + 1).padStart(2, "0")}${String(killTime.getUTCDate()).padStart(2, "0")}${String(killTime.getUTCHours()).padStart(2, "0")}${String(killTime.getUTCMinutes()).padStart(2, "0")}`;
+            const formattedTime = `${killTime.getUTCFullYear()}${String(
+              killTime.getUTCMonth() + 1
+            ).padStart(2, "0")}${String(killTime.getUTCDate()).padStart(
+              2,
+              "0"
+            )}${String(killTime.getUTCHours()).padStart(2, "0")}${String(
+              killTime.getUTCMinutes()
+            ).padStart(2, "0")}`;
             window.open(
               `https://zkillboard.com/related/${camp.systemId}/${formattedTime}/`,
               "_blank"
@@ -92,12 +124,17 @@
       >
         <div class="camp-header">
           <h3>{camp.stargateName}</h3>
-          <span
-            class="probability"
-            style="background-color: {getProbabilityColor(camp.probability)}"
-          >
-            {Math.round(camp.probability)}% Confidence
-          </span>
+          <div class="camp-indicators">
+            {#if camp.type === "smartbomb"}
+              <span class="camp-type smartbomb" title="Smartbomb Camp">⚡</span>
+            {/if}
+            <span
+              class="probability"
+              style="background-color: {getProbabilityColor(camp.probability)}"
+            >
+              {Math.round(camp.probability)}% Confidence
+            </span>
+          </div>
         </div>
 
         <div class="camp-stats">
@@ -110,9 +147,25 @@
           </div>
 
           <div class="stat-row">
+            <span class="stat-label">Duration:</span>
+            <span class="stat-value">
+              {#if camp.metrics?.campDuration}
+                {Math.floor(camp.metrics.campDuration)}m active
+                {#if camp.metrics.inactivityDuration > 0}
+                  ({Math.floor(camp.metrics.inactivityDuration)}m since last
+                  kill)
+                {/if}
+              {/if}
+            </span>
+          </div>
+
+          <div class="stat-row">
             <span class="stat-label">Activity:</span>
             <span class="stat-value">
-              {camp.kills.length} kills ({getKillFrequency(camp.kills)})
+              {camp.kills.length} kills
+              {#if camp.metrics?.podKills > 0}
+                ({camp.metrics.podKills} pods)
+              {/if}
               {#if hasInterdictor(camp.kills)}
                 <span
                   class="interdictor-badge"
@@ -129,41 +182,60 @@
             >
           </div>
 
-          <div class="camp-stats">
-            <div class="stat-row">
-              <span class="stat-label">Composition:</span>
-              <span class="stat-value">
-                {#if camp.composition}
-                  {camp.composition.activeCount}/{camp.composition
-                    .originalCount} active campers
-                  {#if camp.composition.killedCount > 0}
-                    <span class="killed-count"
-                      >(-{camp.composition.killedCount})</span
-                    >
+          <div class="stat-row">
+            <span class="stat-label">Composition:</span>
+            <span class="stat-value">
+              {#if camp.metrics?.partyMetrics}
+                {camp.metrics.partyMetrics.characters} pilots
+                {#if camp.metrics.partyMetrics.corporations > 0}
+                  from {camp.metrics.partyMetrics.corporations} corps
+                  {#if camp.metrics.partyMetrics.alliances > 0}
+                    in {camp.metrics.partyMetrics.alliances} alliances
                   {/if}
-                  {#if camp.numCorps > 0}
-                    from {camp.numCorps} corps
-                    {#if camp.numAlliances > 0}
-                      in {camp.numAlliances} alliances
-                    {/if}
-                  {/if}
-                {:else}
-                  Computing...
                 {/if}
-              </span>
-            </div>
-
-            {#if camp.state === "CRASHED"}
-              <div class="crashed-banner">CRASHED</div>
-            {/if}
-
-            <div class="stat-row">
-              <span class="stat-label">Last Activity:</span>
-              <span class="stat-value time">{getTimeAgo(camp.lastKill)}</span>
-            </div>
+              {:else if camp.composition}
+                {camp.composition.activeCount}/{camp.composition.originalCount} active
+                {#if camp.composition.killedCount > 0}
+                  <span class="killed-count"
+                    >(-{camp.composition.killedCount})</span
+                  >
+                {/if}
+              {:else}
+                Computing...
+              {/if}
+            </span>
           </div>
-        </div></button
-      >
+
+          {#if camp.metrics?.shipCounts}
+            <div class="ship-composition">
+              <div class="threat-ships">
+                {#each Object.entries(camp.metrics.shipCounts) as [shipId, count]}
+                  {#if THREAT_SHIPS[shipId]}
+                    <span
+                      class="ship-indicator"
+                      style="background-color: {getShipThreatColor(
+                        THREAT_SHIPS[shipId].weight
+                      )}"
+                      title="Threat Ship x{count}"
+                    >
+                      {getShipIcon(THREAT_SHIPS[shipId].category)}
+                    </span>
+                  {/if}
+                {/each}
+              </div>
+            </div>
+          {/if}
+
+          {#if camp.state === "CRASHED"}
+            <div class="crashed-banner">CRASHED</div>
+          {/if}
+
+          <div class="stat-row">
+            <span class="stat-label">Last Activity:</span>
+            <span class="stat-value time">{getTimeAgo(camp.lastKill)}</span>
+          </div>
+        </div>
+      </button>
     {/each}
 
     {#if camps.length === 0}
@@ -196,6 +268,41 @@
     color: white;
     appearance: none;
     margin: 0;
+  }
+
+  .camp-indicators {
+    display: flex;
+    align-items: center;
+    gap: 0.5em;
+  }
+
+  .camp-type {
+    padding: 0.3em;
+    border-radius: 4px;
+    font-size: 1.2em;
+  }
+
+  .camp-type.smartbomb {
+    background-color: #ff4444;
+  }
+
+  .ship-composition {
+    margin-top: 0.5em;
+    padding: 0.5em;
+    background: rgba(0, 0, 0, 0.3);
+    border-radius: 4px;
+  }
+
+  .threat-ships {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3em;
+  }
+
+  .ship-indicator {
+    padding: 0.2em 0.4em;
+    border-radius: 3px;
+    font-size: 0.9em;
   }
 
   .killed-count {
