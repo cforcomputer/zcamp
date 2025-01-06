@@ -226,6 +226,30 @@ async function initializeDatabase() {
       )
     `);
 
+    await db.execute(`
+      CREATE TABLE IF NOT EXISTS camp_crushers (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          character_id TEXT NOT NULL,
+          character_name TEXT NOT NULL,
+          target_camp_id TEXT,
+          target_start_time DATETIME,
+          bashbucks INTEGER DEFAULT 0,
+          FOREIGN KEY(character_id) REFERENCES users(character_id)
+      )
+  `);
+
+    await db.execute(`
+    CREATE TABLE IF NOT EXISTS camp_crusher_targets (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        character_id TEXT NOT NULL,
+        camp_id TEXT NOT NULL,
+        start_time DATETIME NOT NULL,
+        end_time DATETIME NOT NULL,
+        completed BOOLEAN DEFAULT FALSE,
+        FOREIGN KEY(character_id) REFERENCES users(character_id)
+    )
+`);
+
     console.log("Database initialized successfully");
     isDatabaseInitialized = true;
   } catch (err) {
@@ -233,6 +257,80 @@ async function initializeDatabase() {
     isDatabaseInitialized = false;
   }
 }
+
+// CAMPCRUSHERS API
+app.get("/api/campcrushers/stats", async (req, res) => {
+  if (!req.session?.user?.character_id) {
+    return res.status(401).json({ error: "Not authenticated" });
+  }
+
+  try {
+    const { rows } = await db.execute({
+      sql: "SELECT character_name, bashbucks FROM camp_crushers WHERE character_id = ?",
+      args: [req.session.user.character_id],
+    });
+
+    if (rows.length === 0) {
+      // Initialize new player
+      await db.execute({
+        sql: "INSERT INTO camp_crushers (character_id, character_name, bashbucks) VALUES (?, ?, 0)",
+        args: [req.session.user.character_id, req.session.user.character_name],
+      });
+      return res.json({ bashbucks: 0 });
+    }
+
+    return res.json({ bashbucks: rows[0].bashbucks });
+  } catch (error) {
+    console.error("Error fetching camp crusher stats:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+app.post("/api/campcrushers/target", async (req, res) => {
+  if (!req.session?.user?.character_id) {
+    return res.status(401).json({ error: "Not authenticated" });
+  }
+
+  const { campId } = req.body;
+  const startTime = new Date();
+  const endTime = new Date(startTime.getTime() + 60 * 60 * 1000); // 1 hour
+
+  try {
+    // Check for existing active target
+    const { rows } = await db.execute({
+      sql: "SELECT id FROM camp_crusher_targets WHERE character_id = ? AND completed = FALSE AND end_time > CURRENT_TIMESTAMP",
+      args: [req.session.user.character_id],
+    });
+
+    if (rows.length > 0) {
+      return res.status(400).json({ error: "Active target already exists" });
+    }
+
+    // Create new target
+    await db.execute({
+      sql: "INSERT INTO camp_crusher_targets (character_id, camp_id, start_time, end_time) VALUES (?, ?, ?, ?)",
+      args: [req.session.user.character_id, campId, startTime, endTime],
+    });
+
+    res.json({ success: true, endTime });
+  } catch (error) {
+    console.error("Error setting camp crusher target:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+app.get("/api/campcrushers/leaderboard", async (req, res) => {
+  try {
+    const { rows } = await db.execute({
+      sql: "SELECT character_name, bashbucks FROM camp_crushers ORDER BY bashbucks DESC LIMIT 100",
+    });
+
+    res.json(rows);
+  } catch (error) {
+    console.error("Error fetching leaderboard:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
 
 // Add health check endpoint
 app.get("/health", async (_, res) => {
@@ -2141,6 +2239,51 @@ async function processKillmail(killmail) {
       };
 
   pinpointData.celestialData = celestialInfo;
+
+  // Check for camp crusher rewards
+  try {
+    const { rows: targets } = await db.execute({
+      sql: `SELECT ct.*, cc.bashbucks 
+                FROM camp_crusher_targets ct 
+                JOIN camp_crushers cc ON ct.character_id = cc.character_id 
+                WHERE ct.camp_id = ? AND ct.completed = FALSE AND ct.end_time > CURRENT_TIMESTAMP`,
+      args: [killmail.killmail.solar_system_id],
+    });
+
+    for (const target of targets) {
+      const isAttacker = killmail.killmail.attackers.some(
+        (a) => a.character_id === target.character_id
+      );
+
+      if (isAttacker) {
+        // Award bashbucks based on kill value
+        const bashbucksAwarded = Math.floor(killmail.zkb.totalValue / 1000000); // 1 bashbuck per million ISK
+
+        await db.execute({
+          sql: "UPDATE camp_crushers SET bashbucks = bashbucks + ? WHERE character_id = ?",
+          args: [bashbucksAwarded, target.character_id],
+        });
+
+        await db.execute({
+          sql: "UPDATE camp_crusher_targets SET completed = TRUE WHERE id = ?",
+          args: [target.id],
+        });
+
+        // Emit update to connected clients
+        io.to(target.character_id).emit("bashbucksAwarded", {
+          amount: bashbucksAwarded,
+          newTotal: target.bashbucks + bashbucksAwarded,
+          killmail: {
+            id: killmail.killID,
+            value: killmail.zkb.totalValue,
+            system: celestialInfo.solarsystemname || systemId,
+          },
+        });
+      }
+    }
+  } catch (error) {
+    console.error("Error processing camp crusher rewards:", error);
+  }
 
   return {
     ...killmail,

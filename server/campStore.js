@@ -35,21 +35,24 @@ export const filteredRoams = derived(
       return [];
     }
 
-    // Get gate camp system names
-    const gateCampSystemNames = new Set(
-      $activeCamps?.map((camp) => camp.lastSystem?.name).filter(Boolean) || []
-    );
+    // Get all character IDs involved in active gate camps
+    const campCharacters = new Set();
+    $activeCamps.forEach((camp) => {
+      if (camp.probability >= 60) {
+        // Only exclude high-probability camps
+        camp.originalAttackers?.forEach((id) => campCharacters.add(id));
+        camp.activeAttackers?.forEach((id) => campCharacters.add(id));
+      }
+    });
 
+    // Filter out roams that have significant overlap with gate camps
     return $activeRoams
       .map((roam) => ({
         ...roam,
-        id: roam.id,
-        members: Array.isArray(roam.members) ? roam.members : [],
-        systems: Array.isArray(roam.systems)
-          ? roam.systems.filter(
-              (system) => !gateCampSystemNames.has(system.name)
-            )
+        members: Array.isArray(roam.members)
+          ? roam.members.filter((id) => !campCharacters.has(id))
           : [],
+        systems: Array.isArray(roam.systems) ? roam.systems : [],
         kills: Array.isArray(roam.kills) ? roam.kills : [],
         totalValue: roam.totalValue || 0,
         lastActivity: roam.lastActivity || new Date().toISOString(),
@@ -58,6 +61,7 @@ export const filteredRoams = derived(
           roam.startTime || roam.lastActivity || new Date().toISOString(),
       }))
       .filter((roam) => {
+        // Keep roams that still have enough active members
         return (
           roam.members.length >= 2 &&
           roam.systems.length > 0 &&
@@ -81,82 +85,97 @@ const DEFAULT_COMPOSITION = {
 };
 
 export const CAMP_PROBABILITY_FACTORS = {
-  TIME_WEIGHTS: {
-    INITIAL_DETECTION: { threshold: 15, maxBonus: 20 },
-    SUSTAINED_ACTIVITY: { threshold: 60, maxBonus: 40 },
-    FATIGUE: { threshold: 180, penalty: -30 },
-    INACTIVITY: { start: 25, severe: 40, penalty: -50 },
+  // Base probability factors for initial camp detection
+  BASE: {
+    SINGLE_KILL: 0.15, // 15% base for single kill at gate
+    MULTI_KILL: 0.3, // 30% base for multiple kills at gate
+    INITIAL_BURST: -0.1, // -10% if burst detected in first 15 minutes
   },
 
-  KILL_SPACING: {
-    BURST_THRESHOLD: 20,
-    BURST_PENALTY: -30,
-    CONSISTENT_BONUS: 25,
+  // Time-based probability adjustments
+  TIME_WEIGHTS: {
+    ESTABLISHED: { threshold: 60, bonus: 0.2 }, // +20% after 1 hour of activity
+    SUSTAINED: { threshold: 120, bonus: 0.3 }, // +30% after 2 hours of sustained activity
+    FATIGUE: { threshold: 180, penalty: -0.2 }, // -20% after 3 hours
+    INACTIVITY: { start: 25, penalty: -0.15 }, // -15% after 25 minutes of inactivity
   },
 
   THREAT_SHIPS: {
-    3756: { weight: 15, category: "dps" }, // gnosis
-    11202: { weight: 3, category: "tackle" }, // ares
-    11196: { weight: 11, category: "tackle" }, // stiletto
-    11176: { weight: 4, category: "tackle" }, // crow
-    11184: { weight: 3, category: "tackle" }, // crusader
-    11186: { weight: 8, category: "tackle" }, // malediction
-    11200: { weight: 3, category: "tackle" }, // Taranis
-    11178: { weight: 4, category: "tackle" }, // raptor
-    29988: { weight: 35, category: "dps" }, // proteus
-    20125: { weight: 20, category: "ewar" }, // Curse
-    17722: { weight: 20, category: "dps" }, // Vigilant
-    22456: { weight: 50, category: "dictor" }, // Sabre
-    22464: { weight: 44, category: "dictor" }, // Flycatcher
-    22452: { weight: 44, category: "dictor" }, // Heretic
-    22460: { weight: 44, category: "dictor" }, // Eris
-    12013: { weight: 40, category: "hic" }, // Broadsword
-    12017: { weight: 40, category: "hic" }, // Onyx
-    12021: { weight: 40, category: "hic" }, // Phobos
-    12025: { weight: 40, category: "hic" }, // Devoter
-    29984: { weight: 15, category: "dps" }, // Tengu
-    29990: { weight: 29, category: "dps" }, // Loki
-    11174: { weight: 30, category: "ewar" }, // Keres
-    35683: { weight: 13, category: "dps" }, // Hecate
-    11969: { weight: 30, category: "ewar" }, // Arazu
-    11961: { weight: 30, category: "ewar" }, // Huginn
-    11957: { weight: 4, category: "ewar" }, // Falcon
-    29986: { weight: 9, category: "dps" }, // Legion
-    47466: { weight: 6, category: "dps" }, // Praxis
-    12038: { weight: 5, category: "dps" }, // Purifier
-    12034: { weight: 5, category: "dps" }, // hound
-    17720: { weight: 12, category: "dps" }, // Cynabal
-    11963: { weight: 16, category: "ewar" }, // Rapier
-    12044: { weight: 8, category: "tackle" }, // enyo
-    17922: { weight: 18, category: "ewar" }, // Ashimmu
-    11999: { weight: 6, category: "dps" }, // Vagabond
-    85086: { weight: 4, category: "dps" }, // Cenotaph
-    33818: { weight: 3, category: "dps" }, // Orthrus
-    11971: { weight: 22, category: "ewar" }, // Lachesis
-    4310: { weight: 1, category: "dps" }, // Tornado
-    17738: { weight: 1, category: "dps" }, // Machariel
-    11387: { weight: 3, category: "ewar" }, // Hyena
+    3756: { weight: 0.15 }, // gnosis
+    11202: { weight: 0.03 }, // ares
+    11196: { weight: 0.11 }, // stiletto
+    11176: { weight: 0.04 }, // crow
+    11184: { weight: 0.03 }, // crusader
+    11186: { weight: 0.08 }, // malediction
+    11200: { weight: 0.03 }, // Taranis
+    11178: { weight: 0.04 }, // raptor
+    29988: { weight: 0.35 }, // proteus
+    20125: { weight: 0.2 }, // Curse
+    17722: { weight: 0.2 }, // Vigilant
+    22456: { weight: 0.5 }, // Sabre
+    22464: { weight: 0.44 }, // Flycatcher
+    22452: { weight: 0.44 }, // Heretic
+    22460: { weight: 0.44 }, // Eris
+    12013: { weight: 0.4 }, // Broadsword
+    12017: { weight: 0.4 }, // Onyx
+    12021: { weight: 0.4 }, // Phobos
+    12025: { weight: 0.4 }, // Devoter
+    29984: { weight: 0.15 }, // Tengu
+    29990: { weight: 0.29 }, // Loki
+    11174: { weight: 0.3 }, // Keres
+    35683: { weight: 0.13 }, // Hecate
+    11969: { weight: 0.3 }, // Arazu
+    11961: { weight: 0.3 }, // Huginn
+    11957: { weight: 0.04 }, // Falcon
+    29986: { weight: 0.09 }, // Legion
+    47466: { weight: 0.06 }, // Praxis
+    12038: { weight: 0.05 }, // Purifier
+    12034: { weight: 0.05 }, // hound
+    17720: { weight: 0.12 }, // Cynabal
+    11963: { weight: 0.16 }, // Rapier
+    12044: { weight: 0.08 }, // enyo
+    17922: { weight: 0.18 }, // Ashimmu
+    11999: { weight: 0.06 }, // Vagabond
+    85086: { weight: 0.04 }, // Cenotaph
+    33818: { weight: 0.03 }, // Orthrus
+    11971: { weight: 0.22 }, // Lachesis
+    4310: { weight: 0.01 }, // Tornado
+    17738: { weight: 0.01 }, // Machariel
+    11387: { weight: 0.03 }, // Hyena
+  },
+
+  // Ship categories for classification
+  SHIP_CATEGORIES: {
+    INDUSTRIAL: "industrial",
+    MINING: "mining",
+    CONCORD: "concord",
+    NPC: "npc",
   },
 
   PERMANENT_CAMPS: {
-    30002813: { gates: ["Nourvukaiken", "Kedama"], boost: 36 }, // Tama
-    30003068: { gates: ["Miroitem", "Crielere"], boost: 25 }, // Rancer
-    30000142: { gates: ["Perimeter"], boost: 15 }, // Jita
-    30002647: { gates: ["Iyen-Oursta"], boost: 25 }, // Ignoitton
+    30002813: { gates: ["Nourvukaiken", "Kedama"], weight: 0.36 }, // Tama
+    30003068: { gates: ["Miroitem", "Crielere"], weight: 0.25 }, // Rancer
+    30000142: { gates: ["Perimeter"], weight: 0.15 }, // Jita
+    30002647: { gates: ["Iyen-Oursta"], weight: 0.25 }, // Ignoitton
+  },
+  CONSISTENCY: {
+    SAME_CHARS: 0.25, // 25% bonus for same characters across kills
+    SAME_CORPS: 0.15, // 15% bonus for same corporation across kills
+    TIME_WINDOW: 1800000, // 30 minute window for considering consistency
   },
 };
 
 // Function to track roaming gang movements
 function updateRoamingGangs(killmail) {
   console.log("--- campStore.js: Roaming Gang Update ---");
-  console.log("Delegating to roamStore with killmail:", {
-    id: killmail.killID,
-    system: killmail.killmail.solar_system_id,
-    time: killmail.killmail.killmail_time,
-  });
+  // console.log("Delegating to roamStore with killmail:", {
+  //   id: killmail.killID,
+  //   system: killmail.killmail.solar_system_id,
+  //   time: killmail.killmail.killmail_time,
+  // });
 
   const updatedRoams = roamStore.updateRoamingGangs(killmail);
-  console.log(`Received ${updatedRoams.length} roams from roamStore`);
+  // console.log(`Received ${updatedRoams.length} roams from roamStore`);
 
   // Update the store directly
   activeRoams.set(updatedRoams);
@@ -242,216 +261,145 @@ function ensureSets(camp) {
   return camp;
 }
 
+/**
+ * Calculates the probability that a series of kills represents an active gate camp.
+ * This function uses a weighted scoring system that considers multiple factors:
+ * - Presence of kills at stargates
+ * - Types of ships involved in kills
+ * - Time patterns of kills
+ * - Attacker consistency
+ * - Known camping locations
+ * - CONCORD/NPC involvement
+ *
+ * @param {Object} camp - The camp object containing kill data and metrics
+ * @returns {number} - A probability score between 0-100
+ */
 function calculateCampProbability(camp) {
-  console.log("--- Camp Probability Calculation Debug ---");
-  console.log(`System: ${camp.systemId} - ${camp.stargateName}`);
-  console.log(`Total Kills: ${camp.kills.length}`);
-
-  // Skip if all kills are NPC
-  if (
-    camp.kills.every(
-      (k) =>
-        k.zkb.npc ||
-        k.shipCategories?.victim === "npc" ||
-        k.shipCategories?.victim === "concord"
+  // First check for CONCORD involvement - if present, this is a gank not a camp
+  const hasConcord = camp.kills.some((kill) =>
+    kill.killmail.attackers.some(
+      (attacker) =>
+        kill.shipCategories?.victim ===
+        CAMP_PROBABILITY_FACTORS.SHIP_CATEGORIES.CONCORD
     )
-  ) {
-    console.log("All kills are NPC/CONCORD - Probability: 0");
-    return 0;
-  }
-
-  // Require at least 2 non-capsule, non-NPC kills
-  const nonCapsuleKills = camp.kills.filter(
-    (k) =>
-      k.killmail.victim.ship_type_id !== CAPSULE_ID &&
-      k.shipCategories?.victim !== "npc" &&
-      k.shipCategories?.victim !== "concord"
   );
-  if (nonCapsuleKills.length < 2) {
-    console.log(
-      `Non-capsule/NPC kills: ${nonCapsuleKills.length} - Probability: 0`
-    );
-    return 0;
-  }
+  if (hasConcord) return 0;
 
+  // Initialize tracking variables
+  const now = Date.now();
   let probability = 0;
 
-  // Gate camp detection logging
+  // Get gate kills and establish base probability
   const gateKills = camp.kills.filter(isGateCamp);
-  console.log(`Gate Kills: ${gateKills.length}`);
-  if (gateKills.length > 0) {
-    probability += gateKills.length * 25;
-    console.log(`Gate Kill Bonus: ${gateKills.length * 25}`);
+
+  // Set initial probability based on number of kills
+  probability =
+    gateKills.length === 1
+      ? CAMP_PROBABILITY_FACTORS.BASE.SINGLE_KILL
+      : CAMP_PROBABILITY_FACTORS.BASE.MULTI_KILL;
+
+  // Get chronological kill data for pattern analysis
+  const killTimes = gateKills
+    .map((k) => new Date(k.killmail.killmail_time).getTime())
+    .sort();
+  const firstKillTime = killTimes[0];
+  const campAge = (now - firstKillTime) / (60 * 1000); // minutes
+
+  // Check for burst kills in first 15 minutes (indicates possible roaming gang)
+  if (campAge <= 15) {
+    const hasInitialBurst = killTimes.some(
+      (time, i) => i > 0 && time - killTimes[i - 1] < 120000 // 2 minute threshold
+    );
+    if (hasInitialBurst) {
+      probability += CAMP_PROBABILITY_FACTORS.BASE.INITIAL_BURST;
+    }
   }
 
-  // High-risk system check
+  // Analyze all threat ships involved in kills
+  const threatShipsPresent = new Map();
+  camp.kills.forEach((kill) => {
+    kill.killmail.attackers.forEach((attacker) => {
+      const shipType = attacker.ship_type_id;
+      if (CAMP_PROBABILITY_FACTORS.THREAT_SHIPS[shipType]) {
+        const count = threatShipsPresent.get(shipType) || 0;
+        threatShipsPresent.set(shipType, count + 1);
+      }
+    });
+  });
+
+  // Calculate threat ship bonus with diminishing returns
+  let threatShipBonus = 0;
+  threatShipsPresent.forEach((count, shipId) => {
+    const baseWeight = CAMP_PROBABILITY_FACTORS.THREAT_SHIPS[shipId].weight;
+    // Cap effectiveness of multiple same-type ships
+    threatShipBonus += baseWeight * Math.min(count, 2);
+  });
+  // Limit total ship bonus to 50%
+  probability += Math.min(threatShipBonus, 0.5);
+
+  // Apply time-based modifiers based on camp lifecycle
+  if (campAge >= CAMP_PROBABILITY_FACTORS.TIME_WEIGHTS.ESTABLISHED.threshold) {
+    // Bonus for established camps (running over an hour)
+    probability += CAMP_PROBABILITY_FACTORS.TIME_WEIGHTS.ESTABLISHED.bonus;
+  }
+  if (campAge >= CAMP_PROBABILITY_FACTORS.TIME_WEIGHTS.SUSTAINED.threshold) {
+    // Additional bonus for long-running camps (over 2 hours)
+    probability += CAMP_PROBABILITY_FACTORS.TIME_WEIGHTS.SUSTAINED.bonus;
+  }
+  if (campAge >= CAMP_PROBABILITY_FACTORS.TIME_WEIGHTS.FATIGUE.threshold) {
+    // Penalty for very long camps (over 3 hours) - fatigue factor
+    probability += CAMP_PROBABILITY_FACTORS.TIME_WEIGHTS.FATIGUE.penalty;
+  }
+
+  // Analyze attacker consistency
+  const overlap = getAttackerOverlap(camp.kills);
+  if (overlap.characters > 0) {
+    // Bonus for same characters appearing in multiple kills
+    probability += CAMP_PROBABILITY_FACTORS.CONSISTENCY.SAME_CHARS;
+  }
+  if (overlap.corporations > 0) {
+    // Additional bonus for corporate-level organization
+    probability += CAMP_PROBABILITY_FACTORS.CONSISTENCY.SAME_CORPS;
+  }
+
+  // Check if this is a known camping system/gate
   const systemData = CAMP_PROBABILITY_FACTORS.PERMANENT_CAMPS[camp.systemId];
-  console.log("High-Risk System Check:");
   if (
     systemData &&
     systemData.gates.some((gate) =>
       camp.stargateName.toLowerCase().includes(gate.toLowerCase())
     )
   ) {
-    probability += systemData.boost * 2;
-    console.log(`High-Risk System Bonus: ${systemData.boost * 2}`);
+    // Apply bonus for known camping locations
+    probability += systemData.weight;
   }
 
-  // Initial detection time analysis
-  const now = Date.now();
-  const firstKillTime = new Date(
-    camp.kills[0].killmail.killmail_time
-  ).getTime();
-  const detectionAge = (now - firstKillTime) / (60 * 60 * 1000); // in hours
-
-  // Detection age bonus/penalty
-  if (detectionAge < 0.25) {
-    // Less than 15 minutes
-    probability += 20; // Initial detection bonus
-    console.log("New camp detection bonus: +20");
-  } else if (detectionAge < 1) {
-    // Less than 1 hour
-    probability += 40; // Established camp bonus
-    console.log("Established camp bonus: +40");
-  } else if (detectionAge > 3) {
-    // More than 3 hours
-    const fatiguePenalty = Math.min(50, (detectionAge - 3) * 10);
-    probability -= fatiguePenalty;
-    console.log(`Long duration penalty: -${fatiguePenalty}`);
-  }
-
-  // Kill spacing analysis
-  const killTimes = camp.kills
-    .map((k) => new Date(k.killmail.killmail_time).getTime())
-    .sort();
-  let consistentSpacing = true;
-  let burstDetected = false;
-
-  for (let i = 1; i < killTimes.length; i++) {
-    const timeDiff = (killTimes[i] - killTimes[i - 1]) / (60 * 1000); // minutes
-    if (timeDiff < 2) {
-      // Kills within 2 minutes
-      burstDetected = true;
-    } else if (timeDiff > 30) {
-      // Large gap between kills
-      consistentSpacing = false;
-    }
-  }
-
-  if (burstDetected && !consistentSpacing) {
-    probability -= 30;
-    console.log("Burst kill pattern detected: -30");
-  } else if (consistentSpacing) {
-    probability += 25;
-    console.log("Consistent kill spacing bonus: +25");
-  }
-
-  // Detailed threat ship analysis
-  console.log("Threat Ships Analysis:");
-  const threatShipsFound = new Set();
-  let threatShipScore = 0;
-  const attackerShipGroups = {};
-
-  camp.kills.forEach((kill, killIndex) => {
-    console.log(`Kill ${killIndex + 1} Attackers:`);
-    kill.killmail.attackers.forEach((attacker) => {
-      if (attacker.ship_type_id) {
-        if (CAMP_PROBABILITY_FACTORS.THREAT_SHIPS[attacker.ship_type_id]) {
-          threatShipsFound.add(attacker.ship_type_id);
-          const shipWeight =
-            CAMP_PROBABILITY_FACTORS.THREAT_SHIPS[attacker.ship_type_id].weight;
-          threatShipScore += shipWeight;
-
-          if (!attackerShipGroups[attacker.ship_type_id]) {
-            attackerShipGroups[attacker.ship_type_id] = {
-              count: 0,
-              totalWeight: 0,
-            };
-          }
-          attackerShipGroups[attacker.ship_type_id].count++;
-          attackerShipGroups[attacker.ship_type_id].totalWeight += shipWeight;
-
-          console.log(
-            `  - Threat Ship: ${attacker.ship_type_id}, Weight: ${shipWeight}`
-          );
-        }
-      }
-    });
-  });
-
-  console.log("Threat Ship Groups:");
-  Object.entries(attackerShipGroups).forEach(([shipId, data]) => {
-    console.log(
-      `  Ship ${shipId}: Count ${data.count}, Total Weight ${data.totalWeight}`
-    );
-  });
-
-  probability += Math.min(threatShipScore * 1.5, 50);
-  console.log(
-    `Threat Ship Probability Bonus: ${Math.min(threatShipScore * 1.5, 50)}`
+  // Check for industrial/mining victims
+  const hasVulnerableVictims = camp.kills.some(
+    (kill) =>
+      kill.shipCategories?.victim ===
+        CAMP_PROBABILITY_FACTORS.SHIP_CATEGORIES.INDUSTRIAL ||
+      kill.shipCategories?.victim ===
+        CAMP_PROBABILITY_FACTORS.SHIP_CATEGORIES.MINING
   );
-
-  // Attacker overlap analysis
-  console.log("Attacker Overlap Analysis:");
-  const overlap = getAttackerOverlap(camp.kills);
-  console.log(`  Character Overlap: ${overlap.characters}`);
-  console.log(`  Corporation Overlap: ${overlap.corporations}`);
-  console.log(`  Alliance Overlap: ${overlap.alliances}`);
-
-  if (overlap.characters > 1) {
-    probability += 50;
-    console.log("  Multiple Character Overlap Bonus: 50");
-  } else if (overlap.characters > 0) {
-    probability += 25;
-    console.log("  Single Character Overlap Bonus: 25");
+  if (hasVulnerableVictims) {
+    probability += 0.1; // 10% bonus for targeting typical gate camp victims
   }
 
-  if (overlap.corporations > 0) {
-    probability += 20;
-    console.log("  Corporation Overlap Bonus: 20");
-  }
-  if (overlap.alliances > 0) {
-    probability += 10;
-    console.log("  Alliance Overlap Bonus: 10");
-  }
-
-  // Victim analysis
-  console.log("Victim Ship Categories:");
-  const victimCategories = new Set(
-    camp.kills.map((k) => k.shipCategories?.victim).filter(Boolean)
-  );
-  console.log(`  Categories: ${[...victimCategories]}`);
-
-  const vulnerableCategories = ["industrial", "mining", "transport"];
-  if (vulnerableCategories.some((cat) => victimCategories.has(cat))) {
-    probability += 30;
-    console.log("  Vulnerable Victim Category Bonus: 30");
-  }
-
-  // Time since last activity analysis
+  // Apply inactivity penalty if needed
   const lastKillTime = new Date(camp.lastKill).getTime();
   const minutesSinceLastKill = (now - lastKillTime) / (60 * 1000);
-
-  if (minutesSinceLastKill > 25) {
-    const inactivityPenalty = Math.min(
-      70,
-      Math.max(0, ((minutesSinceLastKill - 25) / 15) * 50)
-    );
-    probability -= inactivityPenalty;
-    console.log(
-      `Inactivity penalty (${minutesSinceLastKill.toFixed(
-        1
-      )}min): -${inactivityPenalty.toFixed(1)}`
-    );
+  if (
+    minutesSinceLastKill >
+    CAMP_PROBABILITY_FACTORS.TIME_WEIGHTS.INACTIVITY.start
+  ) {
+    probability += CAMP_PROBABILITY_FACTORS.TIME_WEIGHTS.INACTIVITY.penalty;
   }
 
-  // Ensure probability stays within bounds
-  probability = Math.max(0, Math.min(100, probability));
-
-  console.log(`Final Probability: ${probability}`);
-  console.log("--- End of Camp Probability Calculation ---");
-
-  return probability;
+  // Convert to percentage and clamp between 30-95%
+  // - Minimum 30% ensures low probability camps don't display
+  // - Maximum 95% prevents absolute certainty
+  return Math.max(30, Math.min(95, probability * 100));
 }
 
 // Exported Functions

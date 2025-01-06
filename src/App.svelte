@@ -9,7 +9,9 @@
   import ActiveBattles from "./ActiveBattles.svelte";
   import ActiveCamps from "./ActiveCamps.svelte";
   import ActiveRoams from "./ActiveRoams.svelte";
+  import CampCrusher from "./CampCrusher.svelte";
   import { initializeSettings } from "./store.js";
+  import Leaderboard from "./Leaderboard.svelte";
 
   let loggedIn = false;
   let username = "";
@@ -113,8 +115,8 @@
         Gangs Map
       </button>
       <button
-        class:active={currentPage === "bounty"}
-        on:click={() => (currentPage = "bounty")}
+        class:active={currentPage === "bountyboard"}
+        on:click={() => (currentPage = "bountyboard")}
       >
         Bountyboard
       </button>
@@ -141,8 +143,8 @@
       <ActiveCamps />
     {:else if currentPage === "gangs"}
       <ActiveRoams />
-    {:else if currentPage === "bounty"}
-      <!-- TBA -->
+    {:else if currentPage === "bountyboard"}
+      <Leaderboard />
     {/if}
   {/if}
 </main>
