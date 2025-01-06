@@ -5,7 +5,7 @@ import { Server } from "socket.io";
 import axios from "axios";
 import { createClient as createSqlClient } from "@libsql/client"; // Rename this oneimport { compare, hash } from "bcrypt";
 import { isGateCamp, updateCamps } from "./campStore.js";
-import roamStore from "./roamStore.js";
+import roamStore, { activeRoams } from "./roamStore.js";
 import path from "path";
 import { fileURLToPath } from "url";
 import cors from "cors";
@@ -1612,6 +1612,9 @@ io.on("connection", (socket) => {
 
   socket.emit("initialCamps", Array.from(activeCamps.values()));
 
+  const initialRoams = roamStore.getRoams();
+  socket.emit("initialRoams", initialRoams);
+
   if (socket.request.session?.user?.id) {
     const userId = socket.request.session.user.id.toString();
     socket.join(userId);
@@ -1762,7 +1765,6 @@ io.on("connection", (socket) => {
 
       // Emit success back to sending socket
       socket.emit("filterListCreated", newFilterList);
-      socket.emit("initialRoams", roamStore.getRoams());
     } catch (error) {
       console.error("Error creating filter list:", error);
       socket.emit("error", {
@@ -2148,37 +2150,82 @@ async function processKillmail(killmail) {
 
 // Function to poll for new killmails from RedisQ
 // Modify the polling function to use processKillmail
+// Function to poll for new killmails from RedisQ
 async function pollRedisQ() {
   try {
+    console.log("Polling RedisQ...");
     const response = await axios.get(REDISQ_URL);
+
     if (response.status === 200 && response.data.package) {
       const killmail = response.data.package;
+      console.log("Received killmail:", {
+        id: killmail.killID,
+        system: killmail.killmail.solar_system_id,
+        time: killmail.killmail.killmail_time,
+      });
 
       // Clean old killmails first
+      const beforeCleanCount = killmails.length;
       killmails = cleanKillmailsCache(killmails);
+      console.log(
+        `Cleaned killmail cache: ${beforeCleanCount} -> ${killmails.length}`
+      );
 
       if (
         !isDuplicate(killmail) &&
         isWithinLast24Hours(killmail.killmail.killmail_time)
       ) {
+        console.log("Processing new killmail...");
+
         const processedKillmail = await processKillmail(killmail);
+        console.log("Killmail processed with celestial data");
+
         const enrichedKillmail = await addShipCategoriesToKillmail(
           processedKillmail
         );
+        console.log("Killmail enriched with ship categories");
 
         // Add to cache
         killmails.push(enrichedKillmail);
         io.emit("newKillmail", enrichedKillmail);
 
+        // Debug roaming gang updates
+        console.log("Updating roaming gangs...");
+        const updatedRoams = roamStore.updateRoamingGangs(enrichedKillmail);
+        console.log(`Active roams after update: ${updatedRoams.length}`);
+        console.log(
+          "Roam details:",
+          updatedRoams.map((roam) => ({
+            id: roam.id,
+            members: roam.members.length,
+            systems: roam.systems.length,
+            kills: roam.kills.length,
+            lastActivity: roam.lastActivity,
+          }))
+        );
+
+        // Update the store and broadcast to all clients
+        activeRoams.set(updatedRoams);
+        io.emit("roamUpdate", updatedRoams); // Add direct socket broadcast
+
         if (isGateCamp(enrichedKillmail)) {
+          console.log("Processing gate camp...");
           activeCamps = updateCamps(enrichedKillmail);
           io.emit("campUpdate", Array.from(activeCamps.values()));
         }
+
+        console.log("Killmail processing complete");
+      } else {
+        console.log("Skipping killmail - duplicate or too old");
       }
+    } else {
+      console.log("No new killmail package");
     }
   } catch (error) {
     console.error("Error polling RedisQ:", error);
   }
+
+  // Schedule next poll
   setTimeout(pollRedisQ, 10);
 }
 
@@ -2244,7 +2291,83 @@ app.use(
         res.setHeader("Content-Type", mimeType);
       }
       // Add cache control for static assets
-      res.setHeader("Cache-Control", "public, max-age=31536000");
+      res.setHeader("Cache-Control", "public, max-age=31536000"); // Function to poll for new killmails from RedisQ
+      async function pollRedisQ() {
+        try {
+          console.log("Polling RedisQ...");
+          const response = await axios.get(REDISQ_URL);
+
+          if (response.status === 200 && response.data.package) {
+            const killmail = response.data.package;
+            console.log("Received killmail:", {
+              id: killmail.killID,
+              system: killmail.killmail.solar_system_id,
+              time: killmail.killmail.killmail_time,
+            });
+
+            // Clean old killmails first
+            const beforeCleanCount = killmails.length;
+            killmails = cleanKillmailsCache(killmails);
+            console.log(
+              `Cleaned killmail cache: ${beforeCleanCount} -> ${killmails.length}`
+            );
+
+            if (
+              !isDuplicate(killmail) &&
+              isWithinLast24Hours(killmail.killmail.killmail_time)
+            ) {
+              console.log("Processing new killmail...");
+
+              const processedKillmail = await processKillmail(killmail);
+              console.log("Killmail processed with celestial data");
+
+              const enrichedKillmail = await addShipCategoriesToKillmail(
+                processedKillmail
+              );
+              console.log("Killmail enriched with ship categories");
+
+              // Add to cache
+              killmails.push(enrichedKillmail);
+              io.emit("newKillmail", enrichedKillmail);
+
+              // Debug roaming gang updates
+              console.log("Updating roaming gangs...");
+              const updatedRoams =
+                roamStore.updateRoamingGangs(enrichedKillmail);
+              console.log(`Active roams after update: ${updatedRoams.length}`);
+              console.log(
+                "Roam details:",
+                updatedRoams.map((roam) => ({
+                  id: roam.id,
+                  members: roam.members.length,
+                  systems: roam.systems.length,
+                  kills: roam.kills.length,
+                  lastActivity: roam.lastActivity,
+                }))
+              );
+
+              activeRoams.set(updatedRoams);
+
+              if (isGateCamp(enrichedKillmail)) {
+                console.log("Processing gate camp...");
+                activeCamps = updateCamps(enrichedKillmail);
+                io.emit("campUpdate", Array.from(activeCamps.values()));
+              }
+
+              console.log("Killmail processing complete");
+            } else {
+              console.log("Skipping killmail - duplicate or too old");
+            }
+          } else {
+            console.log("No new killmail package");
+          }
+        } catch (error) {
+          console.error("Error polling RedisQ:", error);
+        }
+
+        // Schedule next poll
+        setTimeout(pollRedisQ, 10);
+      }
     },
   })
 );

@@ -36,25 +36,6 @@
     return "#90ee90";
   }
 
-  function getKillFrequency(kills) {
-    if (kills.length === 0) return "N/A";
-
-    const now = Date.now();
-    const oldestKillTime = new Date(kills[0].killmail.killmail_time).getTime();
-
-    const timeSpanMilliseconds = now - oldestKillTime;
-    const timeSpanHours = Math.floor(timeSpanMilliseconds / (1000 * 60 * 60));
-    const timeSpanMinutes = Math.floor(
-      (timeSpanMilliseconds % (1000 * 60 * 60)) / (1000 * 60)
-    );
-
-    if (timeSpanHours > 0) {
-      return `Detected ${timeSpanHours}h ${timeSpanMinutes}m ago`;
-    } else {
-      return `Detected ${timeSpanMinutes}m ago`;
-    }
-  }
-
   function getShipIcon(category) {
     const icons = {
       dictor: "🔲",
@@ -65,10 +46,6 @@
       smartbomb: "⚡",
     };
     return icons[category] || "🚀";
-  }
-
-  function getShipName(shipId) {
-    return THREAT_SHIPS[shipId]?.name || `Ship ID ${shipId}`;
   }
 
   function getShipThreatColor(weight) {
@@ -151,10 +128,6 @@
             <span class="stat-value">
               {#if camp.metrics?.campDuration}
                 {Math.floor(camp.metrics.campDuration)}m active
-                {#if camp.metrics.inactivityDuration > 0}
-                  ({Math.floor(camp.metrics.inactivityDuration)}m since last
-                  kill)
-                {/if}
               {/if}
             </span>
           </div>

@@ -1,18 +1,43 @@
 // /server/roamStore.js
+import { writable } from "svelte/store";
+
 const CAPSULE_ID = 670;
+
+export const activeRoams = writable([]);
 
 export class RoamStore {
   constructor() {
-    this.activeRoams = [];
+    this._roams = []; // Ensure this is initialized
     this.ROAM_TIMEOUT = 30 * 60 * 1000; // 30 minutes
   }
 
   updateRoamingGangs(killmail) {
+    console.log("--- roamStore.js: Roaming Gang Update Debug ---");
+    console.log("Processing killmail:", {
+      killID: killmail.killID,
+      systemId: killmail.killmail.solar_system_id,
+      time: killmail.killmail.killmail_time,
+      attackers: killmail.killmail.attackers.length,
+    });
+
     const now = Date.now();
 
     // Clean expired roams
-    this.activeRoams = this.activeRoams.filter(
-      (roam) => now - new Date(roam.lastActivity).getTime() <= this.ROAM_TIMEOUT
+    const beforeCleanCount = this._roams.length;
+    this._roams = this._roams.filter((roam) => {
+      const timeSinceLastActivity = now - new Date(roam.lastActivity).getTime();
+      const isActive = timeSinceLastActivity <= this.ROAM_TIMEOUT;
+      if (!isActive) {
+        console.log(
+          `Roam ${roam.id} expired after ${Math.floor(
+            timeSinceLastActivity / 1000 / 60
+          )}m of inactivity`
+        );
+      }
+      return isActive;
+    });
+    console.log(
+      `Cleaned expired roams: ${beforeCleanCount} -> ${this._roams.length}`
     );
 
     const systemId = killmail.killmail.solar_system_id;
@@ -26,18 +51,52 @@ export class RoamStore {
         .map((a) => a.character_id)
     );
 
+    console.log(`Found ${attackerIds.size} unique attackers in killmail`);
+    console.log("Attacker IDs:", [...attackerIds]);
+
     // Skip if insufficient unique attackers
     if (attackerIds.size < 2) {
-      return this.activeRoams;
+      console.log("Skipping - insufficient unique attackers");
+      console.log("--- End roamStore.js: Roaming Gang Update ---");
+      const formattedRoams = this._roams.map((roam) => ({
+        ...roam,
+        members: Array.from(roam.members || []),
+        systems: roam.systems || [],
+        kills: roam.kills || [],
+        totalValue: roam.totalValue || 0,
+        lastActivity: roam.lastActivity || new Date().toISOString(),
+        lastSystem: roam.lastSystem || { id: 0, name: "Unknown" },
+        startTime:
+          roam.startTime || roam.lastActivity || new Date().toISOString(),
+      }));
+      activeRoams.set(formattedRoams);
+      return formattedRoams;
     }
 
     // Find existing roam with overlapping members
-    let existingRoam = this.activeRoams.find((roam) => {
+    let existingRoam = this._roams.find((roam) => {
       const members = new Set(roam.members);
-      return [...attackerIds].some((id) => members.has(id));
+      const overlappingMembers = [...attackerIds].filter((id) =>
+        members.has(id)
+      );
+      const hasOverlap = overlappingMembers.length > 0;
+      if (hasOverlap) {
+        console.log(
+          `Found matching roam: ${roam.id} with overlapping members:`,
+          overlappingMembers
+        );
+      }
+      return hasOverlap;
     });
 
     if (existingRoam) {
+      console.log("Updating existing roam:", {
+        id: existingRoam.id,
+        previousMembers: existingRoam.members.length,
+        previousSystems: existingRoam.systems.length,
+        previousKills: existingRoam.kills.length,
+      });
+
       // Update existing roam
       existingRoam.members = Array.from(
         new Set([...existingRoam.members, ...attackerIds])
@@ -51,7 +110,15 @@ export class RoamStore {
       });
       existingRoam.kills.push(killmail);
       existingRoam.totalValue += killmail.zkb.totalValue;
+
+      console.log("Updated roam stats:", {
+        members: existingRoam.members.length,
+        systems: existingRoam.systems.length,
+        kills: existingRoam.kills.length,
+        totalValue: existingRoam.totalValue,
+      });
     } else {
+      console.log("Creating new roam");
       // Create new roam
       const newRoam = {
         id: `roam-${Date.now()}`,
@@ -69,14 +136,59 @@ export class RoamStore {
         kills: [killmail],
         totalValue: killmail.zkb.totalValue,
       };
-      this.activeRoams.push(newRoam);
+
+      this._roams.push(newRoam);
+      console.log("New roam created:", {
+        id: newRoam.id,
+        members: newRoam.members.length,
+        system: newRoam.lastSystem.name,
+        totalValue: newRoam.totalValue,
+      });
     }
 
-    return this.activeRoams;
+    console.log(`Total active roams: ${this._roams.length}`);
+    console.log(
+      "Active roams summary:",
+      this._roams.map((roam) => ({
+        id: roam.id,
+        members: roam.members.length,
+        systems: roam.systems.length,
+        kills: roam.kills.length,
+        lastActivity: roam.lastActivity,
+      }))
+    );
+    console.log("--- End roamStore.js: Roaming Gang Update ---");
+
+    // Format and return the updated roams
+    const updatedRoams = this._roams.map((roam) => ({
+      ...roam,
+      members: Array.from(roam.members || []),
+      systems: roam.systems || [],
+      kills: roam.kills || [],
+      totalValue: roam.totalValue || 0,
+      lastActivity: roam.lastActivity || new Date().toISOString(),
+      lastSystem: roam.lastSystem || { id: 0, name: "Unknown" },
+      startTime:
+        roam.startTime || roam.lastActivity || new Date().toISOString(),
+    }));
+
+    // Update the Svelte store
+    activeRoams.set(updatedRoams);
+    return updatedRoams;
   }
 
   getRoams() {
-    return this.activeRoams;
+    return this._roams.map((roam) => ({
+      ...roam,
+      members: Array.from(roam.members || []),
+      systems: roam.systems || [],
+      kills: roam.kills || [],
+      totalValue: roam.totalValue || 0,
+      lastActivity: roam.lastActivity || new Date().toISOString(),
+      lastSystem: roam.lastSystem || { id: 0, name: "Unknown" },
+      startTime:
+        roam.startTime || roam.lastActivity || new Date().toISOString(),
+    }));
   }
 
   clearExpiredRoams() {

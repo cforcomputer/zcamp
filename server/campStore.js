@@ -9,6 +9,65 @@ export const CAPSULE_ID = 670;
 
 export const activeRoams = writable([]);
 
+export const activeCamps = writable([]);
+export const filteredCamps = derived([activeCamps], ([$activeCamps]) => {
+  return $activeCamps
+    .filter((camp) => {
+      const nonCapsuleKills = camp.kills.filter(
+        (k) => k.killmail.victim.ship_type_id !== CAPSULE_ID
+      );
+      return nonCapsuleKills.length >= 2 && camp.probability >= 30;
+    })
+    .map((camp) => ({
+      ...camp,
+      composition: camp.composition || DEFAULT_COMPOSITION,
+      lastKillTime: new Date(camp.lastKill).getTime(),
+      age: Date.now() - new Date(camp.lastKill).getTime(),
+      isActive: Date.now() - new Date(camp.lastKill).getTime() <= CAMP_TIMEOUT,
+    }))
+    .sort((a, b) => b.probability - a.probability);
+});
+
+export const filteredRoams = derived(
+  [activeRoams, activeCamps],
+  ([$activeRoams, $activeCamps]) => {
+    if (!Array.isArray($activeRoams)) {
+      return [];
+    }
+
+    // Get gate camp system names
+    const gateCampSystemNames = new Set(
+      $activeCamps?.map((camp) => camp.lastSystem?.name).filter(Boolean) || []
+    );
+
+    return $activeRoams
+      .map((roam) => ({
+        ...roam,
+        id: roam.id,
+        members: Array.isArray(roam.members) ? roam.members : [],
+        systems: Array.isArray(roam.systems)
+          ? roam.systems.filter(
+              (system) => !gateCampSystemNames.has(system.name)
+            )
+          : [],
+        kills: Array.isArray(roam.kills) ? roam.kills : [],
+        totalValue: roam.totalValue || 0,
+        lastActivity: roam.lastActivity || new Date().toISOString(),
+        lastSystem: roam.lastSystem || { id: 0, name: "Unknown" },
+        startTime:
+          roam.startTime || roam.lastActivity || new Date().toISOString(),
+      }))
+      .filter((roam) => {
+        return (
+          roam.members.length >= 2 &&
+          roam.systems.length > 0 &&
+          Date.now() - new Date(roam.lastActivity).getTime() <= ROAM_TIMEOUT
+        );
+      })
+      .sort((a, b) => new Date(b.lastActivity) - new Date(a.lastActivity));
+  }
+);
+
 const CAMP_STATES = {
   ACTIVE: "active",
   CRASHED: "crashed",
@@ -87,30 +146,82 @@ export const CAMP_PROBABILITY_FACTORS = {
   },
 };
 
-// Roaming gangs stuff
-const roamUpdateListeners = [];
-
-export function addRoamUpdateListener(listener) {
-  roamUpdateListeners.push(listener);
-}
-
-export function removeRoamUpdateListener(listener) {
-  const index = roamUpdateListeners.indexOf(listener);
-  if (index > -1) {
-    roamUpdateListeners.splice(index, 1);
-  }
-}
-
-function notifyRoamUpdateListeners(roams) {
-  roamUpdateListeners.forEach((listener) => listener(roams));
-}
-
 // Function to track roaming gang movements
 function updateRoamingGangs(killmail) {
+  console.log("--- campStore.js: Roaming Gang Update ---");
+  console.log("Delegating to roamStore with killmail:", {
+    id: killmail.killID,
+    system: killmail.killmail.solar_system_id,
+    time: killmail.killmail.killmail_time,
+  });
+
   const updatedRoams = roamStore.updateRoamingGangs(killmail);
+  console.log(`Received ${updatedRoams.length} roams from roamStore`);
+
+  // Update the store directly
   activeRoams.set(updatedRoams);
-  notifyRoamUpdateListeners(updatedRoams);
+
+  console.log("--- End campStore.js: Roaming Gang Update ---");
 }
+
+function getAttackerOverlap(kills) {
+  if (kills.length < 2) {
+    return {
+      characters: 0,
+      corporations: 0,
+      alliances: 0,
+    };
+  }
+
+  const CONSECUTIVE_THRESHOLD = 40 * 60 * 1000; // 40 minutes between kills max
+
+  // Get attackers from each kill with their timestamps
+  const killAttackers = kills
+    .map((kill) => ({
+      time: new Date(kill.killmail.killmail_time).getTime(),
+      attackers: {
+        characters: new Set(
+          kill.killmail.attackers.map((a) => a.character_id).filter(Boolean)
+        ),
+        corporations: new Set(
+          kill.killmail.attackers.map((a) => a.corporation_id).filter(Boolean)
+        ),
+        alliances: new Set(
+          kill.killmail.attackers.map((a) => a.alliance_id).filter(Boolean)
+        ),
+      },
+    }))
+    .sort((a, b) => a.time - b.time);
+
+  // Track consistent attackers across consecutive kills
+  let consistentAttackers = {
+    characters: new Set(),
+    corporations: new Set(),
+    alliances: new Set(),
+  };
+
+  // Compare consecutive kills
+  for (let i = 1; i < killAttackers.length; i++) {
+    const timeDiff = killAttackers[i].time - killAttackers[i - 1].time;
+
+    if (timeDiff <= CONSECUTIVE_THRESHOLD) {
+      ["characters", "corporations", "alliances"].forEach((type) => {
+        killAttackers[i - 1].attackers[type].forEach((id) => {
+          if (killAttackers[i].attackers[type].has(id)) {
+            consistentAttackers[type].add(id);
+          }
+        });
+      });
+    }
+  }
+
+  return {
+    characters: consistentAttackers.characters.size,
+    corporations: consistentAttackers.corporations.size,
+    alliances: consistentAttackers.alliances.size,
+  };
+}
+
 // Function to ensure Set objects are properly initialized
 function ensureSets(camp) {
   if (!camp.originalAttackers || !(camp.originalAttackers instanceof Set)) {
@@ -137,18 +248,28 @@ function calculateCampProbability(camp) {
   console.log(`Total Kills: ${camp.kills.length}`);
 
   // Skip if all kills are NPC
-  if (camp.kills.every((k) => k.zkb.npc)) {
-    console.log("All kills are NPC - Probability: 0");
+  if (
+    camp.kills.every(
+      (k) =>
+        k.zkb.npc ||
+        k.shipCategories?.victim === "npc" ||
+        k.shipCategories?.victim === "concord"
+    )
+  ) {
+    console.log("All kills are NPC/CONCORD - Probability: 0");
     return 0;
   }
 
-  // Require at least 2 non-capsule kills
+  // Require at least 2 non-capsule, non-NPC kills
   const nonCapsuleKills = camp.kills.filter(
-    (k) => k.killmail.victim.ship_type_id !== CAPSULE_ID
+    (k) =>
+      k.killmail.victim.ship_type_id !== CAPSULE_ID &&
+      k.shipCategories?.victim !== "npc" &&
+      k.shipCategories?.victim !== "concord"
   );
   if (nonCapsuleKills.length < 2) {
     console.log(
-      `Non-capsule kills: ${nonCapsuleKills.length} - Probability: 0`
+      `Non-capsule/NPC kills: ${nonCapsuleKills.length} - Probability: 0`
     );
     return 0;
   }
@@ -176,6 +297,55 @@ function calculateCampProbability(camp) {
     console.log(`High-Risk System Bonus: ${systemData.boost * 2}`);
   }
 
+  // Initial detection time analysis
+  const now = Date.now();
+  const firstKillTime = new Date(
+    camp.kills[0].killmail.killmail_time
+  ).getTime();
+  const detectionAge = (now - firstKillTime) / (60 * 60 * 1000); // in hours
+
+  // Detection age bonus/penalty
+  if (detectionAge < 0.25) {
+    // Less than 15 minutes
+    probability += 20; // Initial detection bonus
+    console.log("New camp detection bonus: +20");
+  } else if (detectionAge < 1) {
+    // Less than 1 hour
+    probability += 40; // Established camp bonus
+    console.log("Established camp bonus: +40");
+  } else if (detectionAge > 3) {
+    // More than 3 hours
+    const fatiguePenalty = Math.min(50, (detectionAge - 3) * 10);
+    probability -= fatiguePenalty;
+    console.log(`Long duration penalty: -${fatiguePenalty}`);
+  }
+
+  // Kill spacing analysis
+  const killTimes = camp.kills
+    .map((k) => new Date(k.killmail.killmail_time).getTime())
+    .sort();
+  let consistentSpacing = true;
+  let burstDetected = false;
+
+  for (let i = 1; i < killTimes.length; i++) {
+    const timeDiff = (killTimes[i] - killTimes[i - 1]) / (60 * 1000); // minutes
+    if (timeDiff < 2) {
+      // Kills within 2 minutes
+      burstDetected = true;
+    } else if (timeDiff > 30) {
+      // Large gap between kills
+      consistentSpacing = false;
+    }
+  }
+
+  if (burstDetected && !consistentSpacing) {
+    probability -= 30;
+    console.log("Burst kill pattern detected: -30");
+  } else if (consistentSpacing) {
+    probability += 25;
+    console.log("Consistent kill spacing bonus: +25");
+  }
+
   // Detailed threat ship analysis
   console.log("Threat Ships Analysis:");
   const threatShipsFound = new Set();
@@ -186,12 +356,12 @@ function calculateCampProbability(camp) {
     console.log(`Kill ${killIndex + 1} Attackers:`);
     kill.killmail.attackers.forEach((attacker) => {
       if (attacker.ship_type_id) {
-        if (CAMP_PROBABILITY_FACTORS[attacker.ship_type_id]) {
+        if (CAMP_PROBABILITY_FACTORS.THREAT_SHIPS[attacker.ship_type_id]) {
           threatShipsFound.add(attacker.ship_type_id);
-          const shipWeight = CAMP_PROBABILITY_FACTORS[attacker.ship_type_id];
+          const shipWeight =
+            CAMP_PROBABILITY_FACTORS.THREAT_SHIPS[attacker.ship_type_id].weight;
           threatShipScore += shipWeight;
 
-          // Group tracking
           if (!attackerShipGroups[attacker.ship_type_id]) {
             attackerShipGroups[attacker.ship_type_id] = {
               count: 0,
@@ -209,7 +379,6 @@ function calculateCampProbability(camp) {
     });
   });
 
-  // Detailed threat ship logging
   console.log("Threat Ship Groups:");
   Object.entries(attackerShipGroups).forEach(([shipId, data]) => {
     console.log(
@@ -221,87 +390,6 @@ function calculateCampProbability(camp) {
   console.log(
     `Threat Ship Probability Bonus: ${Math.min(threatShipScore * 1.5, 50)}`
   );
-
-  function getAttackerOverlap(kills) {
-    // Skip if not enough kills
-    if (kills.length < 2) {
-      return {
-        characters: 0,
-        corporations: 0,
-        alliances: 0,
-      };
-    }
-
-    // Get attackers from each kill, mapping kill time to attacker IDs
-    const killAttackers = kills
-      .map((kill) => ({
-        time: new Date(kill.killmail.killmail_time).getTime(),
-        attackers: kill.killmail.attackers.reduce(
-          (acc, attacker) => {
-            if (attacker.character_id) {
-              acc.characters.add(attacker.character_id);
-            }
-            if (attacker.corporation_id) {
-              acc.corporations.add(attacker.corporation_id);
-            }
-            if (attacker.alliance_id) {
-              acc.alliances.add(attacker.alliance_id);
-            }
-            return acc;
-          },
-          {
-            characters: new Set(),
-            corporations: new Set(),
-            alliances: new Set(),
-          }
-        ),
-      }))
-      .sort((a, b) => a.time - b.time);
-
-    // Count attackers that appear in consecutive kills within timeframe
-    let consistentAttackers = {
-      characters: new Set(),
-      corporations: new Set(),
-      alliances: new Set(),
-    };
-
-    const CONSECUTIVE_THRESHOLD = 40 * 60 * 1000; // 40 minutes between kills max
-
-    for (let i = 1; i < killAttackers.length; i++) {
-      const timeDiff = killAttackers[i].time - killAttackers[i - 1].time;
-
-      // If kills are close enough in time, look for overlap
-      if (timeDiff <= CONSECUTIVE_THRESHOLD) {
-        const prevAttackers = killAttackers[i - 1].attackers;
-        const currAttackers = killAttackers[i].attackers;
-
-        // Find attackers present in both kills
-        prevAttackers.characters.forEach((id) => {
-          if (currAttackers.characters.has(id)) {
-            consistentAttackers.characters.add(id);
-          }
-        });
-
-        prevAttackers.corporations.forEach((id) => {
-          if (currAttackers.corporations.has(id)) {
-            consistentAttackers.corporations.add(id);
-          }
-        });
-
-        prevAttackers.alliances.forEach((id) => {
-          if (currAttackers.alliances.has(id)) {
-            consistentAttackers.alliances.add(id);
-          }
-        });
-      }
-    }
-
-    return {
-      characters: consistentAttackers.characters.size,
-      corporations: consistentAttackers.corporations.size,
-      alliances: consistentAttackers.alliances.size,
-    };
-  }
 
   // Attacker overlap analysis
   console.log("Attacker Overlap Analysis:");
@@ -340,20 +428,30 @@ function calculateCampProbability(camp) {
     console.log("  Vulnerable Victim Category Bonus: 30");
   }
 
-  // Time-based reduction
-  const timeSinceLastKill = Date.now() - new Date(camp.lastKill).getTime();
-  const inactiveMinutes = Math.max(
-    0,
-    Math.floor((timeSinceLastKill - 45 * 60 * 1000) / (60 * 1000))
-  );
-  const timeReduction = Math.min(probability * 0.5, inactiveMinutes);
+  // Time since last activity analysis
+  const lastKillTime = new Date(camp.lastKill).getTime();
+  const minutesSinceLastKill = (now - lastKillTime) / (60 * 1000);
 
-  probability = Math.max(0, probability - timeReduction);
+  if (minutesSinceLastKill > 25) {
+    const inactivityPenalty = Math.min(
+      70,
+      Math.max(0, ((minutesSinceLastKill - 25) / 15) * 50)
+    );
+    probability -= inactivityPenalty;
+    console.log(
+      `Inactivity penalty (${minutesSinceLastKill.toFixed(
+        1
+      )}min): -${inactivityPenalty.toFixed(1)}`
+    );
+  }
 
-  console.log(`Final Probability: ${Math.min(100, probability)}`);
+  // Ensure probability stays within bounds
+  probability = Math.max(0, Math.min(100, probability));
+
+  console.log(`Final Probability: ${probability}`);
   console.log("--- End of Camp Probability Calculation ---");
 
-  return Math.min(100, probability);
+  return probability;
 }
 
 // Exported Functions
@@ -414,7 +512,6 @@ function updateCampComposition(camp, killmail) {
 }
 
 export function updateCamps(killmail) {
-  // Use roamStore to update roaming gangs
   updateRoamingGangs(killmail);
 
   let currentCamps = [];
@@ -431,10 +528,39 @@ export function updateCamps(killmail) {
   currentCamps = currentCamps.filter((camp) => {
     const timeSinceLastKill = now - new Date(camp.lastKill).getTime();
     if (camp.state === CAMP_STATES.CRASHED) {
-      return timeSinceLastKill <= 20 * 60 * 1000; // Keep crashed camps for 20 minutes
+      return timeSinceLastKill <= 20 * 60 * 1000;
     }
     return timeSinceLastKill <= CAMP_TIMEOUT;
   });
+
+  function getMetrics(kills, now) {
+    // Sort kills chronologically first
+    const sortedKills = [...kills].sort(
+      (a, b) =>
+        new Date(a.killmail.killmail_time).getTime() -
+        new Date(b.killmail.killmail_time).getTime()
+    );
+
+    const firstKill = new Date(sortedKills[0].killmail.killmail_time).getTime();
+    const lastKill = new Date(
+      sortedKills[sortedKills.length - 1].killmail.killmail_time
+    ).getTime();
+
+    return {
+      firstSeen: firstKill,
+      campDuration: Math.max(
+        0,
+        Math.floor((lastKill - firstKill) / (1000 * 60))
+      ),
+      inactivityDuration: Math.max(
+        0,
+        Math.floor((now - lastKill) / (1000 * 60))
+      ),
+      podKills: kills.filter(
+        (k) => k.killmail.victim.ship_type_id === CAPSULE_ID
+      ).length,
+    };
+  }
 
   const existingCamp = currentCamps.find((c) => c.id === campId);
 
@@ -443,6 +569,7 @@ export function updateCamps(killmail) {
     existingCamp.lastKill = killmail.killmail.killmail_time;
     existingCamp.totalValue += killmail.zkb.totalValue;
     existingCamp.composition = updateCampComposition(existingCamp, killmail);
+    existingCamp.metrics = getMetrics(existingCamp.kills, now);
     existingCamp.probability = calculateCampProbability(existingCamp);
   } else {
     const newCamp = {
@@ -461,6 +588,7 @@ export function updateCamps(killmail) {
     };
 
     newCamp.composition = updateCampComposition(newCamp, killmail);
+    newCamp.metrics = getMetrics([killmail], now);
     newCamp.probability = calculateCampProbability(newCamp);
     currentCamps.push(newCamp);
   }
@@ -482,53 +610,34 @@ socket.on("campUpdate", (camps) => {
 });
 
 socket.on("initialRoams", (roams) => {
-  activeRoams.set(
-    roams.map((roam) => ({
-      ...roam,
-      members: Array.from(roam.members || []),
-    }))
-  );
+  const formattedRoams = roams.map((roam) => ({
+    ...roam,
+    id: roam.id,
+    members: Array.isArray(roam.members) ? Array.from(roam.members) : [],
+    systems: Array.isArray(roam.systems) ? [...roam.systems] : [],
+    kills: Array.isArray(roam.kills) ? [...roam.kills] : [],
+    totalValue: roam.totalValue || 0,
+    lastActivity: roam.lastActivity || new Date().toISOString(),
+    lastSystem: roam.lastSystem || { id: 0, name: "Unknown" },
+    startTime: roam.startTime || roam.lastActivity || new Date().toISOString(),
+  }));
+  activeRoams.set(formattedRoams);
 });
 
 socket.on("roamUpdate", (roams) => {
-  activeRoams.set(
-    roams.map((roam) => ({
-      ...roam,
-      members: Array.from(roam.members || []),
-    }))
-  );
-});
+  console.log("Received roam update via socket:", roams);
 
-// Roaming gangs detection logic
-export const filteredRoams = derived([activeRoams], ([$activeRoams]) => {
-  return $activeRoams
-    .map((roam) => ({
-      ...roam,
-      memberCount: roam.members.length,
-      systemCount: new Set(roam.systems.map((s) => s.id)).size,
-      age: Date.now() - new Date(roam.startTime).getTime(),
-      lastSeen: Date.now() - new Date(roam.lastActivity).getTime(),
-    }))
-    .filter((roam) => roam.systemCount >= 1 && roam.lastSeen <= ROAM_TIMEOUT)
-    .sort((a, b) => b.lastActivity - a.lastActivity);
-});
+  const formattedRoams = roams.map((roam) => ({
+    ...roam,
+    id: roam.id,
+    members: Array.isArray(roam.members) ? Array.from(roam.members) : [],
+    systems: Array.isArray(roam.systems) ? [...roam.systems] : [],
+    kills: Array.isArray(roam.kills) ? [...roam.kills] : [],
+    totalValue: roam.totalValue || 0,
+    lastActivity: roam.lastActivity || new Date().toISOString(),
+    lastSystem: roam.lastSystem || { id: 0, name: "Unknown" },
+    startTime: roam.startTime || roam.lastActivity || new Date().toISOString(),
+  }));
 
-// Svelte Stores
-export const activeCamps = writable([]);
-export const filteredCamps = derived([activeCamps], ([$activeCamps]) => {
-  return $activeCamps
-    .filter((camp) => {
-      const nonCapsuleKills = camp.kills.filter(
-        (k) => k.killmail.victim.ship_type_id !== CAPSULE_ID
-      );
-      return nonCapsuleKills.length >= 2 && camp.probability >= 30;
-    })
-    .map((camp) => ({
-      ...camp,
-      composition: camp.composition || DEFAULT_COMPOSITION,
-      lastKillTime: new Date(camp.lastKill).getTime(),
-      age: Date.now() - new Date(camp.lastKill).getTime(),
-      isActive: Date.now() - new Date(camp.lastKill).getTime() <= CAMP_TIMEOUT,
-    }))
-    .sort((a, b) => b.probability - a.probability);
+  activeRoams.set(formattedRoams);
 });
