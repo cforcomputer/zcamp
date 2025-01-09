@@ -1,0 +1,14 @@
+# pyproject.toml
+[tool.poetry]
+name = "gate-camp-detector"
+version = "0.1.0"
+description = "ML system for detecting EVE Online gate camps"
+
+[tool.poetry.dependencies]
+python = "^3.9"
+pytorch-lightning = "^2.0.0"
+mlflow = "^2.8.0"
+streamlit = "^1.29.0"
+prefect = "^2.14.0"
+typer = "^0.9.0"
+pandas = "^2.1.0"

@@ -143,4 +143,5 @@ dist
 # Logs
 logs
 *.log
-# ... rest of your current .gitignore ...
+
+key.json

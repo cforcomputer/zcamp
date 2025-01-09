@@ -7,6 +7,9 @@ export const CAMP_TIMEOUT = 60 * 60 * 1000; // 1 hour
 export const ROAM_TIMEOUT = 30 * 60 * 1000; // 30 minutes
 export const CAPSULE_ID = 670;
 
+let lastExportTime = Date.now();
+const EXPORT_INTERVAL = 60 * 60 * 1000; // 1 hour
+
 export const activeRoams = writable([]);
 
 export const activeCamps = writable([]);
@@ -481,8 +484,78 @@ export function updateCamps(killmail) {
     return timeSinceLastKill <= CAMP_TIMEOUT;
   });
 
+  // Prepare export data if interval has passed
+  if (now - lastExportTime >= EXPORT_INTERVAL) {
+    const exportData = {
+      timestamp: new Date().toISOString(),
+      kills: [],
+      campMetrics: [],
+    };
+
+    // Collect all kills with their camp context
+    currentCamps.forEach((camp) => {
+      camp.kills.forEach((kill) => {
+        // Add camp context to each kill
+        const killData = {
+          killmail: {
+            killmail_id: kill.killmail.killmail_id,
+            killmail_time: kill.killmail.killmail_time,
+            solar_system_id: kill.killmail.solar_system_id,
+            victim: {
+              character_id: kill.killmail.victim.character_id,
+              corporation_id: kill.killmail.victim.corporation_id,
+              alliance_id: kill.killmail.victim.alliance_id,
+              ship_type_id: kill.killmail.victim.ship_type_id,
+            },
+            attackers: kill.killmail.attackers.map((a) => ({
+              character_id: a.character_id,
+              corporation_id: a.corporation_id,
+              alliance_id: a.alliance_id,
+              ship_type_id: a.ship_type_id,
+              security_status: a.security_status,
+            })),
+          },
+          zkb: {
+            totalValue: kill.zkb.totalValue,
+          },
+          pinpoints: {
+            nearestCelestial: {
+              name: kill.pinpoints.nearestCelestial.name,
+              distance: kill.pinpoints.nearestCelestial.distance,
+            },
+          },
+          campContext: {
+            campId: camp.id,
+            probability: camp.probability,
+            killIndex: camp.kills.indexOf(kill),
+            totalKills: camp.kills.length,
+            campDuration: camp.metrics.campDuration,
+            isGateCamp: isGateCamp(kill),
+          },
+        };
+        exportData.kills.push(killData);
+      });
+
+      // Add camp metrics
+      exportData.campMetrics.push({
+        campId: camp.id,
+        systemId: camp.systemId,
+        stargateName: camp.stargateName,
+        probability: camp.probability,
+        metrics: camp.metrics,
+        composition: camp.composition,
+        totalValue: camp.totalValue,
+        firstSeen: new Date(camp.kills[0].killmail.killmail_time).toISOString(),
+        lastKill: camp.lastKill,
+      });
+    });
+
+    // Emit export event with compressed data
+    socket.emit("exportKillmails", JSON.stringify(exportData));
+    lastExportTime = now;
+  }
+
   function getMetrics(kills, now) {
-    // Sort kills chronologically first
     const sortedKills = [...kills].sort(
       (a, b) =>
         new Date(a.killmail.killmail_time).getTime() -
@@ -507,6 +580,10 @@ export function updateCamps(killmail) {
       podKills: kills.filter(
         (k) => k.killmail.victim.ship_type_id === CAPSULE_ID
       ).length,
+      killFrequency:
+        kills.length / Math.max(1, (lastKill - firstKill) / (1000 * 60)),
+      avgValuePerKill:
+        kills.reduce((sum, k) => sum + k.zkb.totalValue, 0) / kills.length,
     };
   }
 
@@ -544,6 +621,17 @@ export function updateCamps(killmail) {
   activeCamps.set([...currentCamps]);
   return currentCamps;
 }
+
+// Add listener for export confirmation
+socket.on("exportComplete", (response) => {
+  console.log(`Export completed at ${new Date().toISOString()}`);
+  console.log(
+    `Exported ${response.killCount} kills from ${response.campCount} camps`
+  );
+  if (response.fileUrl) {
+    console.log(`Data available at: ${response.fileUrl}`);
+  }
+});
 
 socket.on("initialCamps", (camps) => {
   activeCamps.set(
