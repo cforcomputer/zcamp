@@ -3,7 +3,7 @@ import express from "express";
 import { createServer } from "http";
 import { Server } from "socket.io";
 import axios from "axios";
-import { createClient as createSqlClient } from "@libsql/client"; // Rename this oneimport { compare, hash } from "bcrypt";
+import { createClient as createSqlClient } from "@libsql/client";
 import { isGateCamp, updateCamps } from "./campStore.js";
 import roamStore, { activeRoams } from "./roamStore.js";
 import path from "path";
@@ -22,6 +22,8 @@ const server = createServer(app);
 const io = new Server(server);
 const PORT = process.env.PORT || 3000;
 const PUBLIC_URL = process.env.PUBLIC_URL || "http://localhost:3000";
+
+let lastPollTime = null;
 
 const MIME_TYPES = {
   ".wav": "audio/wav",
@@ -90,13 +92,13 @@ if (!fs.existsSync(audioPath)) {
   fs.mkdirSync(audioPath, { recursive: true });
 }
 
-const REDISQ_URL = "https://redisq.zkillboard.com/listen.php?queueID=KM_hunter";
+const REDISQ_URL = "https://redisq.zkillboard.com/listen.php?queueID=zcamp";
 let killmails = [];
 let activeCamps = new Map();
 let isDatabaseInitialized = false;
 
 const db = createSqlClient({
-  url: process.env.LIBSQL_URL || "file:km_hunter.db",
+  url: process.env.LIBSQL_URL || "file:zcamp.db",
   authToken: process.env.LIBSQL_AUTH_TOKEN,
 });
 
@@ -344,17 +346,33 @@ app.get("/health", async (_, res) => {
 
     // Test database connection with a simple query
     const result = await db.execute("SELECT 1 as health_check");
-    if (result.rows?.[0]?.health_check === 1) {
+
+    // Check if polling is active (within last minute)
+    const pollingActive = lastPollTime && Date.now() - lastPollTime < 60000;
+
+    if (result.rows?.[0]?.health_check === 1 && pollingActive) {
       console.log("Health check passed");
-      return res.status(200).json({ status: "healthy" });
+      return res.status(200).json({
+        status: "healthy",
+        lastPollTime: lastPollTime
+          ? new Date(lastPollTime).toISOString()
+          : null,
+        pollingActive,
+      });
     } else {
-      throw new Error("Database query returned unexpected result");
+      const issues = [];
+      if (result.rows?.[0]?.health_check !== 1) issues.push("database");
+      if (!pollingActive) issues.push("redisq_polling");
+
+      throw new Error(`Health check failed: ${issues.join(", ")}`);
     }
   } catch (error) {
     console.error("Health check failed:", error);
     return res.status(500).json({
       status: "unhealthy",
       error: error.message,
+      lastPollTime: lastPollTime ? new Date(lastPollTime).toISOString() : null,
+      pollingActive: lastPollTime ? Date.now() - lastPollTime < 60000 : false,
     });
   }
 });
@@ -2298,6 +2316,7 @@ async function processKillmail(killmail) {
 // Function to poll for new killmails from RedisQ
 async function pollRedisQ() {
   try {
+    lastPollTime = Date.now(); // For health check tracking
     console.log("Polling RedisQ...");
     const response = await axios.get(REDISQ_URL);
 
@@ -2351,7 +2370,7 @@ async function pollRedisQ() {
 
         // Update the store and broadcast to all clients
         activeRoams.set(updatedRoams);
-        io.emit("roamUpdate", updatedRoams); // Add direct socket broadcast
+        io.emit("roamUpdate", updatedRoams);
 
         if (isGateCamp(enrichedKillmail)) {
           console.log("Processing gate camp...");
@@ -2368,10 +2387,10 @@ async function pollRedisQ() {
     }
   } catch (error) {
     console.error("Error polling RedisQ:", error);
+  } finally {
+    // Changed from 10ms to 15 seconds (15000ms)
+    setTimeout(pollRedisQ, 15000);
   }
-
-  // Schedule next poll
-  setTimeout(pollRedisQ, 10);
 }
 
 // There are sometimes duplicate killmails in the RedisQ
@@ -2437,82 +2456,6 @@ app.use(
       }
       // Add cache control for static assets
       res.setHeader("Cache-Control", "public, max-age=31536000"); // Function to poll for new killmails from RedisQ
-      async function pollRedisQ() {
-        try {
-          console.log("Polling RedisQ...");
-          const response = await axios.get(REDISQ_URL);
-
-          if (response.status === 200 && response.data.package) {
-            const killmail = response.data.package;
-            console.log("Received killmail:", {
-              id: killmail.killID,
-              system: killmail.killmail.solar_system_id,
-              time: killmail.killmail.killmail_time,
-            });
-
-            // Clean old killmails first
-            const beforeCleanCount = killmails.length;
-            killmails = cleanKillmailsCache(killmails);
-            console.log(
-              `Cleaned killmail cache: ${beforeCleanCount} -> ${killmails.length}`
-            );
-
-            if (
-              !isDuplicate(killmail) &&
-              isWithinLast24Hours(killmail.killmail.killmail_time)
-            ) {
-              console.log("Processing new killmail...");
-
-              const processedKillmail = await processKillmail(killmail);
-              console.log("Killmail processed with celestial data");
-
-              const enrichedKillmail = await addShipCategoriesToKillmail(
-                processedKillmail
-              );
-              console.log("Killmail enriched with ship categories");
-
-              // Add to cache
-              killmails.push(enrichedKillmail);
-              io.emit("newKillmail", enrichedKillmail);
-
-              // Debug roaming gang updates
-              console.log("Updating roaming gangs...");
-              const updatedRoams =
-                roamStore.updateRoamingGangs(enrichedKillmail);
-              console.log(`Active roams after update: ${updatedRoams.length}`);
-              console.log(
-                "Roam details:",
-                updatedRoams.map((roam) => ({
-                  id: roam.id,
-                  members: roam.members.length,
-                  systems: roam.systems.length,
-                  kills: roam.kills.length,
-                  lastActivity: roam.lastActivity,
-                }))
-              );
-
-              activeRoams.set(updatedRoams);
-
-              if (isGateCamp(enrichedKillmail)) {
-                console.log("Processing gate camp...");
-                activeCamps = updateCamps(enrichedKillmail);
-                io.emit("campUpdate", Array.from(activeCamps.values()));
-              }
-
-              console.log("Killmail processing complete");
-            } else {
-              console.log("Skipping killmail - duplicate or too old");
-            }
-          } else {
-            console.log("No new killmail package");
-          }
-        } catch (error) {
-          console.error("Error polling RedisQ:", error);
-        }
-
-        // Schedule next poll
-        setTimeout(pollRedisQ, 10);
-      }
     },
   })
 );
