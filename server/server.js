@@ -323,46 +323,6 @@ app.get("/api/campcrushers/stats", async (req, res) => {
   }
 });
 
-// Debug
-async function testNetworkConnectivity() {
-  try {
-    console.log("[NETWORK TEST] Starting network connectivity test...");
-    const startTime = Date.now();
-
-    // Test multiple endpoints to rule out single-site issues
-    const testUrls = [
-      "https://www.fuzzwork.co.uk/api/mapdata.php?solarsystemid=30000142&format=json",
-      "https://jsonplaceholder.typicode.com/todos/1",
-      "https://api.github.com/zen",
-    ];
-
-    for (const url of testUrls) {
-      try {
-        console.log(`[NETWORK TEST] Testing URL: ${url}`);
-        const response = await axios.get(url, {
-          timeout: 5000,
-          httpsAgent: new https.Agent({ rejectUnauthorized: false }),
-        });
-
-        console.log(
-          `[NETWORK TEST] ${url} responded with status ${response.status}`
-        );
-      } catch (urlTestError) {
-        console.error(`[NETWORK TEST] Failed to connect to ${url}:`, {
-          message: urlTestError.message,
-          code: urlTestError.code,
-          errorType: urlTestError.type,
-        });
-      }
-    }
-
-    const duration = Date.now() - startTime;
-    console.log(`[NETWORK TEST] Connectivity test completed in ${duration}ms`);
-  } catch (error) {
-    console.error("[NETWORK TEST] Comprehensive network test failed:", error);
-  }
-}
-
 app.post("/api/campcrushers/target", async (req, res) => {
   if (!req.session?.user?.character_id) {
     return res.status(401).json({ error: "Not authenticated" });
@@ -745,9 +705,6 @@ async function getFilterListsSize(userId) {
 }
 
 async function fetchCelestialData(systemId) {
-  // Run network test first
-  await testNetworkConnectivity();
-
   console.log(
     `[DETAILED] Attempting to fetch celestial data for system ${systemId}`
   );
@@ -2754,8 +2711,7 @@ async function pollRedisQ() {
     });
   }
 
-  // Schedule next poll with random delay to avoid rate limiting
-  const delay = Math.floor(Math.random() * 500) + 500; // Random delay between 500-1000ms
+  const delay = 1000;
   setTimeout(pollRedisQ, delay);
 }
 
