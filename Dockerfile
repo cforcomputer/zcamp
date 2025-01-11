@@ -1,15 +1,36 @@
-FROM node:20.17
+FROM node:20-slim
 
-ENV NODE_ENV=production
+# Create app directory
+WORKDIR /usr/src/app
 
-WORKDIR /app
+# Install curl for healthcheck only
+RUN apt-get update && apt-get install -y wget curl
 
-COPY package*.json .
+# Copy package files
+COPY package*.json ./
 
-RUN npm ci
+# Install dependencies
+RUN apt-get update && apt-get install -y \
+    python3 \
+    make \
+    g++ \
+    && npm install \
+    && apt-get purge -y \
+    python3 \
+    make \
+    g++ \
+    && apt-get autoremove -y \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
 
+# Copy application code
 COPY . .
 
+# Build the application
+RUN npm run build
+
+# Document the port the app uses
 EXPOSE 8080
 
-CMD [ "node", "src/index.js" ]
+# Keep the original port
+CMD [ "npm", "start" ]

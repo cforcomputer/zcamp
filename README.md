@@ -5,6 +5,72 @@
 Install railway.com CLI
 `railway up` to push changes
 
+### Creating a dockerfile for deploy from dockerhub
+
+Add environment variables docker environment
+
+`docker build -t wrighttech/zcamp:latest .`
+`docker push wrighttech/zcamp:latest`
+
+```
+LIBSQL_URL="libsql://your-database-url" 
+- New Environment Variable: Yes
+- Build Variable: No
+- Is Multiline: No
+- Is Literal: No
+
+LIBSQL_AUTH_TOKEN="your-database-auth-token"
+- New Environment Variable: Yes
+- Build Variable: No
+- Is Multiline: No
+- Is Literal: No
+
+REDIS_URL="redis://your-redis-url:6379"
+- New Environment Variable: Yes
+- Build Variable: No
+- Is Multiline: No
+- Is Literal: No
+
+SESSION_SECRET="your-secure-session-secret"
+- Build Variable: No
+- Is Multiline: No
+- Is Literal: Yes
+Note: randomly generated 64 char sequence for authenticating user sessions
+
+EVE_CLIENT_ID="your-eve-client-id"
+- Build Variable: No
+- Is Multiline: No
+- Is Literal: Yes
+
+EVE_CLIENT_SECRET="your-eve-client-secret"
+- Build Variable: No
+- Is Multiline: No
+- Is Literal: Yes
+
+EVE_CALLBACK_URL="https://your-domain.com/callback/"
+- Build Variable: No
+- Is Multiline: No
+- Is Literal: No
+
+PORT=3000
+- Build Variable: Yes
+- Is Multiline: No
+- Is Literal: No
+
+NODE_ENV="production"
+- Build Variable: Yes
+- Is Multiline: No
+- Is Literal: No
+
+PUBLIC_URL="{full domain name} https://zcamp.lol"
+- Build Variable: No
+- Is Multiline: No
+- Is Literal: Yes
+
+```
+
+### Installing locally
+
 `npm install`
 
 `npm i postcss-load-config`
@@ -15,12 +81,13 @@ Install railway.com CLI
 
 Tech stack:
 
-- LibSQL
+- LibSQL (Turso free tier)
 - NodeJS
-- Redis (serve and retrieve)
-- RedisQ (Zkillboard feed)
+- Redis (serve and retrieve, free tier Redis cloud)
+- RedisQ (Zkillboard feed, from zKillboard)
 - Svelte frontend with shadn/UI
 - ThreeJS for visualizations
+- Coolify on Hetzner for deployment
 
 ## Interesting usecases ( real time )
 

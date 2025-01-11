@@ -21,6 +21,7 @@ const app = express();
 const server = createServer(app);
 const io = new Server(server);
 const PORT = process.env.PORT || 3000;
+const PUBLIC_URL = process.env.PUBLIC_URL || "http://localhost:3000";
 
 const MIME_TYPES = {
   ".wav": "audio/wav",
@@ -59,8 +60,9 @@ app.use(express.json());
 app.use(
   cors({
     origin: [
-      "https://eve-content-hunter-production.up.railway.app",
-      "http://localhost:3000",
+      process.env.NODE_ENV === "production"
+        ? PUBLIC_URL
+        : "http://localhost:3000",
     ],
     credentials: true,
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
@@ -118,14 +120,14 @@ const sessionMiddleware = session({
   saveUninitialized: false,
   name: "km_sid",
   cookie: {
-    secure: true, // Always true since you're using HTTPS
+    secure: true,
     maxAge: 24 * 60 * 60 * 1000,
     httpOnly: true,
     sameSite: "lax",
     domain:
       process.env.NODE_ENV === "production"
-        ? "eve-content-hunter-production.up.railway.app"
-        : undefined, // Full domain instead of .railway.app
+        ? new URL(PUBLIC_URL).hostname
+        : undefined,
     path: "/",
   },
   proxy: true, // Add this for proper HTTPS handling behind proxy
