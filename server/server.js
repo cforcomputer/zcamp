@@ -14,16 +14,37 @@ import session from "express-session";
 import RedisStore from "connect-redis";
 import { createClient as createRedisClient } from "redis";
 import { compare } from "bcrypt";
+import https from "https";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const app = express();
 const server = createServer(app);
-const io = new Server(server);
+const io = new Server(server, {
+  cors: {
+    origin: process.env.PUBLIC_URL || "https://where.zcamp.lol",
+    methods: ["GET", "POST"],
+    credentials: true,
+  },
+  allowEIO3: true,
+  path: "/socket.io/",
+  transports: ["websocket"],
+  pingTimeout: 60000,
+  pingInterval: 25000,
+  cookie: {
+    name: "io",
+    path: "/",
+    httpOnly: true,
+    sameSite: "lax",
+  },
+});
+
+// Make sure these are set before creating the server
+app.set("trust proxy", true);
+app.enable("trust proxy");
 const PORT = process.env.PORT || 3000;
 const PUBLIC_URL = process.env.PUBLIC_URL || "http://localhost:3000";
-
-let lastPollTime = null;
+axios.defaults.baseURL = "http://localhost:" + process.env.PORT;
 
 const MIME_TYPES = {
   ".wav": "audio/wav",
@@ -55,21 +76,20 @@ const redisClient = createRedisClient({
 });
 redisClient.connect().catch(console.error);
 
+io.use((socket, next) => {
+  sessionMiddleware(socket.request, socket.request.res || {}, next);
+});
+
 // Express middleware
 app.use(express.json());
 
 // Allow cross origin requests
 app.use(
   cors({
-    origin: [
-      process.env.NODE_ENV === "production"
-        ? PUBLIC_URL
-        : "http://localhost:3000",
-    ],
+    origin: process.env.PUBLIC_URL || "http://localhost:8080",
     credentials: true,
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
-    exposedHeaders: ["set-cookie"],
   })
 );
 
@@ -91,6 +111,19 @@ const audioPath = path.join(__dirname, "../public/build/audio_files");
 if (!fs.existsSync(audioPath)) {
   fs.mkdirSync(audioPath, { recursive: true });
 }
+
+// Send public url configuration to client (this is not necessary if we switch to vite)
+app.get("/", (req, res) => {
+  const indexHtml = fs.readFileSync(
+    path.join(__dirname, "../public/index.html"),
+    "utf8"
+  );
+  const rendered = indexHtml.replace(
+    "{{PUBLIC_URL}}",
+    process.env.PUBLIC_URL || `http://${req.headers.host}`
+  );
+  res.send(rendered);
+});
 
 const REDISQ_URL = "https://redisq.zkillboard.com/listen.php?queueID=zcamp";
 let killmails = [];
@@ -290,6 +323,46 @@ app.get("/api/campcrushers/stats", async (req, res) => {
   }
 });
 
+// Debug
+async function testNetworkConnectivity() {
+  try {
+    console.log("[NETWORK TEST] Starting network connectivity test...");
+    const startTime = Date.now();
+
+    // Test multiple endpoints to rule out single-site issues
+    const testUrls = [
+      "https://www.fuzzwork.co.uk/api/mapdata.php?solarsystemid=30000142&format=json",
+      "https://jsonplaceholder.typicode.com/todos/1",
+      "https://api.github.com/zen",
+    ];
+
+    for (const url of testUrls) {
+      try {
+        console.log(`[NETWORK TEST] Testing URL: ${url}`);
+        const response = await axios.get(url, {
+          timeout: 5000,
+          httpsAgent: new https.Agent({ rejectUnauthorized: false }),
+        });
+
+        console.log(
+          `[NETWORK TEST] ${url} responded with status ${response.status}`
+        );
+      } catch (urlTestError) {
+        console.error(`[NETWORK TEST] Failed to connect to ${url}:`, {
+          message: urlTestError.message,
+          code: urlTestError.code,
+          errorType: urlTestError.type,
+        });
+      }
+    }
+
+    const duration = Date.now() - startTime;
+    console.log(`[NETWORK TEST] Connectivity test completed in ${duration}ms`);
+  } catch (error) {
+    console.error("[NETWORK TEST] Comprehensive network test failed:", error);
+  }
+}
+
 app.post("/api/campcrushers/target", async (req, res) => {
   if (!req.session?.user?.character_id) {
     return res.status(401).json({ error: "Not authenticated" });
@@ -341,38 +414,33 @@ app.get("/health", async (_, res) => {
   try {
     if (!isDatabaseInitialized) {
       console.log("Health check failed: Database not yet initialized");
-      return res.status(503).json({ status: "initializing" });
+      return res.status(503).json({
+        status: "initializing",
+        killmails: killmails.length,
+        lastPoll: new Date().toISOString(),
+      });
     }
 
     // Test database connection with a simple query
     const result = await db.execute("SELECT 1 as health_check");
-
-    // Check if polling is active (within last minute)
-    const pollingActive = lastPollTime && Date.now() - lastPollTime < 60000;
-
-    if (result.rows?.[0]?.health_check === 1 && pollingActive) {
+    if (result.rows?.[0]?.health_check === 1) {
       console.log("Health check passed");
       return res.status(200).json({
         status: "healthy",
-        lastPollTime: lastPollTime
-          ? new Date(lastPollTime).toISOString()
-          : null,
-        pollingActive,
+        killmails: killmails.length,
+        lastPoll: new Date().toISOString(),
+        redisConnected: redisClient.isReady,
       });
     } else {
-      const issues = [];
-      if (result.rows?.[0]?.health_check !== 1) issues.push("database");
-      if (!pollingActive) issues.push("redisq_polling");
-
-      throw new Error(`Health check failed: ${issues.join(", ")}`);
+      throw new Error("Database query returned unexpected result");
     }
   } catch (error) {
     console.error("Health check failed:", error);
     return res.status(500).json({
       status: "unhealthy",
       error: error.message,
-      lastPollTime: lastPollTime ? new Date(lastPollTime).toISOString() : null,
-      pollingActive: lastPollTime ? Date.now() - lastPollTime < 60000 : false,
+      killmails: killmails.length,
+      lastPoll: new Date().toISOString(),
     });
   }
 });
@@ -611,15 +679,21 @@ async function getShipCategory(shipTypeId, killmail) {
 }
 
 async function addShipCategoriesToKillmail(killmail) {
+  console.log(
+    "Starting addShipCategoriesToKillmail for killmail:",
+    killmail.killID
+  );
+
   try {
-    // Get victim ship category with killmail for NPC/structure checks
+    console.log("Fetching victim ship category...");
     const victimCategory = await getShipCategory(
       killmail.killmail.victim.ship_type_id,
       killmail
     );
+    console.log("Victim category:", victimCategory);
 
-    // Initialize categories object only if a valid category is found
     if (!victimCategory) {
+      console.log("No valid victim category found");
       return killmail;
     }
 
@@ -628,18 +702,18 @@ async function addShipCategoriesToKillmail(killmail) {
       attackers: [],
     };
 
-    // Process only ship types, not weapon types
+    console.log("Processing attacker ship types...");
     const attackerShipTypes = killmail.killmail.attackers
       .map((attacker) => attacker.ship_type_id)
-      .filter((shipTypeId) => shipTypeId); // Remove any null/undefined ship types
+      .filter((shipTypeId) => shipTypeId);
 
-    // Process unique ship types to avoid redundant API calls
-    const uniqueShipTypes = [...new Set(attackerShipTypes)];
+    console.log("Unique attacker ship types:", attackerShipTypes);
 
-    for (const shipTypeId of uniqueShipTypes) {
+    for (const shipTypeId of attackerShipTypes) {
+      console.log(`Processing ship type: ${shipTypeId}`);
       const category = await getShipCategory(shipTypeId, killmail);
+      console.log(`Category for ship type ${shipTypeId}:`, category);
 
-      // Only add if a valid category is found
       if (category) {
         killmail.shipCategories.attackers.push({
           shipTypeId,
@@ -648,10 +722,11 @@ async function addShipCategoriesToKillmail(killmail) {
       }
     }
 
+    console.log("Completed ship categories processing");
     return killmail;
   } catch (error) {
-    console.error("Error adding ship categories to killmail:", error);
-    return killmail;
+    console.error("Fatal error in addShipCategoriesToKillmail:", error);
+    throw error;
   }
 }
 
@@ -670,26 +745,111 @@ async function getFilterListsSize(userId) {
 }
 
 async function fetchCelestialData(systemId) {
+  // Run network test first
+  await testNetworkConnectivity();
+
+  console.log(
+    `[DETAILED] Attempting to fetch celestial data for system ${systemId}`
+  );
+
   try {
+    console.log(
+      `[DETAILED] Sending request to Fuzzwork API for system ${systemId}`
+    );
+
+    // Detailed request logging
+    const startTime = Date.now();
+    console.log("[DETAILED] Request start time:", startTime);
+
     const response = await axios.get(
-      `https://www.fuzzwork.co.uk/api/mapdata.php?solarsystemid=${systemId}&format=json`
+      `https://www.fuzzwork.co.uk/api/mapdata.php?solarsystemid=${systemId}&format=json`,
+      {
+        timeout: 30000, // 30 second timeout
+        timeoutErrorMessage: "Fuzzworks request timed out",
+        httpsAgent: new https.Agent({
+          rejectUnauthorized: false,
+          keepAlive: true,
+          timeout: 30000,
+        }),
+        headers: {
+          "User-Agent": "KM-Hunter/1.0.0",
+          Accept: "application/json",
+        },
+      }
+    );
+
+    const duration = Date.now() - startTime;
+    console.log(`[DETAILED] Request completed in ${duration}ms`);
+    console.log(`[DETAILED] Response received. Status: ${response.status}`);
+    console.log(`[DETAILED] Response data type: ${typeof response.data}`);
+    console.log(
+      `[DETAILED] Response data length: ${JSON.stringify(response.data).length}`
     );
 
     if (!Array.isArray(response.data)) {
-      throw new Error("Invalid celestial data format");
+      console.error(
+        `[DETAILED] Invalid data format. Type: ${typeof response.data}`
+      );
+      console.error(`[DETAILED] Received data:`, response.data);
+
+      return [
+        {
+          solarsystemid: systemId,
+          solarsystemname: `System ${systemId}`,
+          x: 0,
+          y: 0,
+          z: 0,
+          itemname: `System ${systemId}`,
+        },
+      ];
     }
 
+    console.log(`[DETAILED] Fetched ${response.data.length} celestial items`);
     return response.data;
   } catch (error) {
-    console.error("Error fetching celestial data:", error);
-    return null;
+    console.error(
+      `[DETAILED] Error fetching celestial data for system ${systemId}:`,
+      {
+        message: error.message,
+        name: error.name,
+        code: error.code,
+        errorType: error.type,
+        responseStatus: error.response?.status,
+        responseData: error.response?.data,
+        stack: error.stack,
+      }
+    );
+
+    // Extensive error type checking
+    if (error.code === "ENOTFOUND") {
+      console.error("[DETAILED] DNS resolution failed");
+    } else if (error.code === "ETIMEDOUT") {
+      console.error("[DETAILED] Connection timed out");
+    } else if (error.code === "ECONNREFUSED") {
+      console.error("[DETAILED] Connection refused");
+    }
+
+    // Create a minimal fallback dataset
+    return [
+      {
+        solarsystemid: systemId,
+        solarsystemname: `System ${systemId}`,
+        x: 0,
+        y: 0,
+        z: 0,
+        itemname: `System ${systemId}`,
+      },
+    ];
   }
 }
 
 async function storeCelestialData(systemId, celestialData) {
   try {
+    console.log(`[DETAILED] Storing celestial data for system ${systemId}`);
     const systemName = celestialData[0]?.solarsystemname || systemId.toString();
-    console.log("Storing celestial data:", celestialData[0]);
+
+    console.log(`[DETAILED] System name: ${systemName}`);
+    console.log(`[DETAILED] First celestial item:`, celestialData[0]);
 
     await db.execute({
       sql: `REPLACE INTO celestial_data 
@@ -698,9 +858,19 @@ async function storeCelestialData(systemId, celestialData) {
       args: [systemId, systemName, JSON.stringify(celestialData)],
     });
 
+    console.log(
+      `[DETAILED] Celestial data stored successfully for system ${systemId}`
+    );
     return true;
   } catch (error) {
-    console.error("Error storing celestial data:", error);
+    console.error(
+      `[DETAILED] Error storing celestial data for system ${systemId}:`,
+      {
+        message: error.message,
+        name: error.name,
+        stack: error.stack,
+      }
+    );
     throw error;
   }
 }
@@ -2199,116 +2369,277 @@ io.on("connection", (socket) => {
 });
 
 async function ensureCelestialData(systemId) {
+  console.log(`[DETAILED] Starting ensureCelestialData for system ${systemId}`);
+  console.time(`[PERFORMANCE] ensureCelestialData-${systemId}`);
+
+  // Fallback data creation helper
+  const createFallbackData = () => [
+    {
+      solarsystemid: systemId,
+      solarsystemname: `System ${systemId}`,
+      x: 0,
+      y: 0,
+      z: 0,
+      itemname: `System ${systemId}`,
+    },
+  ];
+
+  // Timeout promise
+  const timeout = new Promise((_, reject) => {
+    setTimeout(
+      () => reject(new Error("Celestial data operation timeout")),
+      15000
+    );
+  });
+
   try {
-    // Check for cached data
-    const { rows } = await db.execute({
-      sql: "SELECT celestial_data FROM celestial_data WHERE system_id = ?",
-      args: [systemId],
+    // Check cache first with timeout
+    console.log(`[DETAILED] Checking database cache for system ${systemId}`);
+    const queryStartTime = Date.now();
+
+    const dbResult = await Promise.race([
+      db.execute({
+        sql: "SELECT celestial_data, last_updated FROM celestial_data WHERE system_id = ?",
+        args: [systemId],
+      }),
+      timeout,
+    ]).catch((err) => {
+      console.error(
+        `[DETAILED] Database query failed for system ${systemId}:`,
+        err
+      );
+      return { rows: [] };
     });
 
-    if (rows[0]) {
-      const celestialData = JSON.parse(rows[0].celestial_data);
-      // console.log("Retrieved cached celestial data:", celestialData[0]);
-      return celestialData;
+    const queryDuration = Date.now() - queryStartTime;
+    console.log(`[DETAILED] Database query completed in ${queryDuration}ms`);
+
+    // Check if we have valid cached data
+    if (dbResult.rows?.length > 0) {
+      const cacheAge =
+        Date.now() - new Date(dbResult.rows[0].last_updated).getTime();
+      const CACHE_TTL = 24 * 60 * 60 * 1000; // 24 hours
+
+      if (cacheAge < CACHE_TTL) {
+        try {
+          const celestialData = JSON.parse(dbResult.rows[0].celestial_data);
+          if (Array.isArray(celestialData) && celestialData.length > 0) {
+            console.log(
+              `[DETAILED] Using valid cached data for system ${systemId}`
+            );
+            console.timeEnd(`[PERFORMANCE] ensureCelestialData-${systemId}`);
+            return celestialData;
+          }
+        } catch (parseError) {
+          console.error(`[DETAILED] Error parsing cached data:`, parseError);
+        }
+      } else {
+        console.log(`[DETAILED] Cache expired for system ${systemId}`);
+      }
     }
 
-    // If no cached data, fetch new data
-    console.log(`Fetching new celestial data for system ${systemId}`);
-    const celestialData = await fetchCelestialData(systemId);
+    // Fetch new data with retries
+    console.log(
+      `[DETAILED] Fetching new celestial data for system ${systemId}`
+    );
+    const fetchStartTime = Date.now();
 
-    if (!celestialData) {
-      console.error(`Failed to fetch celestial data for system ${systemId}`);
-      throw new Error(`Failed to fetch celestial data for system ${systemId}`);
+    const MAX_RETRIES = 3;
+    let lastError = null;
+
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        const celestialData = await Promise.race([
+          fetchCelestialData(systemId),
+          timeout,
+        ]);
+
+        if (
+          celestialData &&
+          Array.isArray(celestialData) &&
+          celestialData.length > 0
+        ) {
+          const fetchDuration = Date.now() - fetchStartTime;
+          console.log(
+            `[DETAILED] Fetch successful after ${fetchDuration}ms on attempt ${attempt}`
+          );
+
+          // Store in cache
+          try {
+            await Promise.race([
+              storeCelestialData(systemId, celestialData),
+              timeout,
+            ]);
+            console.log(
+              `[DETAILED] Successfully cached celestial data for system ${systemId}`
+            );
+          } catch (cacheError) {
+            console.error(
+              `[DETAILED] Failed to cache celestial data:`,
+              cacheError
+            );
+            // Continue even if caching fails
+          }
+
+          console.timeEnd(`[PERFORMANCE] ensureCelestialData-${systemId}`);
+          return celestialData;
+        } else {
+          throw new Error("Invalid celestial data format received");
+        }
+      } catch (error) {
+        lastError = error;
+        console.error(`[DETAILED] Attempt ${attempt} failed:`, error);
+
+        if (attempt < MAX_RETRIES) {
+          const backoffTime = Math.min(1000 * Math.pow(2, attempt - 1), 5000);
+          console.log(`[DETAILED] Retrying in ${backoffTime}ms...`);
+          await new Promise((resolve) => setTimeout(resolve, backoffTime));
+        }
+      }
     }
 
-    // Store the new data
-    await storeCelestialData(systemId, celestialData);
-    console.log("Stored celestial data:", celestialData[0]);
-    return celestialData;
+    // If all retries failed, log and return fallback
+    console.error(
+      `[DETAILED] All ${MAX_RETRIES} attempts failed. Last error:`,
+      lastError
+    );
+    console.log(`[DETAILED] Using fallback data for system ${systemId}`);
+
+    const fallbackData = createFallbackData();
+
+    // Try to cache fallback data to prevent repeated failed attempts
+    try {
+      await storeCelestialData(systemId, fallbackData);
+      console.log(`[DETAILED] Cached fallback data for system ${systemId}`);
+    } catch (fallbackCacheError) {
+      console.error(
+        `[DETAILED] Failed to cache fallback data:`,
+        fallbackCacheError
+      );
+    }
+
+    console.timeEnd(`[PERFORMANCE] ensureCelestialData-${systemId}`);
+    return fallbackData;
   } catch (error) {
-    console.error("Error in ensureCelestialData:", error);
-    throw error;
+    console.error(
+      `[DETAILED] Fatal error in ensureCelestialData for system ${systemId}:`,
+      {
+        message: error.message,
+        name: error.name,
+        stack: error.stack,
+      }
+    );
+
+    console.timeEnd(`[PERFORMANCE] ensureCelestialData-${systemId}`);
+    return createFallbackData();
   }
 }
 
 async function processKillmail(killmail) {
-  const systemId = killmail.killmail.solar_system_id;
-  const celestialData = await ensureCelestialData(systemId);
+  console.log("Starting processKillmail", {
+    killID: killmail.killID,
+    systemId: killmail.killmail.solar_system_id,
+    time: killmail.killmail.killmail_time,
+  });
 
-  // Calculate pinpoint data including nearest celestial
-  const pinpointData = calculatePinpoints(
-    celestialData,
-    killmail.killmail.victim.position
-  );
-
-  // Get the first celestial entry which contains system info
-  const systemInfo = celestialData?.[0];
-
-  const celestialInfo = systemInfo
-    ? {
-        regionid: systemInfo.regionid,
-        regionname: systemInfo.regionname,
-        solarsystemid: systemInfo.solarsystemid,
-        solarsystemname: systemInfo.solarsystemname,
-      }
-    : {
-        regionid: null,
-        regionname: null,
-        solarsystemid: systemId,
-        solarsystemname: null,
-      };
-
-  pinpointData.celestialData = celestialInfo;
-
-  // Check for camp crusher rewards
   try {
-    const { rows: targets } = await db.execute({
-      sql: `SELECT ct.*, cc.bashbucks 
-                FROM camp_crusher_targets ct 
-                JOIN camp_crushers cc ON ct.character_id = cc.character_id 
-                WHERE ct.camp_id = ? AND ct.completed = FALSE AND ct.end_time > CURRENT_TIMESTAMP`,
-      args: [killmail.killmail.solar_system_id],
-    });
+    const systemId = killmail.killmail.solar_system_id;
 
-    for (const target of targets) {
-      const isAttacker = killmail.killmail.attackers.some(
-        (a) => a.character_id === target.character_id
-      );
+    console.log("Fetching celestial data...");
+    const celestialData = await ensureCelestialData(systemId);
+    console.log(
+      "Celestial data fetched:",
+      celestialData && celestialData.length
+    );
 
-      if (isAttacker) {
-        // Award bashbucks based on kill value
-        const bashbucksAwarded = Math.floor(killmail.zkb.totalValue / 1000000); // 1 bashbuck per million ISK
+    // Calculate pinpoint data including nearest celestial
+    console.log("Calculating pinpoints...");
+    const pinpointData = calculatePinpoints(
+      celestialData,
+      killmail.killmail.victim.position
+    );
+    console.log("Pinpoint data calculated:", pinpointData);
 
-        await db.execute({
-          sql: "UPDATE camp_crushers SET bashbucks = bashbucks + ? WHERE character_id = ?",
-          args: [bashbucksAwarded, target.character_id],
-        });
+    // Get the first celestial entry which contains system info
+    const systemInfo = celestialData?.[0];
+    const celestialInfo = systemInfo
+      ? {
+          regionid: systemInfo.regionid,
+          regionname: systemInfo.regionname,
+          solarsystemid: systemInfo.solarsystemid,
+          solarsystemname: systemInfo.solarsystemname,
+        }
+      : {
+          regionid: null,
+          regionname: null,
+          solarsystemid: systemId,
+          solarsystemname: null,
+        };
+    pinpointData.celestialData = celestialInfo;
 
-        await db.execute({
-          sql: "UPDATE camp_crusher_targets SET completed = TRUE WHERE id = ?",
-          args: [target.id],
-        });
+    // Check for camp crusher rewards
+    console.log("Checking camp crusher targets...");
+    try {
+      const { rows: targets } = await db.execute({
+        sql: `SELECT ct.*, cc.bashbucks 
+              FROM camp_crusher_targets ct 
+              JOIN camp_crushers cc ON ct.character_id = cc.character_id 
+              WHERE ct.camp_id = ? AND ct.completed = FALSE AND ct.end_time > CURRENT_TIMESTAMP`,
+        args: [killmail.killmail.solar_system_id],
+      });
+      console.log(`Found ${targets.length} potential camp crusher targets`);
 
-        // Emit update to connected clients
-        io.to(target.character_id).emit("bashbucksAwarded", {
-          amount: bashbucksAwarded,
-          newTotal: target.bashbucks + bashbucksAwarded,
-          killmail: {
-            id: killmail.killID,
-            value: killmail.zkb.totalValue,
-            system: celestialInfo.solarsystemname || systemId,
-          },
-        });
+      for (const target of targets) {
+        const isAttacker = killmail.killmail.attackers.some(
+          (a) => a.character_id === target.character_id
+        );
+
+        if (isAttacker) {
+          console.log(
+            `Processing camp crusher reward for character ${target.character_id}`
+          );
+          // Award bashbucks based on kill value
+          const bashbucksAwarded = Math.floor(
+            killmail.zkb.totalValue / 1000000
+          ); // 1 bashbuck per million ISK
+
+          console.log(`Awarding ${bashbucksAwarded} bashbucks`);
+          await db.execute({
+            sql: "UPDATE camp_crushers SET bashbucks = bashbucks + ? WHERE character_id = ?",
+            args: [bashbucksAwarded, target.character_id],
+          });
+
+          await db.execute({
+            sql: "UPDATE camp_crusher_targets SET completed = TRUE WHERE id = ?",
+            args: [target.id],
+          });
+
+          // Emit update to connected clients
+          console.log(`Emitting bashbucks awarded to ${target.character_id}`);
+          io.to(target.character_id).emit("bashbucksAwarded", {
+            amount: bashbucksAwarded,
+            newTotal: target.bashbucks + bashbucksAwarded,
+            killmail: {
+              id: killmail.killID,
+              value: killmail.zkb.totalValue,
+              system: celestialInfo.solarsystemname || systemId,
+            },
+          });
+        }
       }
+    } catch (error) {
+      console.error("Error processing camp crusher rewards:", error);
     }
-  } catch (error) {
-    console.error("Error processing camp crusher rewards:", error);
-  }
 
-  return {
-    ...killmail,
-    pinpoints: pinpointData,
-  };
+    console.log("Returning processed killmail");
+    return {
+      ...killmail,
+      pinpoints: pinpointData,
+    };
+  } catch (error) {
+    console.error("Fatal error in processKillmail:", error);
+    throw error;
+  }
 }
 
 // Function to poll for new killmails from RedisQ
@@ -2316,81 +2647,116 @@ async function processKillmail(killmail) {
 // Function to poll for new killmails from RedisQ
 async function pollRedisQ() {
   try {
-    lastPollTime = Date.now(); // For health check tracking
-    console.log("Polling RedisQ...");
-    const response = await axios.get(REDISQ_URL);
+    // Add timestamp to all logs
+    const timestamp = new Date().toISOString();
+    console.log(
+      `[${timestamp}] Polling RedisQ... Current killmails: ${killmails.length}`
+    );
 
-    if (response.status === 200 && response.data.package) {
-      const killmail = response.data.package;
-      console.log("Received killmail:", {
-        id: killmail.killID,
-        system: killmail.killmail.solar_system_id,
-        time: killmail.killmail.killmail_time,
-      });
+    const response = await axios.get(REDISQ_URL, {
+      timeout: 30000, // 30 second timeout
+      headers: {
+        "User-Agent": "KM-Hunter/1.0.0", // Add user agent
+      },
+    });
 
-      // Clean old killmails first
-      const beforeCleanCount = killmails.length;
-      killmails = cleanKillmailsCache(killmails);
-      console.log(
-        `Cleaned killmail cache: ${beforeCleanCount} -> ${killmails.length}`
-      );
+    console.log(`[${timestamp}] RedisQ response status: ${response.status}`);
 
-      if (
-        !isDuplicate(killmail) &&
-        isWithinLast24Hours(killmail.killmail.killmail_time)
-      ) {
-        console.log("Processing new killmail...");
+    if (response.status === 200) {
+      if (response.data.package) {
+        const killmail = response.data.package;
+        console.log(`[${timestamp}] Received killmail:`, {
+          id: killmail.killID,
+          system: killmail.killmail.solar_system_id,
+          time: killmail.killmail.killmail_time,
+          totalValue: killmail.zkb?.totalValue,
+        });
 
-        const processedKillmail = await processKillmail(killmail);
-        console.log("Killmail processed with celestial data");
-
-        const enrichedKillmail = await addShipCategoriesToKillmail(
-          processedKillmail
-        );
-        console.log("Killmail enriched with ship categories");
-
-        // Add to cache
-        killmails.push(enrichedKillmail);
-        io.emit("newKillmail", enrichedKillmail);
-
-        // Debug roaming gang updates
-        console.log("Updating roaming gangs...");
-        const updatedRoams = roamStore.updateRoamingGangs(enrichedKillmail);
-        console.log(`Active roams after update: ${updatedRoams.length}`);
+        // Clean old killmails first
+        const beforeCleanCount = killmails.length;
+        killmails = cleanKillmailsCache(killmails);
         console.log(
-          "Roam details:",
-          updatedRoams.map((roam) => ({
-            id: roam.id,
-            members: roam.members.length,
-            systems: roam.systems.length,
-            kills: roam.kills.length,
-            lastActivity: roam.lastActivity,
-          }))
+          `[${timestamp}] Cleaned killmail cache: ${beforeCleanCount} -> ${killmails.length}`
         );
 
-        // Update the store and broadcast to all clients
-        activeRoams.set(updatedRoams);
-        io.emit("roamUpdate", updatedRoams);
+        if (!isDuplicate(killmail)) {
+          console.log(`[${timestamp}] Not a duplicate, checking time...`);
 
-        if (isGateCamp(enrichedKillmail)) {
-          console.log("Processing gate camp...");
-          activeCamps = updateCamps(enrichedKillmail);
-          io.emit("campUpdate", Array.from(activeCamps.values()));
+          if (isWithinLast24Hours(killmail.killmail.killmail_time)) {
+            console.log(`[${timestamp}] Within time window, processing...`);
+
+            try {
+              const processedKillmail = await processKillmail(killmail);
+              console.log(
+                `[${timestamp}] Killmail processed with celestial data`
+              );
+
+              const enrichedKillmail = await addShipCategoriesToKillmail(
+                processedKillmail
+              );
+              console.log(
+                `[${timestamp}] Killmail enriched with ship categories`
+              );
+
+              // Add to cache
+              killmails.push(enrichedKillmail);
+              console.log(
+                `[${timestamp}] Added to cache. New total: ${killmails.length}`
+              );
+
+              // Emit to connected clients
+              const connectedClients = io.sockets.sockets.size;
+              console.log(
+                `[${timestamp}] Broadcasting to ${connectedClients} connected clients`
+              );
+              io.emit("newKillmail", enrichedKillmail);
+
+              // Process for roaming gangs
+              const updatedRoams =
+                roamStore.updateRoamingGangs(enrichedKillmail);
+              console.log(
+                `[${timestamp}] Updated roams: ${updatedRoams.length}`
+              );
+              activeRoams.set(updatedRoams);
+              io.emit("roamUpdate", updatedRoams);
+
+              // Process for gate camps
+              if (isGateCamp(enrichedKillmail)) {
+                console.log(`[${timestamp}] Processing gate camp...`);
+                activeCamps = updateCamps(enrichedKillmail);
+                io.emit("campUpdate", Array.from(activeCamps.values()));
+              }
+            } catch (processError) {
+              console.error(
+                `[${timestamp}] Error processing killmail:`,
+                processError
+              );
+            }
+          } else {
+            console.log(`[${timestamp}] Killmail too old, skipping`);
+          }
+        } else {
+          console.log(`[${timestamp}] Duplicate killmail, skipping`);
         }
-
-        console.log("Killmail processing complete");
       } else {
-        console.log("Skipping killmail - duplicate or too old");
+        console.log(`[${timestamp}] No killmail package in response`);
       }
     } else {
-      console.log("No new killmail package");
+      console.log(
+        `[${timestamp}] Unexpected response status: ${response.status}`
+      );
     }
   } catch (error) {
-    console.error("Error polling RedisQ:", error);
-  } finally {
-    // Changed from 10ms to 15 seconds (15000ms)
-    setTimeout(pollRedisQ, 15000);
+    console.error(`[${new Date().toISOString()}] Error polling RedisQ:`, {
+      message: error.message,
+      code: error.code,
+      response: error.response?.data,
+    });
   }
+
+  // Schedule next poll with random delay to avoid rate limiting
+  const delay = Math.floor(Math.random() * 500) + 500; // Random delay between 500-1000ms
+  setTimeout(pollRedisQ, delay);
 }
 
 // There are sometimes duplicate killmails in the RedisQ

@@ -14,19 +14,16 @@ Add environment variables docker environment
 
 ```
 LIBSQL_URL="libsql://your-database-url" 
-- New Environment Variable: Yes
 - Build Variable: No
 - Is Multiline: No
 - Is Literal: No
 
 LIBSQL_AUTH_TOKEN="your-database-auth-token"
-- New Environment Variable: Yes
 - Build Variable: No
 - Is Multiline: No
 - Is Literal: No
 
 REDIS_URL="redis://your-redis-url:6379"
-- New Environment Variable: Yes
 - Build Variable: No
 - Is Multiline: No
 - Is Literal: No
@@ -52,7 +49,7 @@ EVE_CALLBACK_URL="https://your-domain.com/callback/"
 - Is Multiline: No
 - Is Literal: No
 
-PORT=3000
+PORT=8080
 - Build Variable: Yes
 - Is Multiline: No
 - Is Literal: No
@@ -62,7 +59,7 @@ NODE_ENV="production"
 - Is Multiline: No
 - Is Literal: No
 
-PUBLIC_URL="{full domain name} https://zcamp.lol"
+PUBLIC_URL="{full domain name} https://where.zcamp.lol"
 - Build Variable: No
 - Is Multiline: No
 - Is Literal: Yes
