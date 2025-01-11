@@ -705,128 +705,70 @@ async function getFilterListsSize(userId) {
 }
 
 async function fetchCelestialData(systemId) {
-  console.log(
-    `[DETAILED] Attempting to fetch celestial data for system ${systemId}`
-  );
+  console.log(`Fetching celestial data for system ${systemId}`);
 
   try {
-    console.log(
-      `[DETAILED] Sending request to Fuzzwork API for system ${systemId}`
-    );
+    // Check database first - with a short timeout
+    try {
+      const dbPromise = db.execute({
+        sql: "SELECT celestial_data FROM celestial_data WHERE system_id = ?",
+        args: [systemId],
+      });
 
-    // Detailed request logging
-    const startTime = Date.now();
-    console.log("[DETAILED] Request start time:", startTime);
+      const { rows } = await Promise.race([
+        dbPromise,
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error("Database timeout")), 2000)
+        ),
+      ]);
 
-    const response = await axios.get(
-      `https://www.fuzzwork.co.uk/api/mapdata.php?solarsystemid=${systemId}&format=json`,
-      {
-        timeout: 30000, // 30 second timeout
-        timeoutErrorMessage: "Fuzzworks request timed out",
-        httpsAgent: new https.Agent({
-          rejectUnauthorized: false,
-          keepAlive: true,
-          timeout: 30000,
-        }),
-        headers: {
-          "User-Agent": "KM-Hunter/1.0.0",
-          Accept: "application/json",
-        },
+      // If found in database, return it
+      if (rows[0]?.celestial_data) {
+        return JSON.parse(rows[0].celestial_data);
       }
+    } catch (dbError) {
+      console.error(`Database error for system ${systemId}:`, dbError);
+      // Continue to API call if database fails
+    }
+
+    // If not in database, fetch from API - with its own timeout
+    const apiPromise = axios.get(
+      `https://www.fuzzwork.co.uk/api/mapdata.php?solarsystemid=${systemId}&format=json`
     );
 
-    const duration = Date.now() - startTime;
-    console.log(`[DETAILED] Request completed in ${duration}ms`);
-    console.log(`[DETAILED] Response received. Status: ${response.status}`);
-    console.log(`[DETAILED] Response data type: ${typeof response.data}`);
-    console.log(
-      `[DETAILED] Response data length: ${JSON.stringify(response.data).length}`
-    );
+    const response = await Promise.race([
+      apiPromise,
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("API timeout")), 5000)
+      ),
+    ]);
 
     if (!Array.isArray(response.data)) {
-      console.error(
-        `[DETAILED] Invalid data format. Type: ${typeof response.data}`
-      );
-      console.error(`[DETAILED] Received data:`, response.data);
-
-      return [
-        {
-          solarsystemid: systemId,
-          solarsystemname: `System ${systemId}`,
-          x: 0,
-          y: 0,
-          z: 0,
-          itemname: `System ${systemId}`,
-        },
-      ];
+      throw new Error(`Invalid API response for system ${systemId}`);
     }
 
-    console.log(`[DETAILED] Fetched ${response.data.length} celestial items`);
-    return response.data;
-  } catch (error) {
-    console.error(
-      `[DETAILED] Error fetching celestial data for system ${systemId}:`,
-      {
-        message: error.message,
-        name: error.name,
-        code: error.code,
-        errorType: error.type,
-        responseStatus: error.response?.status,
-        responseData: error.response?.data,
-        stack: error.stack,
-      }
-    );
-
-    // Extensive error type checking
-    if (error.code === "ENOTFOUND") {
-      console.error("[DETAILED] DNS resolution failed");
-    } else if (error.code === "ETIMEDOUT") {
-      console.error("[DETAILED] Connection timed out");
-    } else if (error.code === "ECONNREFUSED") {
-      console.error("[DETAILED] Connection refused");
-    }
-
-    // Create a minimal fallback dataset
-    return [
-      {
-        solarsystemid: systemId,
-        solarsystemname: `System ${systemId}`,
-        x: 0,
-        y: 0,
-        z: 0,
-        itemname: `System ${systemId}`,
-      },
-    ];
-  }
-}
-
-async function storeCelestialData(systemId, celestialData) {
-  try {
-    console.log(`[DETAILED] Storing celestial data for system ${systemId}`);
-    const systemName = celestialData[0]?.solarsystemname || systemId.toString();
-
-    console.log(`[DETAILED] System name: ${systemName}`);
-    console.log(`[DETAILED] First celestial item:`, celestialData[0]);
-
-    await db.execute({
+    // Store in database - non-blocking
+    db.execute({
       sql: `REPLACE INTO celestial_data 
             (system_id, system_name, celestial_data, last_updated) 
             VALUES (?, ?, ?, CURRENT_TIMESTAMP)`,
-      args: [systemId, systemName, JSON.stringify(celestialData)],
+      args: [
+        systemId,
+        response.data[0]?.solarsystemname || String(systemId),
+        JSON.stringify(response.data),
+      ],
+    }).catch((err) => {
+      console.error(
+        `Failed to store celestial data for system ${systemId}:`,
+        err
+      );
     });
 
-    console.log(
-      `[DETAILED] Celestial data stored successfully for system ${systemId}`
-    );
-    return true;
+    return response.data;
   } catch (error) {
     console.error(
-      `[DETAILED] Error storing celestial data for system ${systemId}:`,
-      {
-        message: error.message,
-        name: error.name,
-        stack: error.stack,
-      }
+      `Error fetching celestial data for system ${systemId}:`,
+      error
     );
     throw error;
   }
@@ -1447,27 +1389,7 @@ app.get("/callback", async (req, res) => {
 app.get("/api/celestials/system/:systemId", async (req, res) => {
   try {
     const systemId = req.params.systemId;
-
-    // Check database first
-    const { rows } = await db.execute({
-      sql: "SELECT celestial_data FROM celestial_data WHERE system_id = ?",
-      args: [systemId],
-    });
-
-    if (rows[0]?.celestial_data) {
-      return res.json(JSON.parse(rows[0].celestial_data));
-    }
-
-    // Fetch from API if not in database
     const celestialData = await fetchCelestialData(systemId);
-    if (!celestialData) {
-      throw new Error("Failed to fetch celestial data");
-    }
-
-    // Store in database
-    await storeCelestialData(systemId, celestialData);
-
-    // Return data
     res.json(celestialData);
   } catch (error) {
     console.error(
@@ -1490,7 +1412,7 @@ app.get("/api/celestials/:killmailId", async (req, res) => {
     const systemId = killmail.killmail.solar_system_id;
 
     try {
-      const celestialData = await ensureCelestialData(systemId);
+      const celestialData = await fetchCelestialData(systemId);
 
       const response = [
         {
@@ -1510,7 +1432,7 @@ app.get("/api/celestials/:killmailId", async (req, res) => {
       res.json(response);
     } catch (error) {
       console.error(
-        `Error ensuring celestial data for system ${systemId}:`,
+        `Error fetching celestial data for system ${systemId}:`,
         error
       );
       res.status(500).json({ error: "Failed to retrieve celestial data" });
@@ -2325,173 +2247,6 @@ io.on("connection", (socket) => {
   });
 });
 
-async function ensureCelestialData(systemId) {
-  console.log(`[DETAILED] Starting ensureCelestialData for system ${systemId}`);
-  console.time(`[PERFORMANCE] ensureCelestialData-${systemId}`);
-
-  // Fallback data creation helper
-  const createFallbackData = () => [
-    {
-      solarsystemid: systemId,
-      solarsystemname: `System ${systemId}`,
-      x: 0,
-      y: 0,
-      z: 0,
-      itemname: `System ${systemId}`,
-    },
-  ];
-
-  // Timeout promise
-  const timeout = new Promise((_, reject) => {
-    setTimeout(
-      () => reject(new Error("Celestial data operation timeout")),
-      15000
-    );
-  });
-
-  try {
-    // Check cache first with timeout
-    console.log(`[DETAILED] Checking database cache for system ${systemId}`);
-    const queryStartTime = Date.now();
-
-    const dbResult = await Promise.race([
-      db.execute({
-        sql: "SELECT celestial_data, last_updated FROM celestial_data WHERE system_id = ?",
-        args: [systemId],
-      }),
-      timeout,
-    ]).catch((err) => {
-      console.error(
-        `[DETAILED] Database query failed for system ${systemId}:`,
-        err
-      );
-      return { rows: [] };
-    });
-
-    const queryDuration = Date.now() - queryStartTime;
-    console.log(`[DETAILED] Database query completed in ${queryDuration}ms`);
-
-    // Check if we have valid cached data
-    if (dbResult.rows?.length > 0) {
-      const cacheAge =
-        Date.now() - new Date(dbResult.rows[0].last_updated).getTime();
-      const CACHE_TTL = 24 * 60 * 60 * 1000; // 24 hours
-
-      if (cacheAge < CACHE_TTL) {
-        try {
-          const celestialData = JSON.parse(dbResult.rows[0].celestial_data);
-          if (Array.isArray(celestialData) && celestialData.length > 0) {
-            console.log(
-              `[DETAILED] Using valid cached data for system ${systemId}`
-            );
-            console.timeEnd(`[PERFORMANCE] ensureCelestialData-${systemId}`);
-            return celestialData;
-          }
-        } catch (parseError) {
-          console.error(`[DETAILED] Error parsing cached data:`, parseError);
-        }
-      } else {
-        console.log(`[DETAILED] Cache expired for system ${systemId}`);
-      }
-    }
-
-    // Fetch new data with retries
-    console.log(
-      `[DETAILED] Fetching new celestial data for system ${systemId}`
-    );
-    const fetchStartTime = Date.now();
-
-    const MAX_RETRIES = 3;
-    let lastError = null;
-
-    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-      try {
-        const celestialData = await Promise.race([
-          fetchCelestialData(systemId),
-          timeout,
-        ]);
-
-        if (
-          celestialData &&
-          Array.isArray(celestialData) &&
-          celestialData.length > 0
-        ) {
-          const fetchDuration = Date.now() - fetchStartTime;
-          console.log(
-            `[DETAILED] Fetch successful after ${fetchDuration}ms on attempt ${attempt}`
-          );
-
-          // Store in cache
-          try {
-            await Promise.race([
-              storeCelestialData(systemId, celestialData),
-              timeout,
-            ]);
-            console.log(
-              `[DETAILED] Successfully cached celestial data for system ${systemId}`
-            );
-          } catch (cacheError) {
-            console.error(
-              `[DETAILED] Failed to cache celestial data:`,
-              cacheError
-            );
-            // Continue even if caching fails
-          }
-
-          console.timeEnd(`[PERFORMANCE] ensureCelestialData-${systemId}`);
-          return celestialData;
-        } else {
-          throw new Error("Invalid celestial data format received");
-        }
-      } catch (error) {
-        lastError = error;
-        console.error(`[DETAILED] Attempt ${attempt} failed:`, error);
-
-        if (attempt < MAX_RETRIES) {
-          const backoffTime = Math.min(1000 * Math.pow(2, attempt - 1), 5000);
-          console.log(`[DETAILED] Retrying in ${backoffTime}ms...`);
-          await new Promise((resolve) => setTimeout(resolve, backoffTime));
-        }
-      }
-    }
-
-    // If all retries failed, log and return fallback
-    console.error(
-      `[DETAILED] All ${MAX_RETRIES} attempts failed. Last error:`,
-      lastError
-    );
-    console.log(`[DETAILED] Using fallback data for system ${systemId}`);
-
-    const fallbackData = createFallbackData();
-
-    // Try to cache fallback data to prevent repeated failed attempts
-    try {
-      await storeCelestialData(systemId, fallbackData);
-      console.log(`[DETAILED] Cached fallback data for system ${systemId}`);
-    } catch (fallbackCacheError) {
-      console.error(
-        `[DETAILED] Failed to cache fallback data:`,
-        fallbackCacheError
-      );
-    }
-
-    console.timeEnd(`[PERFORMANCE] ensureCelestialData-${systemId}`);
-    return fallbackData;
-  } catch (error) {
-    console.error(
-      `[DETAILED] Fatal error in ensureCelestialData for system ${systemId}:`,
-      {
-        message: error.message,
-        name: error.name,
-        stack: error.stack,
-      }
-    );
-
-    console.timeEnd(`[PERFORMANCE] ensureCelestialData-${systemId}`);
-    return createFallbackData();
-  }
-}
-
 async function processKillmail(killmail) {
   console.log("Starting processKillmail", {
     killID: killmail.killID,
@@ -2503,7 +2258,7 @@ async function processKillmail(killmail) {
     const systemId = killmail.killmail.solar_system_id;
 
     console.log("Fetching celestial data...");
-    const celestialData = await ensureCelestialData(systemId);
+    const celestialData = await fetchCelestialData(systemId);
     console.log(
       "Celestial data fetched:",
       celestialData && celestialData.length
@@ -2555,12 +2310,10 @@ async function processKillmail(killmail) {
           console.log(
             `Processing camp crusher reward for character ${target.character_id}`
           );
-          // Award bashbucks based on kill value
           const bashbucksAwarded = Math.floor(
             killmail.zkb.totalValue / 1000000
-          ); // 1 bashbuck per million ISK
+          );
 
-          console.log(`Awarding ${bashbucksAwarded} bashbucks`);
           await db.execute({
             sql: "UPDATE camp_crushers SET bashbucks = bashbucks + ? WHERE character_id = ?",
             args: [bashbucksAwarded, target.character_id],
@@ -2571,8 +2324,6 @@ async function processKillmail(killmail) {
             args: [target.id],
           });
 
-          // Emit update to connected clients
-          console.log(`Emitting bashbucks awarded to ${target.character_id}`);
           io.to(target.character_id).emit("bashbucksAwarded", {
             amount: bashbucksAwarded,
             newTotal: target.bashbucks + bashbucksAwarded,
@@ -2588,7 +2339,6 @@ async function processKillmail(killmail) {
       console.error("Error processing camp crusher rewards:", error);
     }
 
-    console.log("Returning processed killmail");
     return {
       ...killmail,
       pinpoints: pinpointData,
