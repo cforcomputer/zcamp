@@ -14,8 +14,15 @@ export const activeRoams = writable([]);
 
 export const activeCamps = writable([]);
 export const filteredCamps = derived([activeCamps], ([$activeCamps]) => {
-  return $activeCamps
-    .map((camp) => ({
+  return $activeCamps.map((camp) => {
+    // Calculate firstKillTime if not present or invalid
+    const firstKillTime =
+      camp.firstKillTime ||
+      Math.min(
+        ...camp.kills.map((k) => new Date(k.killmail.killmail_time).getTime())
+      );
+
+    return {
       ...camp,
       nonPodKills: camp.kills.filter(
         (k) => k.killmail.victim.ship_type_id !== CAPSULE_ID
@@ -24,11 +31,14 @@ export const filteredCamps = derived([activeCamps], ([$activeCamps]) => {
       lastKillTime: new Date(camp.lastKill).getTime(),
       age: Date.now() - new Date(camp.lastKill).getTime(),
       isActive: Date.now() - new Date(camp.lastKill).getTime() <= CAMP_TIMEOUT,
-      firstKillTime: camp.firstKillTime,
-      latestKillTime: camp.latestKillTime,
-    }))
-    .filter((camp) => camp.nonPodKills > 0)
-    .sort((a, b) => b.probability - a.probability);
+      firstKillTime: firstKillTime, // Ensure this is set
+      latestKillTime:
+        camp.latestKillTime ||
+        Math.max(
+          ...camp.kills.map((k) => new Date(k.killmail.killmail_time).getTime())
+        ),
+    };
+  });
 });
 
 export const filteredRoams = derived(
@@ -486,34 +496,22 @@ function isNPCKill(killmail) {
 }
 
 function getMetrics(kills, now) {
-  // Find earliest and latest kill times without sorting
-  let earliestKill = Infinity;
-  let latestKill = 0;
-
-  kills.forEach((kill) => {
-    const killTime = new Date(kill.killmail.killmail_time).getTime();
-    if (killTime < earliestKill) {
-      earliestKill = killTime;
-    }
-    if (killTime > latestKill) {
-      latestKill = killTime;
-    }
-  });
+  const killTimes = kills.map((k) =>
+    new Date(k.killmail.killmail_time).getTime()
+  );
+  const earliestKillTime = Math.min(...killTimes);
+  const lastKillTime = Math.max(...killTimes);
 
   return {
-    firstSeen: earliestKill,
-    campDuration: Math.max(
-      0,
-      Math.floor((latestKill - earliestKill) / (1000 * 60))
-    ),
-    inactivityDuration: Math.max(
-      0,
-      Math.floor((now - latestKill) / (1000 * 60))
-    ),
+    firstSeen: earliestKillTime,
+    // Duration is from earliest kill to NOW
+    campDuration: Math.floor((now - earliestKillTime) / (1000 * 60)),
+    // Activity is from latest kill to now
+    inactivityDuration: Math.floor((now - lastKillTime) / (1000 * 60)),
     podKills: kills.filter((k) => k.killmail.victim.ship_type_id === CAPSULE_ID)
       .length,
     killFrequency:
-      kills.length / Math.max(1, (latestKill - earliestKill) / (1000 * 60)),
+      kills.length / Math.max(1, (now - earliestKillTime) / (1000 * 60)),
     avgValuePerKill:
       kills.reduce((sum, k) => sum + k.zkb.totalValue, 0) / kills.length,
   };
@@ -632,14 +630,7 @@ export function updateCamps(killmail) {
     existingCamp.lastKill = killmail.killmail.killmail_time;
     existingCamp.totalValue += killmail.zkb.totalValue;
     existingCamp.composition = updateCampComposition(existingCamp, killmail);
-
-    // Calculate metrics using the tracked timestamps
-    existingCamp.metrics = {
-      ...getMetrics(existingCamp.kills, now),
-      campDuration: Math.floor(
-        (existingCamp.latestKillTime - existingCamp.firstKillTime) / (1000 * 60)
-      ),
-    };
+    existingCamp.metrics = getMetrics(existingCamp.kills, now);
 
     existingCamp.probability = calculateCampProbability(existingCamp);
   } else {
@@ -651,8 +642,8 @@ export function updateCamps(killmail) {
       kills: [killmail],
       totalValue: killmail.zkb.totalValue,
       lastKill: killmail.killmail.killmail_time,
-      firstKillTime: killTime, // Add this
-      latestKillTime: killTime, // Add this
+      firstKillTime: killTime,
+      latestKillTime: killTime,
       state: CAMP_STATES.ACTIVE,
       originalAttackers: new Set(),
       activeAttackers: new Set(),
@@ -693,9 +684,18 @@ socket.on("initialCamps", (camps) => {
         ...camp,
         firstKillTime:
           camp.firstKillTime ||
-          new Date(camp.kills[0]?.killmail.killmail_time).getTime(),
+          Math.min(
+            ...camp.kills.map((k) =>
+              new Date(k.killmail.killmail_time).getTime()
+            )
+          ),
         latestKillTime:
-          camp.latestKillTime || new Date(camp.lastKill).getTime(),
+          camp.latestKillTime ||
+          Math.max(
+            ...camp.kills.map((k) =>
+              new Date(k.killmail.killmail_time).getTime()
+            )
+          ),
       }))
   );
 });
@@ -708,9 +708,18 @@ socket.on("campUpdate", (camps) => {
         ...camp,
         firstKillTime:
           camp.firstKillTime ||
-          new Date(camp.kills[0]?.killmail.killmail_time).getTime(),
+          Math.min(
+            ...camp.kills.map((k) =>
+              new Date(k.killmail.killmail_time).getTime()
+            )
+          ),
         latestKillTime:
-          camp.latestKillTime || new Date(camp.lastKill).getTime(),
+          camp.latestKillTime ||
+          Math.max(
+            ...camp.kills.map((k) =>
+              new Date(k.killmail.killmail_time).getTime()
+            )
+          ),
       }))
   );
 });

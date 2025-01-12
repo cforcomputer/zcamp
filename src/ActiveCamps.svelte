@@ -138,8 +138,8 @@
           <div class="stat-row">
             <span class="stat-label">Duration:</span>
             <span class="stat-value">
-              {#if camp.metrics?.campDuration !== undefined}
-                {Math.floor(camp.metrics.campDuration)}m active
+              {#if camp.firstKillTime}
+                {getTimeAgo(camp.firstKillTime)}
               {:else}
                 0m active
               {/if}
