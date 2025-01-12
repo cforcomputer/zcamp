@@ -136,10 +136,17 @@
 
         <div class="camp-stats">
           <div class="stat-row">
+            <span class="stat-label">System:</span>
+            <span class="stat-value">
+              {camp.kills[0]?.pinpoints?.celestialData?.solarsystemname ||
+                camp.systemId}
+            </span>
+          </div>
+          <div class="stat-row">
             <span class="stat-label">Duration:</span>
             <span class="stat-value">
               {#if camp.firstKillTime}
-                {getTimeAgo(camp.firstKillTime)}
+                {getTimeAgo(camp.firstKillTime).replace(" ago", "")}
               {:else}
                 0m active
               {/if}

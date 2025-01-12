@@ -14,15 +14,8 @@ export const activeRoams = writable([]);
 
 export const activeCamps = writable([]);
 export const filteredCamps = derived([activeCamps], ([$activeCamps]) => {
-  return $activeCamps.map((camp) => {
-    // Calculate firstKillTime if not present or invalid
-    const firstKillTime =
-      camp.firstKillTime ||
-      Math.min(
-        ...camp.kills.map((k) => new Date(k.killmail.killmail_time).getTime())
-      );
-
-    return {
+  return $activeCamps
+    .map((camp) => ({
       ...camp,
       nonPodKills: camp.kills.filter(
         (k) => k.killmail.victim.ship_type_id !== CAPSULE_ID
@@ -31,14 +24,11 @@ export const filteredCamps = derived([activeCamps], ([$activeCamps]) => {
       lastKillTime: new Date(camp.lastKill).getTime(),
       age: Date.now() - new Date(camp.lastKill).getTime(),
       isActive: Date.now() - new Date(camp.lastKill).getTime() <= CAMP_TIMEOUT,
-      firstKillTime: firstKillTime, // Ensure this is set
-      latestKillTime:
-        camp.latestKillTime ||
-        Math.max(
-          ...camp.kills.map((k) => new Date(k.killmail.killmail_time).getTime())
-        ),
-    };
-  });
+      firstKillTime: camp.firstKillTime,
+      latestKillTime: camp.latestKillTime,
+    }))
+    .filter((camp) => camp.nonPodKills > 0)
+    .sort((a, b) => b.probability - a.probability); // Add this line back
 });
 
 export const filteredRoams = derived(
@@ -130,9 +120,9 @@ export const CAMP_PROBABILITY_FACTORS = {
     22452: { weight: 0.44 }, // Heretic
     22460: { weight: 0.44 }, // Eris
     12013: { weight: 0.4 }, // Broadsword
-    12017: { weight: 0.4 }, // Onyx
+    11995: { weight: 0.4 }, // Onyx
     12021: { weight: 0.4 }, // Phobos
-    12025: { weight: 0.4 }, // Devoter
+    12017: { weight: 0.4 }, // Devoter
     29984: { weight: 0.15 }, // Tengu
     29990: { weight: 0.29 }, // Loki
     11174: { weight: 0.3 }, // Keres
