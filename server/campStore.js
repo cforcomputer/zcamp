@@ -15,19 +15,19 @@ export const activeRoams = writable([]);
 export const activeCamps = writable([]);
 export const filteredCamps = derived([activeCamps], ([$activeCamps]) => {
   return $activeCamps
-    .filter((camp) => {
-      const nonCapsuleKills = camp.kills.filter(
-        (k) => k.killmail.victim.ship_type_id !== CAPSULE_ID
-      );
-      return nonCapsuleKills.length >= 2 && camp.probability >= 30;
-    })
     .map((camp) => ({
       ...camp,
+      nonPodKills: camp.kills.filter(
+        (k) => k.killmail.victim.ship_type_id !== CAPSULE_ID
+      ).length,
       composition: camp.composition || DEFAULT_COMPOSITION,
       lastKillTime: new Date(camp.lastKill).getTime(),
       age: Date.now() - new Date(camp.lastKill).getTime(),
       isActive: Date.now() - new Date(camp.lastKill).getTime() <= CAMP_TIMEOUT,
+      firstKillTime: camp.firstKillTime,
+      latestKillTime: camp.latestKillTime,
     }))
+    .filter((camp) => camp.nonPodKills > 0)
     .sort((a, b) => b.probability - a.probability);
 });
 
@@ -156,10 +156,10 @@ export const CAMP_PROBABILITY_FACTORS = {
   },
 
   PERMANENT_CAMPS: {
-    30002813: { gates: ["Nourvukaiken", "Kedama"], weight: 0.36 }, // Tama
-    30003068: { gates: ["Miroitem", "Crielere"], weight: 0.25 }, // Rancer
-    30000142: { gates: ["Perimeter"], weight: 0.15 }, // Jita
-    30002647: { gates: ["Iyen-Oursta"], weight: 0.25 }, // Ignoitton
+    30002813: { gates: ["Nourvukaiken", "Kedama"], weight: 0.5 }, // Tama
+    30003068: { gates: ["Miroitem", "Crielere"], weight: 0.5 }, // Rancer
+    30000142: { gates: ["Perimeter"], weight: 0.25 }, // Jita
+    30002647: { gates: ["Iyen-Oursta"], weight: 0.3 }, // Ignoitton
   },
   CONSISTENCY: {
     SAME_CHARS: 0.25, // 25% bonus for same characters across kills
@@ -278,28 +278,65 @@ function ensureSets(camp) {
  * @returns {number} - A probability score between 0-100
  */
 function calculateCampProbability(camp) {
-  // First check for CONCORD involvement - if present, this is a gank not a camp
-  const hasConcord = camp.kills.some((kill) =>
-    kill.killmail.attackers.some(
-      (attacker) =>
-        kill.shipCategories?.victim ===
-        CAMP_PROBABILITY_FACTORS.SHIP_CATEGORIES.CONCORD
+  // Check for NPC involvement first
+  if (camp.kills.some(isNPCKill)) {
+    return 0;
+  }
+
+  // Check for invalid attackers or victims
+  const hasInvalidAttackers = camp.kills.some((kill) =>
+    kill.shipCategories?.attackers.some((attacker) =>
+      ["concord", "structure"].includes(attacker.category)
     )
   );
-  if (hasConcord) return 0;
+
+  if (hasInvalidAttackers) return 0;
+
+  // Get valid kills (non-pod, non-structure victims)
+  const validKills = camp.kills.filter(
+    (kill) =>
+      kill.killmail.victim.ship_type_id !== CAPSULE_ID &&
+      kill.shipCategories?.victim !== "structure"
+  );
+
+  if (validKills.length === 0) return 0;
 
   // Initialize tracking variables
   const now = Date.now();
   let probability = 0;
 
-  // Get gate kills and establish base probability
-  const gateKills = camp.kills.filter(isGateCamp);
+  // Get valid gate kills
+  const gateKills = validKills.filter(isGateCamp);
+
+  if (gateKills.length === 0) return 0;
 
   // Set initial probability based on number of kills
   probability =
     gateKills.length === 1
       ? CAMP_PROBABILITY_FACTORS.BASE.SINGLE_KILL
       : CAMP_PROBABILITY_FACTORS.BASE.MULTI_KILL;
+
+  // Apply time-based inactivity penalty first
+  const lastKillTime = new Date(camp.lastKill).getTime();
+  const minutesSinceLastKill = (now - lastKillTime) / (60 * 1000);
+
+  if (minutesSinceLastKill > 25) {
+    // Reduce by 1% per minute after 25 minutes
+    const reductionFactor = Math.min(0.95, (minutesSinceLastKill - 25) * 0.01);
+    probability *= 1 - reductionFactor;
+  }
+
+  // Check if this is a known camping system/gate - apply early for higher impact
+  const systemData = CAMP_PROBABILITY_FACTORS.PERMANENT_CAMPS[camp.systemId];
+  if (
+    systemData &&
+    systemData.gates.some((gate) =>
+      camp.stargateName.toLowerCase().includes(gate.toLowerCase())
+    )
+  ) {
+    // Increase base probability for known camping locations
+    probability += systemData.weight;
+  }
 
   // Get chronological kill data for pattern analysis
   const killTimes = gateKills
@@ -365,20 +402,8 @@ function calculateCampProbability(camp) {
     probability += CAMP_PROBABILITY_FACTORS.CONSISTENCY.SAME_CORPS;
   }
 
-  // Check if this is a known camping system/gate
-  const systemData = CAMP_PROBABILITY_FACTORS.PERMANENT_CAMPS[camp.systemId];
-  if (
-    systemData &&
-    systemData.gates.some((gate) =>
-      camp.stargateName.toLowerCase().includes(gate.toLowerCase())
-    )
-  ) {
-    // Apply bonus for known camping locations
-    probability += systemData.weight;
-  }
-
   // Check for industrial/mining victims
-  const hasVulnerableVictims = camp.kills.some(
+  const hasVulnerableVictims = validKills.some(
     (kill) =>
       kill.shipCategories?.victim ===
         CAMP_PROBABILITY_FACTORS.SHIP_CATEGORIES.INDUSTRIAL ||
@@ -389,20 +414,8 @@ function calculateCampProbability(camp) {
     probability += 0.1; // 10% bonus for targeting typical gate camp victims
   }
 
-  // Apply inactivity penalty if needed
-  const lastKillTime = new Date(camp.lastKill).getTime();
-  const minutesSinceLastKill = (now - lastKillTime) / (60 * 1000);
-  if (
-    minutesSinceLastKill >
-    CAMP_PROBABILITY_FACTORS.TIME_WEIGHTS.INACTIVITY.start
-  ) {
-    probability += CAMP_PROBABILITY_FACTORS.TIME_WEIGHTS.INACTIVITY.penalty;
-  }
-
-  // Convert to percentage and clamp between 30-95%
-  // - Minimum 30% ensures low probability camps don't display
-  // - Maximum 95% prevents absolute certainty
-  return Math.max(30, Math.min(95, probability * 100));
+  // Convert to percentage at the very end and clamp between 0-95
+  return Math.max(0, Math.min(95, probability * 100));
 }
 
 // Exported Functions
@@ -459,6 +472,50 @@ function updateCampComposition(camp, killmail) {
     killedCount: camp.killedAttackers.size,
     numCorps: camp.involvedCorporations.length,
     numAlliances: camp.involvedAlliances.length,
+  };
+}
+
+function isNPCKill(killmail) {
+  // Check if killmail is tagged as NPC
+  const isNPCTagged = killmail.zkb?.labels?.includes("npc");
+
+  // Check if victim ship is an NPC type
+  const isNPCShipType = killmail.shipCategories?.victim === "npc";
+
+  return isNPCTagged || isNPCShipType;
+}
+
+function getMetrics(kills, now) {
+  // Find earliest and latest kill times without sorting
+  let earliestKill = Infinity;
+  let latestKill = 0;
+
+  kills.forEach((kill) => {
+    const killTime = new Date(kill.killmail.killmail_time).getTime();
+    if (killTime < earliestKill) {
+      earliestKill = killTime;
+    }
+    if (killTime > latestKill) {
+      latestKill = killTime;
+    }
+  });
+
+  return {
+    firstSeen: earliestKill,
+    campDuration: Math.max(
+      0,
+      Math.floor((latestKill - earliestKill) / (1000 * 60))
+    ),
+    inactivityDuration: Math.max(
+      0,
+      Math.floor((now - latestKill) / (1000 * 60))
+    ),
+    podKills: kills.filter((k) => k.killmail.victim.ship_type_id === CAPSULE_ID)
+      .length,
+    killFrequency:
+      kills.length / Math.max(1, (latestKill - earliestKill) / (1000 * 60)),
+    avgValuePerKill:
+      kills.reduce((sum, k) => sum + k.zkb.totalValue, 0) / kills.length,
   };
 }
 
@@ -555,48 +612,38 @@ export function updateCamps(killmail) {
     lastExportTime = now;
   }
 
-  function getMetrics(kills, now) {
-    const sortedKills = [...kills].sort(
-      (a, b) =>
-        new Date(a.killmail.killmail_time).getTime() -
-        new Date(b.killmail.killmail_time).getTime()
-    );
-
-    const firstKill = new Date(sortedKills[0].killmail.killmail_time).getTime();
-    const lastKill = new Date(
-      sortedKills[sortedKills.length - 1].killmail.killmail_time
-    ).getTime();
-
-    return {
-      firstSeen: firstKill,
-      campDuration: Math.max(
-        0,
-        Math.floor((lastKill - firstKill) / (1000 * 60))
-      ),
-      inactivityDuration: Math.max(
-        0,
-        Math.floor((now - lastKill) / (1000 * 60))
-      ),
-      podKills: kills.filter(
-        (k) => k.killmail.victim.ship_type_id === CAPSULE_ID
-      ).length,
-      killFrequency:
-        kills.length / Math.max(1, (lastKill - firstKill) / (1000 * 60)),
-      avgValuePerKill:
-        kills.reduce((sum, k) => sum + k.zkb.totalValue, 0) / kills.length,
-    };
-  }
-
   const existingCamp = currentCamps.find((c) => c.id === campId);
 
   if (existingCamp) {
+    const killTime = new Date(killmail.killmail.killmail_time).getTime();
+
+    // Update earliest/latest kill times
+    if (!existingCamp.firstKillTime || killTime < existingCamp.firstKillTime) {
+      existingCamp.firstKillTime = killTime;
+    }
+    if (
+      !existingCamp.latestKillTime ||
+      killTime > existingCamp.latestKillTime
+    ) {
+      existingCamp.latestKillTime = killTime;
+    }
+
     existingCamp.kills.push(killmail);
     existingCamp.lastKill = killmail.killmail.killmail_time;
     existingCamp.totalValue += killmail.zkb.totalValue;
     existingCamp.composition = updateCampComposition(existingCamp, killmail);
-    existingCamp.metrics = getMetrics(existingCamp.kills, now);
+
+    // Calculate metrics using the tracked timestamps
+    existingCamp.metrics = {
+      ...getMetrics(existingCamp.kills, now),
+      campDuration: Math.floor(
+        (existingCamp.latestKillTime - existingCamp.firstKillTime) / (1000 * 60)
+      ),
+    };
+
     existingCamp.probability = calculateCampProbability(existingCamp);
   } else {
+    const killTime = new Date(killmail.killmail.killmail_time).getTime();
     const newCamp = {
       id: campId,
       systemId,
@@ -604,6 +651,8 @@ export function updateCamps(killmail) {
       kills: [killmail],
       totalValue: killmail.zkb.totalValue,
       lastKill: killmail.killmail.killmail_time,
+      firstKillTime: killTime, // Add this
+      latestKillTime: killTime, // Add this
       state: CAMP_STATES.ACTIVE,
       originalAttackers: new Set(),
       activeAttackers: new Set(),
@@ -613,7 +662,10 @@ export function updateCamps(killmail) {
     };
 
     newCamp.composition = updateCampComposition(newCamp, killmail);
-    newCamp.metrics = getMetrics([killmail], now);
+    newCamp.metrics = {
+      ...getMetrics([killmail], now),
+      campDuration: 0, // Initialize to 0 for new camps
+    };
     newCamp.probability = calculateCampProbability(newCamp);
     currentCamps.push(newCamp);
   }
@@ -635,13 +687,31 @@ socket.on("exportComplete", (response) => {
 
 socket.on("initialCamps", (camps) => {
   activeCamps.set(
-    camps.map((camp) => ensureSets(camp)).map((camp) => ({ ...camp }))
+    camps
+      .map((camp) => ensureSets(camp))
+      .map((camp) => ({
+        ...camp,
+        firstKillTime:
+          camp.firstKillTime ||
+          new Date(camp.kills[0]?.killmail.killmail_time).getTime(),
+        latestKillTime:
+          camp.latestKillTime || new Date(camp.lastKill).getTime(),
+      }))
   );
 });
 
 socket.on("campUpdate", (camps) => {
   activeCamps.set(
-    camps.map((camp) => ensureSets(camp)).map((camp) => ({ ...camp }))
+    camps
+      .map((camp) => ensureSets(camp))
+      .map((camp) => ({
+        ...camp,
+        firstKillTime:
+          camp.firstKillTime ||
+          new Date(camp.kills[0]?.killmail.killmail_time).getTime(),
+        latestKillTime:
+          camp.latestKillTime || new Date(camp.lastKill).getTime(),
+      }))
   );
 });
 

@@ -4,6 +4,8 @@
   import LocationTracker from "./LocationTracker.svelte";
   import CampCrusher from "./CampCrusher.svelte";
   import { CAMP_PROBABILITY_FACTORS } from "../server/campStore.js";
+  import { CAPSULE_ID } from "../server/campStore.js";
+
   const { THREAT_SHIPS } = CAMP_PROBABILITY_FACTORS;
 
   let camps = [];
@@ -113,23 +115,33 @@
             >
               {Math.round(camp.probability)}% Confidence
             </span>
+            <button
+              class="zk-button"
+              title="View Latest Kill"
+              on:click|stopPropagation={(e) => {
+                e.preventDefault();
+                const latestKill = camp.kills[camp.kills.length - 1];
+                if (latestKill) {
+                  window.open(
+                    `https://zkillboard.com/kill/${latestKill.killID}/`,
+                    "_blank"
+                  );
+                }
+              }}
+            >
+              Last Kill
+            </button>
           </div>
         </div>
 
         <div class="camp-stats">
           <div class="stat-row">
-            <span class="stat-label">System:</span>
-            <span class="stat-value"
-              >{camp.kills[0]?.pinpoints?.celestialData?.solarsystemname ||
-                camp.systemId}</span
-            >
-          </div>
-
-          <div class="stat-row">
             <span class="stat-label">Duration:</span>
             <span class="stat-value">
-              {#if camp.metrics?.campDuration}
+              {#if camp.metrics?.campDuration !== undefined}
                 {Math.floor(camp.metrics.campDuration)}m active
+              {:else}
+                0m active
               {/if}
             </span>
           </div>
@@ -137,7 +149,9 @@
           <div class="stat-row">
             <span class="stat-label">Activity:</span>
             <span class="stat-value">
-              {camp.kills.length} kills
+              {camp.kills.filter(
+                (k) => k.killmail.victim.ship_type_id !== CAPSULE_ID
+              ).length} kills
               {#if camp.metrics?.podKills > 0}
                 ({camp.metrics.podKills} pods)
               {/if}

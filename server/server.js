@@ -2461,7 +2461,7 @@ async function pollRedisQ() {
     });
   }
 
-  const delay = 1000;
+  const delay = 20; // 20 ms --> Delay has to stay low, otherwise it can't process the entire backlog.
   setTimeout(pollRedisQ, delay);
 }
 
