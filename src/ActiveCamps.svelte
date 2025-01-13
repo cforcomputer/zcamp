@@ -1,4 +1,3 @@
-<!-- new src/ActiveCamps.svelte -->
 <script>
   import { filteredCamps } from "../server/campStore.js";
   import LocationTracker from "./LocationTracker.svelte";
@@ -68,6 +67,21 @@
           )
       )
     );
+  }
+
+  function formatProbabilityLog(log) {
+    if (!log || !Array.isArray(log)) {
+      return "No probability log available.";
+    }
+
+    return log
+      .map((entry) => {
+        if (typeof entry === "object") {
+          return JSON.stringify(entry, null, 2);
+        }
+        return String(entry);
+      })
+      .join("\n");
   }
 </script>
 
@@ -231,6 +245,12 @@
             <span class="stat-value time">{getTimeAgo(camp.lastKill)}</span>
           </div>
         </div>
+
+        <div class="probability-log-container">
+          <pre class="probability-log">{formatProbabilityLog(
+              camp.probabilityLog
+            )}</pre>
+        </div>
       </button>
     {/each}
 
@@ -264,6 +284,7 @@
     color: white;
     appearance: none;
     margin: 0;
+    position: relative; /* To position the tooltip */
   }
 
   .camp-indicators {
@@ -304,19 +325,6 @@
   .killed-count {
     color: #ff4444;
     font-weight: bold;
-  }
-
-  .crashed-banner {
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%) rotate(-15deg);
-    background: #ff4444;
-    color: white;
-    padding: 0.5em 1em;
-    font-weight: bold;
-    border-radius: 4px;
-    z-index: 1;
   }
 
   .camp-card[data-state="CRASHED"] {
@@ -398,5 +406,36 @@
   h3 {
     margin: 0;
     color: white;
+  }
+
+  .probability-log-container {
+    display: none;
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    z-index: 9999;
+    pointer-events: none; /* Prevent log from blocking interactions */
+  }
+
+  .probability-log {
+    background-color: rgba(0, 0, 0, 0.95);
+    color: white;
+    padding: 1em;
+    border-radius: 4px;
+    white-space: pre-wrap;
+    max-width: 500px;
+    max-height: 400px;
+    overflow-y: auto;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    font-family: monospace;
+    font-size: 0.9em;
+    line-height: 1.4;
+    margin-top: 0.5em;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+  }
+
+  .camp-card:hover .probability-log-container {
+    display: block;
   }
 </style>

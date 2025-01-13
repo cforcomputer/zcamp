@@ -2270,7 +2270,7 @@ async function processKillmail(killmail) {
       celestialData,
       killmail.killmail.victim.position
     );
-    console.log("Pinpoint data calculated:", pinpointData);
+    // console.log("Pinpoint data calculated:", pinpointData);
 
     // Get the first celestial entry which contains system info
     const systemInfo = celestialData?.[0];

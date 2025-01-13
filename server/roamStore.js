@@ -12,13 +12,13 @@ export class RoamStore {
   }
 
   updateRoamingGangs(killmail) {
-    console.log("--- roamStore.js: Roaming Gang Update Debug ---");
-    console.log("Processing killmail:", {
-      killID: killmail.killID,
-      systemId: killmail.killmail.solar_system_id,
-      time: killmail.killmail.killmail_time,
-      attackers: killmail.killmail.attackers.length,
-    });
+    // console.log("--- roamStore.js: Roaming Gang Update Debug ---");
+    // console.log("Processing killmail:", {
+    //   killID: killmail.killID,
+    //   systemId: killmail.killmail.solar_system_id,
+    //   time: killmail.killmail.killmail_time,
+    //   attackers: killmail.killmail.attackers.length,
+    // });
 
     const now = Date.now();
 
