@@ -581,7 +581,10 @@ export function updateCamps(killmail) {
     existingCamp.composition = updateCampComposition(existingCamp, killmail);
     existingCamp.metrics = getMetrics(existingCamp.kills, now);
 
-    existingCamp.probability = calculateCampProbability(existingCamp);
+    // Calculate probability and explicitly preserve the logs
+    const result = calculateCampProbability(existingCamp);
+    existingCamp.probability = result;
+    existingCamp.probabilityLog = existingCamp.probabilityLog; // Preserve the logs
   } else {
     const killTime = new Date(killmail.killmail.killmail_time).getTime();
     const newCamp = {
@@ -605,7 +608,11 @@ export function updateCamps(killmail) {
       ...getMetrics([killmail], now),
       campDuration: 0, // Initialize to 0 for new camps
     };
-    newCamp.probability = calculateCampProbability(newCamp);
+
+    // Calculate probability and explicitly preserve the logs
+    const result = calculateCampProbability(newCamp);
+    newCamp.probability = result;
+    newCamp.probabilityLog = newCamp.probabilityLog; // Preserve the logs
     currentCamps.push(newCamp);
   }
 

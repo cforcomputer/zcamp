@@ -285,6 +285,11 @@
     appearance: none;
     margin: 0;
     position: relative; /* To position the tooltip */
+    z-index: 1;
+  }
+
+  .camp-card:hover {
+    z-index: 100; /* Higher z-index on hover to appear above other cards */
   }
 
   .camp-indicators {
@@ -414,7 +419,7 @@
     top: 100%;
     left: 0;
     right: 0;
-    z-index: 9999;
+    z-index: 99;
     pointer-events: none; /* Prevent log from blocking interactions */
   }
 
