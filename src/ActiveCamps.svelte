@@ -1,6 +1,5 @@
 <script>
   import { filteredCamps } from "../server/campStore.js";
-  import LocationTracker from "./LocationTracker.svelte";
   import CampCrusher from "./CampCrusher.svelte";
   import { CAMP_PROBABILITY_FACTORS } from "../server/campStore.js";
   import { CAPSULE_ID } from "../server/campStore.js";
@@ -95,7 +94,6 @@
   <CampCrusher />
   <div class="header">
     <h2>Active Gate Camps</h2>
-    <LocationTracker />
   </div>
   <div class="camp-grid">
     {#each camps as camp}

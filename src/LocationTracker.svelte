@@ -33,14 +33,15 @@
       msg.rate = 0.9;
       msg.pitch = 1.1;
     }
-    window.speechSynthesis.cancel(); // Cancel any ongoing speech
+    window.speechSynthesis.cancel();
     window.speechSynthesis.speak(msg);
   }
+
   function getCampSummary(camps) {
-    if (!camps) return "No camp data available";
+    if (!camps) return "No camp data";
 
     if (camps.current.length > 0) {
-      return `Warning! Active camps in your current system at: ${camps.current.map((c) => c.stargateName).join(", ")}`;
+      return `⚠️ Active camps at: ${camps.current.map((c) => c.stargateName).join(", ")}`;
     }
 
     if (camps.connected.length > 0) {
@@ -51,14 +52,14 @@
           const gateName =
             camp.stargateName.match(/\(([^)]+)\)/)?.[1] || camp.stargateName;
           return systemName
-            ? `${systemName} (${gateName} gate, ${Math.round(camp.probability)}% confidence)`
+            ? `${systemName} (${gateName} gate, ${Math.round(camp.probability)}%)`
             : null;
         })
         .filter(Boolean);
-      return `Warning! Active camps in connected systems: ${connectedCampInfo.join(", ")}`;
+      return `⚠️ Camps in connected systems: ${connectedCampInfo.join(", ")}`;
     }
 
-    return "There are no active camps in your current system or direct system connections. Cleared to jump.";
+    return "✓ No active camps";
   }
 
   // Subscribe to location changes
@@ -84,13 +85,11 @@
           const userData = JSON.parse(sessionStorage.getItem("user"));
           trackedCharacter = userData?.character_name;
 
-          // Force a camp check regardless of current location
           if ($currentLocation) {
             const campSummary = getCampSummary($currentLocation.camps);
             speak(
               `Tracking enabled for: ${trackedCharacter}. Your current system is ${$currentLocation.systemName}. ${campSummary}`
             );
-            // Reset lastSystemId to ensure we check camps on next system change
             lastSystemId = null;
           }
         }
@@ -113,53 +112,40 @@
 </script>
 
 <div class="location-tracker">
-  <div class="tracker-header">
+  <div class="tracker-content">
     <label class="toggle">
       <input type="checkbox" checked={isTracking} on:change={toggleTracking} />
       <span class="slider" />
-      <span class="label-text">Track Location</span>
+      <span class="label-text">Track</span>
     </label>
-    <span class="tracking-status">
-      {#if isTracking}
-        Tracking: {trackedCharacter || "Active"}
-      {:else}
-        Tracking Disabled
-      {/if}
-    </span>
+
+    {#if $currentLocation}
+      <div class="system-info">
+        <span class="system-name">{$currentLocation.systemName}</span>
+        <span class="camp-status">{getCampSummary($currentLocation.camps)}</span
+        >
+      </div>
+    {/if}
+
+    {#if $locationError}
+      <span class="error">{$locationError}</span>
+    {/if}
   </div>
-
-  {#if $currentLocation}
-    <div class="system-info">
-      <p class="system-name">Current System: {$currentLocation.systemName}</p>
-      <p class="camp-status">{getCampSummary($currentLocation.camps)}</p>
-    </div>
-  {/if}
-
-  {#if $locationError}
-    <p class="error">{$locationError}</p>
-  {/if}
 </div>
 
 <style>
   .location-tracker {
-    padding: 1rem;
-    display: flex;
-    flex-direction: column;
-    gap: 1rem;
-    background: rgba(0, 0, 0, 0.3);
-    border-radius: 4px;
-  }
-
-  .tracker-header {
     display: flex;
     align-items: center;
-    justify-content: space-between;
+    padding: 0 1rem;
+    height: 100%;
+    background: transparent;
   }
 
-  .system-name {
-    font-size: 1.1em;
-    font-weight: 500;
-    color: #ffd700;
+  .tracker-content {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
   }
 
   .toggle {
@@ -176,8 +162,8 @@
 
   .slider {
     position: relative;
-    width: 40px;
-    height: 20px;
+    width: 32px;
+    height: 16px;
     background: #444;
     border-radius: 20px;
     transition: 0.3s;
@@ -186,8 +172,8 @@
   .slider:before {
     content: "";
     position: absolute;
-    width: 16px;
-    height: 16px;
+    width: 12px;
+    height: 12px;
     border-radius: 50%;
     left: 2px;
     top: 2px;
@@ -200,26 +186,34 @@
   }
 
   input:checked + .slider:before {
-    transform: translateX(20px);
+    transform: translateX(16px);
   }
 
-  .tracking-status {
+  .system-info {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
     color: white;
     font-size: 0.9em;
   }
 
-  .system-info {
-    color: white;
-    margin: 0;
+  .system-name {
+    color: #ffd700;
+    font-weight: 500;
+  }
+
+  .camp-status {
+    color: #fff;
   }
 
   .error {
     color: #ff4444;
-    margin: 0;
+    font-size: 0.8em;
   }
 
   .label-text {
     color: white;
     user-select: none;
+    font-size: 0.9em;
   }
 </style>

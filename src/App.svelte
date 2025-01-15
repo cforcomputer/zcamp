@@ -12,6 +12,7 @@
   import CampCrusher from "./CampCrusher.svelte";
   import { initializeSettings } from "./store.js";
   import Leaderboard from "./Leaderboard.svelte";
+  import LocationTracker from "./LocationTracker.svelte";
 
   let loggedIn = false;
   let username = "";
@@ -89,38 +90,43 @@
   {#if !loggedIn}
     <Login on:login={handleLogin} />
   {:else}
-    <div class="nav-tabs">
-      <button
-        class:active={currentPage === "kills"}
-        on:click={() => (currentPage = "kills")}
-      >
-        Kills
-      </button>
-      <button
-        class:active={currentPage === "battles"}
-        on:click={() => (currentPage = "battles")}
-      >
-        Active Battles
-      </button>
-      <button
-        class:active={currentPage === "camps"}
-        on:click={() => (currentPage = "camps")}
-      >
-        Gate Camps
-      </button>
-      <button
-        class:active={currentPage === "gangs"}
-        on:click={() => (currentPage = "gangs")}
-      >
-        Gangs Map
-      </button>
-      <button
-        class:active={currentPage === "bountyboard"}
-        on:click={() => (currentPage = "bountyboard")}
-      >
-        Bountyboard
-      </button>
-    </div>
+    <nav class="navigation">
+      <div class="nav-tabs">
+        <button
+          class:active={currentPage === "kills"}
+          on:click={() => (currentPage = "kills")}
+        >
+          Kills
+        </button>
+        <button
+          class:active={currentPage === "battles"}
+          on:click={() => (currentPage = "battles")}
+        >
+          Active Battles
+        </button>
+        <button
+          class:active={currentPage === "camps"}
+          on:click={() => (currentPage = "camps")}
+        >
+          Gate Camps
+        </button>
+        <button
+          class:active={currentPage === "gangs"}
+          on:click={() => (currentPage = "gangs")}
+        >
+          Gangs Map
+        </button>
+        <button
+          class:active={currentPage === "bountyboard"}
+          on:click={() => (currentPage = "bountyboard")}
+        >
+          Bountyboard
+        </button>
+      </div>
+      <div class="nav-right">
+        <LocationTracker />
+      </div>
+    </nav>
 
     {#if currentPage === "kills"}
       <div class="dashboard">
@@ -152,15 +158,55 @@
 <style>
   main {
     text-align: center;
-    padding: 1em;
     max-width: 1200px;
     margin: 0 auto;
+    padding-top: 0;
+  }
+
+  .navigation {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: rgba(0, 0, 0, 0.3);
+    padding: 0.5rem 1rem;
+    margin-bottom: 1rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  }
+
+  .nav-tabs {
+    display: flex;
+    gap: 0.5rem;
+  }
+
+  .nav-right {
+    display: flex;
+    align-items: center;
+  }
+
+  .nav-tabs button {
+    padding: 0.5em 1em;
+    border: none;
+    background: #333;
+    color: #fff;
+    cursor: pointer;
+    border-radius: 4px;
+    transition: background-color 0.2s;
+    font-size: 0.9em;
+  }
+
+  .nav-tabs button.active {
+    background: #007bff;
+    color: white;
+  }
+
+  .nav-tabs button:hover {
+    background: #0056b3;
   }
 
   .dashboard {
     display: flex;
     flex-direction: column;
-    height: calc(100vh - 100px);
+    height: calc(100vh - 120px);
   }
 
   .settings-section {
@@ -172,31 +218,6 @@
   .killmail-section {
     flex: 1;
     overflow-y: auto;
-  }
-
-  .nav-tabs {
-    display: flex;
-    gap: 1em;
-    margin-bottom: 1em;
-  }
-
-  .nav-tabs button {
-    padding: 0.5em 1em;
-    border: none;
-    background: #ddd;
-    cursor: pointer;
-    border-radius: 4px;
-    transition: background-color 0.2s;
-  }
-
-  .nav-tabs button.active {
-    background: #007bff;
-    color: white;
-  }
-
-  .nav-tabs button:hover {
-    background: #0056b3;
-    color: white;
   }
 
   @media (min-width: 768px) {
