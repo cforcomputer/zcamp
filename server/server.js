@@ -4,7 +4,7 @@ import { createServer } from "http";
 import { Server } from "socket.io";
 import axios from "axios";
 import { createClient as createSqlClient } from "@libsql/client";
-import { isGateCamp, updateCamps } from "./campStore.js";
+import { activeCamps, updateCamps, isGateCamp } from "./campStore.js";
 import roamStore, { activeRoams } from "./roamStore.js";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -14,7 +14,6 @@ import session from "express-session";
 import RedisStore from "connect-redis";
 import { createClient as createRedisClient } from "redis";
 import { compare } from "bcrypt";
-import https from "https";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -127,7 +126,6 @@ app.get("/", (req, res) => {
 
 const REDISQ_URL = "https://redisq.zkillboard.com/listen.php?queueID=zcamp";
 let killmails = [];
-let activeCamps = new Map();
 let isDatabaseInitialized = false;
 
 const db = createSqlClient({
@@ -1777,10 +1775,17 @@ redisClient.on("reconnecting", () => {
 io.on("connection", (socket) => {
   console.log("New client connected");
 
-  socket.emit("initialCamps", Array.from(activeCamps.values()));
-
   const initialRoams = roamStore.getRoams();
   socket.emit("initialRoams", initialRoams);
+
+  // Get current camps from store
+  let currentCamps = [];
+  const unsubscribe = activeCamps.subscribe((value) => {
+    currentCamps = value;
+  });
+
+  // Send initial state
+  socket.emit("initialCamps", currentCamps);
 
   if (socket.request.session?.user?.id) {
     const userId = socket.request.session.user.id.toString();
@@ -2243,6 +2248,7 @@ io.on("connection", (socket) => {
   });
 
   socket.on("disconnect", () => {
+    unsubscribe();
     console.log("Client disconnected");
   });
 });
@@ -2354,16 +2360,15 @@ async function processKillmail(killmail) {
 // Function to poll for new killmails from RedisQ
 async function pollRedisQ() {
   try {
-    // Add timestamp to all logs
     const timestamp = new Date().toISOString();
     console.log(
       `[${timestamp}] Polling RedisQ... Current killmails: ${killmails.length}`
     );
 
     const response = await axios.get(REDISQ_URL, {
-      timeout: 30000, // 30 second timeout
+      timeout: 30000,
       headers: {
-        "User-Agent": "KM-Hunter/1.0.0", // Add user agent
+        "User-Agent": "KM-Hunter/1.0.0",
       },
     });
 
@@ -2428,10 +2433,11 @@ async function pollRedisQ() {
               io.emit("roamUpdate", updatedRoams);
 
               // Process for gate camps
+              // When processing killmail
               if (isGateCamp(enrichedKillmail)) {
                 console.log(`[${timestamp}] Processing gate camp...`);
-                activeCamps = updateCamps(enrichedKillmail);
-                io.emit("campUpdate", Array.from(activeCamps.values()));
+                const updatedCamps = updateCamps(enrichedKillmail);
+                io.emit("campUpdate", updatedCamps);
               }
             } catch (processError) {
               console.error(
@@ -2461,7 +2467,7 @@ async function pollRedisQ() {
     });
   }
 
-  const delay = 20; // 20 ms --> Delay has to stay low, otherwise it can't process the entire backlog.
+  const delay = 20; // 20 ms delay
   setTimeout(pollRedisQ, delay);
 }
 

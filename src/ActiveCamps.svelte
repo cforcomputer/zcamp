@@ -11,6 +11,12 @@
 
   $: camps = $filteredCamps;
 
+  // debug log
+  $: console.log("ActiveCamps component state:", {
+    camps: $filteredCamps,
+    count: $filteredCamps.length,
+  });
+
   function formatValue(value) {
     if (value >= 1000000000) {
       return (value / 1000000000).toFixed(2) + "B";

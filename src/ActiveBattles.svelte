@@ -8,13 +8,8 @@
   let ctx;
   let bubbles = new Map();
   let animationFrame;
-  let defaultSize = 40; // Default size when canvas isn't ready
 
   // Physics constants
-  // Physics constants
-  const FRICTION = 0.99;
-  const REPULSION = 0.5;
-  const FLASH_DURATION = 1000;
   const BATTLE_TIMEOUT = 5 * 60 * 1000; // 5 minutes in milliseconds
 
   class Bubble {
