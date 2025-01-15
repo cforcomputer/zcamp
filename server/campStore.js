@@ -238,7 +238,6 @@ export function calculateCampProbability(camp) {
   //----------------------------------------
   // 1. EARLY EXCLUSIONS - Quick checks to rule out non-camps
   //----------------------------------------
-
   // Check for NPC kills
   if (camp.kills.some((kill) => kill.zkb?.labels?.includes("npc"))) {
     log.push("Camp excluded: NPC kill detected");
@@ -246,14 +245,31 @@ export function calculateCampProbability(camp) {
     return 0;
   }
 
-  // Check for CONCORD or structure attackers
+  // Check for CONCORD or non-bubble structure attackers
+  const MOBILE_DISRUPTOR_IDS = new Set([
+    12198, // Mobile Small Warp Disruptor I
+    26892, // Mobile Medium Warp Disruptor I
+    12200, // Mobile Large Warp Disruptor I
+    12199, // Mobile Small Warp Disruptor II
+    26888, // Mobile Medium Warp Disruptor II
+    26890, // Mobile Large Warp Disruptor II
+    28770, // Mobile 'Hybrid' Warp Disruptor I
+    28772, // Mobile 'Hybrid' Warp Disruptor I
+    28774, // Mobile 'Hybrid' Warp Disruptor I
+  ]);
+
   const hasInvalidAttackers = camp.kills.some((kill) =>
-    kill.shipCategories?.attackers.some((attacker) =>
-      ["concord", "structure"].includes(attacker.category)
+    kill.killmail.attackers.some(
+      (attacker) =>
+        (attacker.category === "structure" &&
+          !MOBILE_DISRUPTOR_IDS.has(attacker.ship_type_id)) ||
+        attacker.category === "concord"
     )
   );
   if (hasInvalidAttackers) {
-    log.push("Camp excluded: Invalid attackers (Concord or structure)");
+    log.push(
+      "Camp excluded: Invalid attackers (Concord or non-bubble structure)"
+    );
     camp.probabilityLog = log;
     return 0;
   }
@@ -283,20 +299,15 @@ export function calculateCampProbability(camp) {
   //----------------------------------------
 
   const now = Date.now();
-  let probability = 0;
+  let probability = 0; // Start at 0, no base probability
+  log.push(`Starting with base probability of 0%`);
 
-  // Count recent kills within last hour
+  // Count recent kills within last hour for logging purposes
   const recentKills = gateKills.filter(
     (kill) =>
       now - new Date(kill.killmail.killmail_time).getTime() <= 60 * 60 * 1000
   ).length;
-
-  probability = Math.max(0, 0.3 + (recentKills - 1) * 0.25);
-  log.push(
-    `Base probability from ${recentKills} recent kills: ${(
-      probability * 100
-    ).toFixed(1)}%`
-  );
+  log.push(`Found ${recentKills} kills within the last hour`);
 
   //----------------------------------------
   // 3. TIME-BASED ADJUSTMENTS (Initial Checks)
