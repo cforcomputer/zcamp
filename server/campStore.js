@@ -20,11 +20,58 @@ export const CAMP_PROBABILITY_FACTORS = {
     INACTIVITY: {
       start: 20,
       penalty: -0.35,
-      decayPerMinute: 0.1,
+      decayPerMinute: 0.2,
     },
     ESTABLISHED: { threshold: 60, bonus: 0.2 },
     SUSTAINED: { threshold: 120, bonus: 0.3 },
     FATIGUE: { threshold: 180, penalty: -0.2 },
+  },
+
+  SMARTBOMB_WEAPONS: {
+    // Large T1 Smartbombs
+    14210: "Large EMP Smartbomb I",
+    14208: "Large Proton Smartbomb I",
+    14212: "Large Plasma Smartbomb I",
+    14214: "Large Electron Smartbomb I",
+    14216: "Large Gamma Smartbomb I",
+    // Large T2 Smartbombs
+    14209: "Large EMP Smartbomb II",
+    14207: "Large Proton Smartbomb II",
+    14211: "Large Plasma Smartbomb II",
+    14213: "Large Electron Smartbomb II",
+    14215: "Large Gamma Smartbomb II",
+    // Large Faction Smartbombs
+    14269: "Domination Large EMP Smartbomb",
+    14271: "Dark Blood Large EMP Smartbomb",
+    14273: "True Sansha Large EMP Smartbomb",
+    14275: "Shadow Serpentis Large Electron Smartbomb",
+    14277: "Dread Guristas Large Proton Smartbomb",
+    14279: "Republic Fleet Large EMP Smartbomb",
+    14281: "Caldari Navy Large Proton Smartbomb",
+    14283: "Imperial Navy Large EMP Smartbomb",
+    14285: "Federation Navy Large Electron Smartbomb",
+    // Medium T1 Smartbombs
+    14202: "Medium EMP Smartbomb I",
+    14200: "Medium Proton Smartbomb I",
+    14204: "Medium Plasma Smartbomb I",
+    14206: "Medium Electron Smartbomb I",
+    14198: "Medium Gamma Smartbomb I",
+    // Medium T2 Smartbombs
+    14201: "Medium EMP Smartbomb II",
+    14199: "Medium Proton Smartbomb II",
+    14203: "Medium Plasma Smartbomb II",
+    14205: "Medium Electron Smartbomb II",
+    14197: "Medium Gamma Smartbomb II",
+    // Medium Faction Smartbombs
+    14268: "Domination Medium EMP Smartbomb",
+    14270: "Dark Blood Medium EMP Smartbomb",
+    14272: "True Sansha Medium EMP Smartbomb",
+    14274: "Shadow Serpentis Medium Electron Smartbomb",
+    14276: "Dread Guristas Medium Proton Smartbomb",
+    14278: "Republic Fleet Medium EMP Smartbomb",
+    14280: "Caldari Navy Medium Proton Smartbomb",
+    14282: "Imperial Navy Medium EMP Smartbomb",
+    14284: "Federation Navy Medium Electron Smartbomb",
   },
 
   THREAT_SHIPS: {
@@ -102,6 +149,16 @@ export const CAMP_PROBABILITY_FACTORS = {
   },
 };
 
+function hasSmartbombs(kills) {
+  return kills.some((kill) =>
+    kill.killmail.attackers.some(
+      (attacker) =>
+        attacker.weapon_type_id &&
+        CAMP_PROBABILITY_FACTORS.SMARTBOMB_WEAPONS[attacker.weapon_type_id]
+    )
+  );
+}
+
 export const filteredCamps = derived([activeCamps], ([$activeCamps]) => {
   return $activeCamps
     .map((camp) => ({
@@ -164,15 +221,19 @@ export const filteredRoams = derived(
   }
 );
 
-// Modified functions in campStore.js
-
-// Modified functions in campStore.js
-
 export function calculateCampProbability(camp) {
   const log = [];
   log.push(
     `--- Starting probability calculation for camp: ${camp.systemId}-${camp.stargateName} ---`
   );
+
+  // Check for smartbomb usage and set camp type
+  if (hasSmartbombs(camp.kills)) {
+    camp.type = "smartbomb";
+    log.push("Smartbomb weapons detected - marking as smartbomb camp");
+  } else {
+    camp.type = "standard";
+  }
 
   //----------------------------------------
   // 1. EARLY EXCLUSIONS - Quick checks to rule out non-camps
@@ -238,28 +299,11 @@ export function calculateCampProbability(camp) {
   );
 
   //----------------------------------------
-  // 3. TIME-BASED ADJUSTMENTS
+  // 3. TIME-BASED ADJUSTMENTS (Initial Checks)
   //----------------------------------------
 
   const lastKillTime = new Date(camp.lastKill).getTime();
   const minutesSinceLastKill = (now - lastKillTime) / (60 * 1000);
-  let timeDecay = 0;
-
-  // Only apply decay after DECAY_START (20 minutes)
-  if (minutesSinceLastKill > DECAY_START / (60 * 1000)) {
-    const decayMinutes = minutesSinceLastKill - DECAY_START / (60 * 1000);
-    timeDecay = Math.min(0.95, decayMinutes * 0.02); // 2% decay per minute after decay start, max 95% decay
-    log.push(
-      `Applying decay for ${decayMinutes.toFixed(1)} minutes beyond decay start`
-    );
-  }
-
-  probability -= timeDecay;
-  log.push(
-    `Time decay adjustment (${minutesSinceLastKill.toFixed(
-      1
-    )} minutes since last kill): -${(timeDecay * 100).toFixed(1)}%`
-  );
 
   // Penalty for burst kills
   const killTimes = gateKills
@@ -398,7 +442,32 @@ export function calculateCampProbability(camp) {
   }
 
   //----------------------------------------
-  // 8. FINAL NORMALIZATION
+  // 8. FINAL TIME DECAY
+  //----------------------------------------
+
+  // Calculate time decay percentage
+  let timeDecayPercent = 0;
+  if (minutesSinceLastKill > DECAY_START / (60 * 1000)) {
+    const decayMinutes = minutesSinceLastKill - DECAY_START / (60 * 1000);
+    timeDecayPercent = Math.min(0.95, decayMinutes * 0.05); // 5% decay per minute after decay start, max 95% decay
+    log.push(
+      `Applying decay for ${decayMinutes.toFixed(1)} minutes beyond decay start`
+    );
+
+    // Apply decay as a percentage of current probability
+    const beforeDecay = probability;
+    probability *= 1 - timeDecayPercent;
+    log.push(
+      `Time decay adjustment (${minutesSinceLastKill.toFixed(
+        1
+      )} minutes since last kill): -${(timeDecayPercent * 100).toFixed(
+        1
+      )}% (${beforeDecay} → ${probability})`
+    );
+  }
+
+  //----------------------------------------
+  // 9. FINAL NORMALIZATION
   //----------------------------------------
 
   probability = Math.max(0, Math.min(95, Math.round(probability * 100)));
@@ -508,6 +577,12 @@ export function updateCamps(killmail) {
       camp.kills.push(killmail);
       camp.lastKill = killmail.killmail.killmail_time;
       camp.totalValue += killmail.zkb.totalValue;
+
+      // Check for smartbomb usage
+      if (hasSmartbombs([killmail])) {
+        camp.type = "smartbomb";
+      }
+
       camp.probability = calculateCampProbability(camp);
       camp.composition = updateCampComposition(camp, killmail);
       camp.metrics = getMetrics(camp.kills, now);
@@ -516,6 +591,7 @@ export function updateCamps(killmail) {
         kills: camp.kills.length,
         totalValue: camp.totalValue,
         probability: camp.probability,
+        type: camp.type,
       });
     } else {
       console.log("Creating new camp");
@@ -529,6 +605,7 @@ export function updateCamps(killmail) {
         lastKill: killmail.killmail.killmail_time,
         firstKillTime: now,
         latestKillTime: now,
+        type: hasSmartbombs([killmail]) ? "smartbomb" : "standard",
         probability: calculateCampProbability({ kills: [killmail] }),
         composition: updateCampComposition(
           {
@@ -546,6 +623,7 @@ export function updateCamps(killmail) {
         id: newCamp.id,
         system: newCamp.stargateName,
         totalValue: newCamp.totalValue,
+        type: newCamp.type,
       });
     }
 
