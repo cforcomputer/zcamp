@@ -122,25 +122,6 @@
             </div>
           {/if}
         </div>
-
-        <div class="leaderboard">
-          <h4>Top Crushers</h4>
-          <div class="leaderboard-entries">
-            {#each leaderboard as entry, i}
-              <div class="leaderboard-entry">
-                <span class="rank">
-                  {#if i === 0}🥇
-                  {:else if i === 1}🥈
-                  {:else if i === 2}🥉
-                  {:else}{i + 1}.
-                  {/if}
-                </span>
-                <span class="name">{entry.character_name}</span>
-                <span class="score">{entry.bashbucks}</span>
-              </div>
-            {/each}
-          </div>
-        </div>
       </div>
     {/if}
   {/if}
@@ -208,32 +189,5 @@
   .countdown {
     color: #ffd700;
     font-weight: bold;
-  }
-
-  .leaderboard {
-    margin-top: 1em;
-    padding-top: 1em;
-    border-top: 1px solid rgba(255, 255, 255, 0.1);
-  }
-
-  .leaderboard-entry {
-    display: flex;
-    justify-content: space-between;
-    padding: 0.5em;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-  }
-
-  .rank {
-    width: 2em;
-  }
-
-  .name {
-    flex-grow: 1;
-    margin: 0 1em;
-  }
-
-  .score {
-    font-weight: bold;
-    color: #ffd700;
   }
 </style>

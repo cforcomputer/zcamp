@@ -263,13 +263,11 @@ async function initializeDatabase() {
 
     await db.execute(`
       CREATE TABLE IF NOT EXISTS camp_crushers (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          character_id TEXT NOT NULL,
-          character_name TEXT NOT NULL,
-          target_camp_id TEXT,
-          target_start_time DATETIME,
-          bashbucks INTEGER DEFAULT 0,
-          FOREIGN KEY(character_id) REFERENCES users(character_id)
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        character_id TEXT NOT NULL,
+        character_name TEXT NOT NULL,
+        bashbucks INTEGER DEFAULT 0,
+        FOREIGN KEY(character_id) REFERENCES users(character_id)
       )
   `);
 
@@ -356,14 +354,81 @@ app.post("/api/campcrushers/target", async (req, res) => {
 
 app.get("/api/campcrushers/leaderboard", async (req, res) => {
   try {
-    const { rows } = await db.execute({
-      sql: "SELECT character_name, bashbucks FROM camp_crushers ORDER BY bashbucks DESC LIMIT 100",
+    // First, let's debug what's in the camp_crushers table
+    const { rows: debugRows } = await db.execute({
+      sql: "SELECT * FROM camp_crushers",
     });
+    console.log("Debug - camp_crushers contents:", debugRows);
 
-    res.json(rows);
+    // Simplified query first to ensure we're getting basic results
+    const { rows: currentStandings } = await db.execute({
+      sql: `SELECT 
+              character_id,
+              character_name, 
+              bashbucks
+            FROM camp_crushers 
+            ORDER BY bashbucks DESC 
+            LIMIT 100`,
+    });
+    console.log("Debug - currentStandings:", currentStandings);
+
+    // If we get results from the simple query, then try the full query
+    if (currentStandings && currentStandings.length > 0) {
+      const { rows: fullStandings } = await db.execute({
+        sql: `SELECT 
+                cc.character_id,
+                cc.character_name, 
+                cc.bashbucks,
+                COUNT(cct.id) as total_camps_crushed
+              FROM camp_crushers cc
+              LEFT JOIN camp_crusher_targets cct ON cc.character_id = cct.character_id 
+                AND cct.completed = TRUE
+              GROUP BY cc.character_id, cc.character_name, cc.bashbucks
+              ORDER BY cc.bashbucks DESC, total_camps_crushed DESC 
+              LIMIT 100`,
+      });
+      console.log("Debug - fullStandings:", fullStandings);
+
+      // Add history for each player
+      const standingsWithHistory = await Promise.all(
+        fullStandings.map(async (player) => {
+          const { rows: history } = await db.execute({
+            sql: `SELECT 
+                  camp_id,
+                  start_time,
+                  end_time,
+                  completed,
+                  (SELECT solarsystemname FROM celestial_data WHERE system_id = CAST(camp_id AS INTEGER) LIMIT 1) as system_name
+                FROM camp_crusher_targets 
+                WHERE character_id = ? AND completed = TRUE
+                ORDER BY end_time DESC 
+                LIMIT 10`,
+            args: [player.character_id],
+          });
+          console.log(`Debug - history for ${player.character_name}:`, history);
+
+          return {
+            ...player,
+            recent_crushes: history || [],
+          };
+        })
+      );
+
+      return res.json(standingsWithHistory);
+    } else {
+      // If we don't get results from the simple query, something's wrong with basic data
+      console.log("No results found in camp_crushers table");
+      return res.json([]);
+    }
   } catch (error) {
     console.error("Error fetching leaderboard:", error);
-    res.status(500).json({ error: "Internal server error" });
+    // Send a more descriptive error response
+    res.status(500).json({
+      error: "Internal server error",
+      details: error.message,
+      type: error.constructor.name,
+      stack: error.stack,
+    });
   }
 });
 
@@ -1312,6 +1377,16 @@ app.get("/callback", async (req, res) => {
         });
         userId = result.lastInsertRowid;
       }
+
+      console.log("Ensuring camp_crushers entry exists...");
+      await db.execute({
+        sql: `INSERT INTO camp_crushers (character_id, character_name, bashbucks)
+              SELECT ?, ?, 0
+              WHERE NOT EXISTS (
+                SELECT 1 FROM camp_crushers WHERE character_id = ?
+              )`,
+        args: [characterId, characterName, characterId],
+      });
 
       // Fetch filter lists
       const { rows: filterLists } = await db.execute({
