@@ -1,24 +1,42 @@
-// /server/roamStore.js
-import { writable } from "svelte/store";
+// roamManager.js
+import EventEmitter from "events";
 
-const CAPSULE_ID = 670;
+export const ROAM_TIMEOUT = 30 * 60 * 1000; // 30 minutes
+export const CAPSULE_ID = 670;
 
-export const activeRoams = writable([]);
-
-export class RoamStore {
+class RoamManager extends EventEmitter {
   constructor() {
-    this._roams = []; // Ensure this is initialized
-    this.ROAM_TIMEOUT = 30 * 60 * 1000; // 30 minutes
+    super();
+    this._roams = [];
+    this.updateInterval = null;
+    this.lastUpdate = Date.now();
+  }
+
+  startUpdates(interval = 30000) {
+    if (this.updateInterval) {
+      clearInterval(this.updateInterval);
+    }
+
+    this.updateInterval = setInterval(() => {
+      this.clearExpiredRoams();
+    }, interval);
+  }
+
+  stopUpdates() {
+    if (this.updateInterval) {
+      clearInterval(this.updateInterval);
+      this.updateInterval = null;
+    }
   }
 
   updateRoamingGangs(killmail) {
-    // console.log("--- roamStore.js: Roaming Gang Update Debug ---");
-    // console.log("Processing killmail:", {
-    //   killID: killmail.killID,
-    //   systemId: killmail.killmail.solar_system_id,
-    //   time: killmail.killmail.killmail_time,
-    //   attackers: killmail.killmail.attackers.length,
-    // });
+    console.log("--- roamManager.js: Roaming Gang Update Debug ---");
+    console.log("Processing killmail:", {
+      killID: killmail.killID,
+      systemId: killmail.killmail.solar_system_id,
+      time: killmail.killmail.killmail_time,
+      attackers: killmail.killmail.attackers.length,
+    });
 
     const now = Date.now();
 
@@ -26,7 +44,7 @@ export class RoamStore {
     const beforeCleanCount = this._roams.length;
     this._roams = this._roams.filter((roam) => {
       const timeSinceLastActivity = now - new Date(roam.lastActivity).getTime();
-      const isActive = timeSinceLastActivity <= this.ROAM_TIMEOUT;
+      const isActive = timeSinceLastActivity <= ROAM_TIMEOUT;
       if (!isActive) {
         console.log(
           `Roam ${roam.id} expired after ${Math.floor(
@@ -57,19 +75,9 @@ export class RoamStore {
     // Skip if insufficient unique attackers
     if (attackerIds.size < 2) {
       console.log("Skipping - insufficient unique attackers");
-      console.log("--- End roamStore.js: Roaming Gang Update ---");
-      const formattedRoams = this._roams.map((roam) => ({
-        ...roam,
-        members: Array.from(roam.members || []),
-        systems: roam.systems || [],
-        kills: roam.kills || [],
-        totalValue: roam.totalValue || 0,
-        lastActivity: roam.lastActivity || new Date().toISOString(),
-        lastSystem: roam.lastSystem || { id: 0, name: "Unknown" },
-        startTime:
-          roam.startTime || roam.lastActivity || new Date().toISOString(),
-      }));
-      activeRoams.set(formattedRoams);
+      console.log("--- End roamManager.js: Roaming Gang Update ---");
+      const formattedRoams = this.formatRoams(this._roams);
+      this.emit("roamsUpdated", formattedRoams);
       return formattedRoams;
     }
 
@@ -157,28 +165,19 @@ export class RoamStore {
         lastActivity: roam.lastActivity,
       }))
     );
-    console.log("--- End roamStore.js: Roaming Gang Update ---");
+    console.log("--- End roamManager.js: Roaming Gang Update ---");
 
-    // Format and return the updated roams
-    const updatedRoams = this._roams.map((roam) => ({
-      ...roam,
-      members: Array.from(roam.members || []),
-      systems: roam.systems || [],
-      kills: roam.kills || [],
-      totalValue: roam.totalValue || 0,
-      lastActivity: roam.lastActivity || new Date().toISOString(),
-      lastSystem: roam.lastSystem || { id: 0, name: "Unknown" },
-      startTime:
-        roam.startTime || roam.lastActivity || new Date().toISOString(),
-    }));
-
-    // Update the Svelte store
-    activeRoams.set(updatedRoams);
-    return updatedRoams;
+    const formattedRoams = this.formatRoams(this._roams);
+    this.emit("roamsUpdated", formattedRoams);
+    return formattedRoams;
   }
 
   getRoams() {
-    return this._roams.map((roam) => ({
+    return this.formatRoams(this._roams);
+  }
+
+  formatRoams(roams) {
+    return roams.map((roam) => ({
       ...roam,
       members: Array.from(roam.members || []),
       systems: roam.systems || [],
@@ -193,11 +192,32 @@ export class RoamStore {
 
   clearExpiredRoams() {
     const now = Date.now();
-    this.activeRoams = this.activeRoams.filter(
-      (roam) => now - new Date(roam.lastActivity).getTime() <= this.ROAM_TIMEOUT
-    );
-    return this.activeRoams;
+    const beforeCleanCount = this._roams.length;
+    this._roams = this._roams.filter((roam) => {
+      const timeSinceLastActivity = now - new Date(roam.lastActivity).getTime();
+      return timeSinceLastActivity <= ROAM_TIMEOUT;
+    });
+
+    if (beforeCleanCount !== this._roams.length) {
+      console.log(
+        `Cleared ${beforeCleanCount - this._roams.length} expired roams`
+      );
+      const formattedRoams = this.formatRoams(this._roams);
+      this.emit("roamsUpdated", formattedRoams);
+    }
+    return this.formatRoams(this._roams);
+  }
+
+  cleanup() {
+    this.stopUpdates();
+    this._roams = [];
+    this.removeAllListeners();
   }
 }
 
-export default new RoamStore();
+// Export a singleton instance
+const roamManager = new RoamManager();
+export default roamManager;
+
+// Also export the class for testing
+export { RoamManager };

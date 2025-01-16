@@ -7,13 +7,16 @@
     "server/**/*"
   ],
   "scripts": {
-    "clean": "rimraf public/build",
-    "build": "npm run clean && rollup -c",
-    "dev": "npm run clean && concurrently \"rollup -c -w\" \"node server/server.js\"",
-    "start": "node server/server.js"
+    "build": "rollup -c",
+    "autobuild": "rollup -c -w",
+    "dev": "run-p start:dev autobuild",
+    "start": "node build/server.js",
+    "start:dev": "nodemon --watch server --exec \"node build/server.js\"",
+    "serve": "sirv public --no-clear"
   },
   "devDependencies": {
     "@rollup/plugin-commonjs": "^17.0.0",
+    "@rollup/plugin-json": "^6.1.0",
     "@rollup/plugin-node-resolve": "^11.0.0",
     "@types/three": "^0.168.0",
     "concurrently": "^9.1.0",
@@ -33,6 +36,7 @@
     "axios": "^1.7.6",
     "bcrypt": "^5.1.1",
     "connect-redis": "^7.1.0",
+    "events": "^3.3.0",
     "express": "^4.17.1",
     "express-session": "^1.18.1",
     "gsap": "^3.12.5",

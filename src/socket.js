@@ -1,3 +1,4 @@
+// socket.js
 import { io } from "socket.io-client";
 import { get } from "svelte/store";
 import { addKillmailToBattles } from "./battleStore.js";

@@ -1,5 +1,5 @@
 import { writable } from "svelte/store";
-import { filteredCamps } from "../server/campStore.js";
+import socket from "./socket.js";
 
 export const currentLocation = writable(null);
 export const locationError = writable(null);
@@ -32,10 +32,14 @@ async function refreshToken(refreshToken) {
 }
 
 async function checkForGateCamps(systemId, celestialData) {
-  let camps = [];
-  const unsubscribe = filteredCamps.subscribe((value) => (camps = value));
-
   try {
+    // Request active camps from the server
+    const camps = await new Promise((resolve) => {
+      socket.emit("requestCamps", (response) => {
+        resolve(response);
+      });
+    });
+
     // Extract stargates from celestial data
     const stargates = celestialData
       .filter((cel) => cel.typename?.includes("Stargate"))
@@ -80,8 +84,9 @@ async function checkForGateCamps(systemId, celestialData) {
       current: currentSystemCamps,
       connected: connectedCamps,
     };
-  } finally {
-    unsubscribe();
+  } catch (error) {
+    console.error("Error checking for gate camps:", error);
+    return { current: [], connected: [] }; // Return empty arrays on error
   }
 }
 

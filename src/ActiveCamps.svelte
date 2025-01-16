@@ -1,19 +1,38 @@
 <script>
-  import { filteredCamps } from "../server/campStore.js";
+  import { onMount } from "svelte";
   import CampCrusher from "./CampCrusher.svelte";
-  import { CAMP_PROBABILITY_FACTORS } from "../server/campStore.js";
-  import { CAPSULE_ID } from "../server/campStore.js";
+  import socket from "./socket.js";
+  import { CAMP_PROBABILITY_FACTORS, CAPSULE_ID } from "./constants.js";
 
   const { THREAT_SHIPS } = CAMP_PROBABILITY_FACTORS;
 
   let camps = [];
 
-  $: camps = $filteredCamps;
+  // Reactive statement to sort camps whenever the array is updated
+  $: camps = camps.sort((a, b) => b.probability - a.probability);
+
+  onMount(() => {
+    // Listen for initial camps data
+    socket.on("initialCamps", (initialCamps) => {
+      camps = initialCamps;
+    });
+
+    // Listen for camp updates
+    socket.on("campUpdate", (updatedCamps) => {
+      camps = updatedCamps;
+    });
+
+    // Clean up on component destroy
+    return () => {
+      socket.off("initialCamps");
+      socket.off("campUpdate");
+    };
+  });
 
   // debug log
   $: console.log("ActiveCamps component state:", {
-    camps: $filteredCamps,
-    count: $filteredCamps.length,
+    camps,
+    count: camps.length,
   });
 
   function formatValue(value) {
@@ -43,6 +62,18 @@
     return "#90ee90";
   }
 
+  function hasInterdictor(kills) {
+    return kills.some((kill) =>
+      kill.killmail.attackers.some(
+        (a) =>
+          a.ship_type_id &&
+          [22456, 22464, 22452, 22460, 12013, 12017, 12021, 12025].includes(
+            a.ship_type_id
+          )
+      )
+    );
+  }
+
   function getShipIcon(category) {
     const icons = {
       dictor: "🔲",
@@ -60,18 +91,6 @@
     if (weight >= 30) return "#ff8c00";
     if (weight >= 20) return "#ffd700";
     return "#90ee90";
-  }
-
-  function hasInterdictor(kills) {
-    return kills.some((kill) =>
-      kill.killmail.attackers.some(
-        (a) =>
-          a.ship_type_id &&
-          [22456, 22464, 22452, 22460, 12013, 12017, 12021, 12025].includes(
-            a.ship_type_id
-          )
-      )
-    );
   }
 
   function formatProbabilityLog(log) {
@@ -309,7 +328,7 @@
   }
 
   .camp-type.smartbomb {
-    background-color: #ff4444;
+    background-color: #4682b4;
   }
 
   .ship-composition {

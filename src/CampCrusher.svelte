@@ -1,8 +1,9 @@
 <script>
   import { onMount, onDestroy } from "svelte";
-  import { activeCamps } from "../server/campStore.js";
+  import { writable } from "svelte/store";
   import socket from "./socket.js";
 
+  const camps = writable([]);
   let showGame = false;
   let selectedCamp = null;
   let countdownInterval = null;
@@ -11,7 +12,15 @@
   let leaderboard = [];
   let characterName = null;
 
+  const unsubscribe = camps.subscribe(() => {});
+
   onMount(async () => {
+    socket.on("campUpdate", (updatedCamps) => {
+      camps.set(updatedCamps);
+    });
+
+    socket.on("bashbucksAwarded", handleBashbucksAwarded);
+
     const response = await fetch("/api/session", {
       credentials: "include",
     });
@@ -19,12 +28,14 @@
     characterName = data.user?.character_name;
 
     await loadLeaderboard();
-    socket.on("bashbucksAwarded", handleBashbucksAwarded);
+    socket.emit("requestCamps");
   });
 
   onDestroy(() => {
     if (countdownInterval) clearInterval(countdownInterval);
+    socket.off("campUpdate");
     socket.off("bashbucksAwarded", handleBashbucksAwarded);
+    unsubscribe();
   });
 
   async function loadLeaderboard() {
@@ -36,7 +47,7 @@
 
   function handleBashbucksAwarded(data) {
     userBashbucks = data.newTotal;
-    loadLeaderboard(); // Refresh leaderboard
+    loadLeaderboard();
   }
 
   function formatTime(ms) {
@@ -88,37 +99,53 @@
 
 <div class="camp-crusher">
   <button class="easter-egg" on:click={() => (showGame = !showGame)}>
-    PLAY CAMPCRUSHERS
+    <span class="neon-text">PLAY CAMPCRUSHERS</span>
   </button>
 
   {#if showGame}
     {#if !characterName}
-      <div class="auth-warning">
-        Please log in with EVE Online to play Camp Crushers!
+      <div class="auth-warning retro-box">
+        <span class="blink">!</span> Please log in with EVE Online to play Camp
+        Crushers! <span class="blink">!</span>
       </div>
     {:else}
-      <div class="game-ui">
+      <div class="game-ui retro-box">
         <div class="game-header">
-          <h3>Your Bashbucks: {userBashbucks}</h3>
-          <p>Playing as: {characterName}</p>
+          <div class="player-info">
+            <h3 class="neon-text">
+              BASHBUCKS: <span class="value">{userBashbucks}</span>
+            </h3>
+            <p class="pilot-name">
+              PILOT: <span class="value">{characterName}</span>
+            </p>
+          </div>
+
           {#if selectedCamp}
-            <div class="active-target">
-              <h4>Current Target:</h4>
-              <p>{selectedCamp.stargateName}</p>
+            <div class="active-target retro-panel">
+              <h4 class="target-header">CURRENT TARGET:</h4>
+              <p class="target-name">{selectedCamp.stargateName}</p>
               {#if timeRemaining}
                 <p class="countdown">
-                  Time remaining: {formatTime(timeRemaining)}
+                  TIME REMAINING: <span class="timer"
+                    >{formatTime(timeRemaining)}</span
+                  >
                 </p>
               {/if}
             </div>
           {:else}
             <div class="camp-selection">
-              <h4>Select a Camp to Crush:</h4>
-              {#each $activeCamps as camp}
-                <button class="camp-option" on:click={() => selectCamp(camp)}>
-                  {camp.stargateName} ({camp.kills.length} kills)
-                </button>
-              {/each}
+              <h4 class="selection-header">SELECT TARGET:</h4>
+              <div class="camp-list">
+                {#each $camps as camp}
+                  <button
+                    class="camp-option retro-button"
+                    on:click={() => selectCamp(camp)}
+                  >
+                    <span class="camp-name">{camp.stargateName}</span>
+                    <span class="kill-count">KILLS: {camp.kills.length}</span>
+                  </button>
+                {/each}
+              </div>
             </div>
           {/if}
         </div>
@@ -130,64 +157,179 @@
 <style>
   .camp-crusher {
     margin-top: 1em;
+    font-family: "Courier New", monospace;
   }
 
   .easter-egg {
-    background: linear-gradient(45deg, #ff4444, #ff8c00);
-    color: white;
-    padding: 0.5em 1em;
-    border: none;
-    border-radius: 4px;
+    background: linear-gradient(45deg, #ff00ff, #00ffff);
+    border: 3px solid #ffffff;
+    border-radius: 8px;
+    padding: 0.8em 1.5em;
     cursor: pointer;
-    font-weight: bold;
-    animation: pulse 2s infinite;
+    position: relative;
+    overflow: hidden;
+    transition: all 0.3s ease;
+    box-shadow:
+      0 0 10px #ff00ff,
+      0 0 20px #00ffff;
   }
 
-  @keyframes pulse {
-    0% {
-      transform: scale(1);
-    }
-    50% {
-      transform: scale(1.05);
-    }
-    100% {
-      transform: scale(1);
-    }
+  .easter-egg:hover {
+    transform: scale(1.05);
+    box-shadow:
+      0 0 20px #ff00ff,
+      0 0 40px #00ffff;
+  }
+
+  .neon-text {
+    color: #ffffff;
+    text-shadow:
+      0 0 5px #ffffff,
+      0 0 10px #ffffff,
+      0 0 15px #ff00ff,
+      0 0 20px #ff00ff;
+    font-weight: bold;
+    letter-spacing: 2px;
+  }
+
+  .retro-box {
+    background: rgba(0, 0, 0, 0.9);
+    border: 2px solid #00ffff;
+    border-radius: 8px;
+    padding: 1.5em;
+    margin-top: 1em;
+    box-shadow: 0 0 10px #00ffff inset;
   }
 
   .game-ui {
-    background: rgba(0, 0, 0, 0.8);
+    color: #00ffff;
+  }
+
+  .player-info {
+    margin-bottom: 1.5em;
     padding: 1em;
-    border-radius: 8px;
+    background: rgba(0, 255, 255, 0.1);
+    border-radius: 4px;
+  }
+
+  .player-info h3 {
+    margin: 0;
+    font-size: 1.5em;
+  }
+
+  .value {
+    color: #ff00ff;
+    font-weight: bold;
+  }
+
+  .pilot-name {
+    margin: 0.5em 0 0 0;
+    color: #ffffff;
+  }
+
+  .camp-selection {
     margin-top: 1em;
   }
 
-  .auth-warning {
-    color: #ff4444;
-    padding: 1em;
-    background: rgba(255, 68, 68, 0.1);
-    border-radius: 4px;
-    margin-top: 1em;
+  .selection-header {
+    color: #ff00ff;
+    margin: 0 0 1em 0;
+    text-shadow: 0 0 5px #ff00ff;
+  }
+
+  .camp-list {
+    display: grid;
+    gap: 0.8em;
   }
 
   .camp-option {
-    display: block;
-    width: 100%;
-    padding: 0.5em;
-    margin: 0.5em 0;
-    background: rgba(255, 255, 255, 0.1);
-    border: 1px solid rgba(255, 255, 255, 0.2);
+    background: rgba(255, 0, 255, 0.1);
+    border: 2px solid #ff00ff;
     border-radius: 4px;
-    color: white;
+    padding: 1em;
+    color: #ffffff;
     cursor: pointer;
+    transition: all 0.2s ease;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
   }
 
   .camp-option:hover {
-    background: rgba(255, 255, 255, 0.2);
+    background: rgba(255, 0, 255, 0.2);
+    box-shadow: 0 0 10px #ff00ff;
+    transform: translateY(-2px);
+  }
+
+  .camp-name {
+    font-weight: bold;
+  }
+
+  .kill-count {
+    color: #00ffff;
+  }
+
+  .active-target {
+    background: rgba(0, 255, 255, 0.1);
+    padding: 1em;
+    border-radius: 4px;
+    border: 2px solid #00ffff;
+  }
+
+  .target-header {
+    color: #00ffff;
+    margin: 0 0 0.5em 0;
+    text-shadow: 0 0 5px #00ffff;
+  }
+
+  .target-name {
+    color: #ff00ff;
+    font-size: 1.2em;
+    margin: 0.5em 0;
+    font-weight: bold;
   }
 
   .countdown {
-    color: #ffd700;
+    margin: 1em 0 0 0;
+    color: #ffffff;
+  }
+
+  .timer {
+    color: #ff00ff;
     font-weight: bold;
+    font-size: 1.2em;
+    text-shadow: 0 0 5px #ff00ff;
+  }
+
+  .auth-warning {
+    color: #ff0000;
+    text-align: center;
+    font-size: 1.2em;
+    padding: 2em;
+  }
+
+  .blink {
+    animation: blink 1s steps(2, start) infinite;
+    color: #ff0000;
+  }
+
+  @keyframes blink {
+    to {
+      visibility: hidden;
+    }
+  }
+
+  @keyframes glow {
+    0% {
+      text-shadow: 0 0 5px #ff00ff;
+    }
+    50% {
+      text-shadow:
+        0 0 20px #ff00ff,
+        0 0 30px #ff00ff;
+    }
+    100% {
+      text-shadow: 0 0 5px #ff00ff;
+    }
   }
 </style>

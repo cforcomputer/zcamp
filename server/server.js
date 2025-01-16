@@ -4,8 +4,8 @@ import { createServer } from "http";
 import { Server } from "socket.io";
 import axios from "axios";
 import { createClient as createSqlClient } from "@libsql/client";
-import { activeCamps, updateCamps, isGateCamp } from "./campStore.js";
-import roamStore, { activeRoams } from "./roamStore.js";
+import campManager from "./campManager.js";
+import roamManager from "./roamManager.js";
 import path from "path";
 import { fileURLToPath } from "url";
 import cors from "cors";
@@ -354,103 +354,98 @@ app.post("/api/campcrushers/target", async (req, res) => {
 
 app.get("/api/campcrushers/leaderboard", async (req, res) => {
   try {
-    // First, let's debug what's in the camp_crushers table
-    const { rows: debugRows } = await db.execute({
-      sql: "SELECT * FROM camp_crushers",
-    });
-    console.log("Debug - camp_crushers contents:", debugRows);
-
-    // Simplified query first to ensure we're getting basic results
-    const { rows: currentStandings } = await db.execute({
+    // Basic SELECT without any JOINs first to verify we can get the base data
+    const { rows } = await db.execute({
       sql: `SELECT 
-              character_id,
+              character_id, 
               character_name, 
-              bashbucks
+              bashbucks,
+              target_camp_id,
+              target_start_time
             FROM camp_crushers 
-            ORDER BY bashbucks DESC 
-            LIMIT 100`,
+            ORDER BY bashbucks DESC`,
+      args: [],
     });
-    console.log("Debug - currentStandings:", currentStandings);
 
-    // If we get results from the simple query, then try the full query
-    if (currentStandings && currentStandings.length > 0) {
-      const { rows: fullStandings } = await db.execute({
-        sql: `SELECT 
-                cc.character_id,
-                cc.character_name, 
-                cc.bashbucks,
-                COUNT(cct.id) as total_camps_crushed
-              FROM camp_crushers cc
-              LEFT JOIN camp_crusher_targets cct ON cc.character_id = cct.character_id 
-                AND cct.completed = TRUE
-              GROUP BY cc.character_id, cc.character_name, cc.bashbucks
-              ORDER BY cc.bashbucks DESC, total_camps_crushed DESC 
-              LIMIT 100`,
-      });
-      console.log("Debug - fullStandings:", fullStandings);
-
-      // Add history for each player
-      const standingsWithHistory = await Promise.all(
-        fullStandings.map(async (player) => {
-          const { rows: history } = await db.execute({
-            sql: `SELECT 
-                  camp_id,
-                  start_time,
-                  end_time,
-                  completed,
-                  (SELECT solarsystemname FROM celestial_data WHERE system_id = CAST(camp_id AS INTEGER) LIMIT 1) as system_name
-                FROM camp_crusher_targets 
-                WHERE character_id = ? AND completed = TRUE
-                ORDER BY end_time DESC 
-                LIMIT 10`,
-            args: [player.character_id],
-          });
-          console.log(`Debug - history for ${player.character_name}:`, history);
-
-          return {
-            ...player,
-            recent_crushes: history || [],
-          };
-        })
-      );
-
-      return res.json(standingsWithHistory);
-    } else {
-      // If we don't get results from the simple query, something's wrong with basic data
-      console.log("No results found in camp_crushers table");
+    // If we have no data, return empty array
+    if (!rows || !Array.isArray(rows)) {
       return res.json([]);
     }
+
+    // Map to the format our frontend expects
+    const leaderboard = rows.map((player) => ({
+      character_id: player.character_id,
+      character_name: player.character_name,
+      bashbucks: player.bashbucks || 0,
+      target_camp_id: player.target_camp_id,
+      target_start_time: player.target_start_time,
+      total_camps_crushed: 0, // We can add this feature later
+      recent_crushes: [], // We can add this feature later
+    }));
+
+    res.json(leaderboard);
   } catch (error) {
-    console.error("Error fetching leaderboard:", error);
-    // Send a more descriptive error response
+    console.error("[Leaderboard] Error:", error);
     res.status(500).json({
       error: "Internal server error",
       details: error.message,
-      type: error.constructor.name,
-      stack: error.stack,
     });
   }
 });
+
+// app.get("/api/debug/camp-crushers", async (req, res) => {
+//   try {
+//     // Get table info
+//     const { rows: tableInfo } = await db.execute({
+//       sql: "SELECT sql FROM sqlite_master WHERE type='table' AND name='camp_crushers'",
+//       args: [],
+//     });
+
+//     // Get count
+//     const { rows: countInfo } = await db.execute({
+//       sql: "SELECT COUNT(*) as count FROM camp_crushers",
+//       args: [],
+//     });
+
+//     // Get sample data
+//     const { rows: sampleData } = await db.execute({
+//       sql: "SELECT * FROM camp_crushers LIMIT 5",
+//       args: [],
+//     });
+
+//     res.json({
+//       tableStructure: tableInfo?.[0]?.sql,
+//       recordCount: countInfo?.[0]?.count,
+//       sampleData: sampleData,
+//     });
+//   } catch (error) {
+//     res.status(500).json({
+//       error: "Debug query failed",
+//       details: error.message,
+//     });
+//   }
+// });
 
 // Add health check endpoint
 app.get("/health", async (_, res) => {
   try {
     if (!isDatabaseInitialized) {
-      console.log("Health check failed: Database not yet initialized");
       return res.status(503).json({
         status: "initializing",
         killmails: killmails.length,
+        camps: campManager.getActiveCamps().length,
+        roams: roamManager.getRoams().length,
         lastPoll: new Date().toISOString(),
       });
     }
 
-    // Test database connection with a simple query
     const result = await db.execute("SELECT 1 as health_check");
     if (result.rows?.[0]?.health_check === 1) {
-      console.log("Health check passed");
       return res.status(200).json({
         status: "healthy",
         killmails: killmails.length,
+        camps: campManager.getActiveCamps().length,
+        roams: roamManager.getRoams().length,
         lastPoll: new Date().toISOString(),
         redisConnected: redisClient.isReady,
       });
@@ -463,6 +458,8 @@ app.get("/health", async (_, res) => {
       status: "unhealthy",
       error: error.message,
       killmails: killmails.length,
+      camps: campManager.getActiveCamps().length,
+      roams: roamManager.getRoams().length,
       lastPoll: new Date().toISOString(),
     });
   }
@@ -750,6 +747,49 @@ async function addShipCategoriesToKillmail(killmail) {
   } catch (error) {
     console.error("Fatal error in addShipCategoriesToKillmail:", error);
     throw error;
+  }
+}
+
+async function processKillmail(killmail) {
+  try {
+    // 1. Basic validation
+    if (!killmail || !killmail.killmail) {
+      throw new Error("Invalid killmail data");
+    }
+
+    // 2. Check for position data
+    if (killmail.killmail.position) {
+      // Fetch celestial data for the system
+      const systemId = killmail.killmail.solar_system_id;
+      const celestialData = await fetchCelestialData(systemId);
+
+      // Calculate pinpoints
+      const pinpointData = calculatePinpoints(
+        celestialData,
+        killmail.killmail.position
+      );
+      killmail.pinpointData = pinpointData;
+    }
+
+    // 3. Add ship category data for victim and attackers
+    const enrichedKillmail = await addShipCategoriesToKillmail(killmail);
+
+    // 4. Add additional metadata
+    enrichedKillmail.processed = {
+      timestamp: new Date().toISOString(),
+      systemId: killmail.killmail.solar_system_id,
+      victimShipTypeId: killmail.killmail.victim.ship_type_id,
+      attackerCount: killmail.killmail.attackers.length,
+      totalValue: killmail.zkb?.totalValue || 0,
+    };
+
+    // 5. Process for gate camps using campManager
+    campManager.processCamp(enrichedKillmail);
+
+    return enrichedKillmail;
+  } catch (error) {
+    console.error("Error processing killmail:", error);
+    throw error; // Re-throw the error to be handled by the caller
   }
 }
 
@@ -1850,25 +1890,293 @@ redisClient.on("reconnecting", () => {
 io.on("connection", (socket) => {
   console.log("New client connected");
 
-  const initialRoams = roamStore.getRoams();
-  socket.emit("initialRoams", initialRoams);
+  // Send initial states
+  socket.emit("initialCamps", campManager.getActiveCamps());
+  socket.emit("initialRoams", roamManager.getRoams());
 
-  // Get current camps from store
-  let currentCamps = [];
-  const unsubscribe = activeCamps.subscribe((value) => {
-    currentCamps = value;
+  socket.on("requestCamps", (callback) => {
+    console.log(`[${new Date().toISOString()}] Client requested camp data`);
+    if (typeof callback === "function") {
+      try {
+        const activeCamps = campManager.getActiveCamps();
+        console.log(
+          `[${new Date().toISOString()}] Sending camp data to client:`,
+          socket.id
+        );
+        callback(activeCamps);
+      } catch (error) {
+        console.error(
+          `[${new Date().toISOString()}] Error getting active camps:`,
+          error
+        );
+        // Send an error back to the client
+        callback({ error: "Error retrieving camp data" });
+      }
+    }
   });
 
-  // Send initial state
-  socket.emit("initialCamps", currentCamps);
+  socket.on("requestRoams", () => {
+    socket.emit("roamUpdate", roamManager.getRoams());
+  });
 
-  if (socket.request.session?.user?.id) {
-    const userId = socket.request.session.user.id.toString();
-    socket.join(userId);
-    console.log(`User ${userId} joined their socket room`);
-  }
+  socket.on("requestSync", async () => {
+    if (!socket.username) {
+      socket.emit("syncError", { message: "Not authenticated" });
+      return;
+    }
 
-  socket.on("fetchProfiles", async () => {
+    try {
+      const userData = await getUserData(socket.username);
+      socket.emit("syncComplete", userData);
+    } catch (error) {
+      socket.emit("syncError", { message: error.message });
+    }
+  });
+
+  // Login handling
+  socket.on("login", async ({ username, password }) => {
+    try {
+      const { rows } = await db.execute({
+        sql: "SELECT id, username, password, settings, character_id, character_name, access_token FROM users WHERE username = ?",
+        args: [username],
+      });
+
+      const user = rows[0];
+      if (user) {
+        const match = await compare(password, user.password);
+        if (match) {
+          const sessionUser = {
+            id: Number(user.id),
+            username: String(user.username),
+            character_id: user.character_id ? String(user.character_id) : null,
+            character_name: user.character_name
+              ? String(user.character_name)
+              : null,
+            access_token: user.access_token ? String(user.access_token) : null,
+          };
+
+          socket.request.session.user = sessionUser;
+          await new Promise((resolve, reject) => {
+            socket.request.session.save((err) => {
+              if (err) {
+                console.error("Session save error:", err);
+                reject(err);
+                return;
+              }
+              resolve();
+            });
+          });
+
+          socket.username = username;
+
+          const { rows: filterLists } = await db.execute({
+            sql: "SELECT * FROM filter_lists WHERE user_id = ?",
+            args: [sessionUser.id],
+          });
+
+          const processedFilterLists = filterLists.map((list) => ({
+            id: list.id.toString(),
+            user_id: list.user_id.toString(),
+            name: list.name,
+            ids: JSON.parse(list.ids || "[]"),
+            enabled: Boolean(list.enabled),
+            is_exclude: Boolean(list.is_exclude),
+            filter_type: list.filter_type || null,
+          }));
+
+          socket.emit("loginSuccess", {
+            settings: user.settings ? JSON.parse(user.settings) : {},
+            filterLists: processedFilterLists,
+          });
+        } else {
+          socket.emit("loginError", { message: "Invalid credentials" });
+        }
+      } else {
+        socket.emit("loginError", { message: "User not found" });
+      }
+    } catch (err) {
+      console.error("Login error:", err);
+      socket.emit("loginError", { message: "Error during login" });
+    }
+  });
+
+  // Settings handling
+  socket.on("updateSettings", async (newSettings) => {
+    if (socket.username) {
+      try {
+        await db.execute({
+          sql: "UPDATE users SET settings = ? WHERE username = ?",
+          args: [JSON.stringify(newSettings), socket.username],
+        });
+        console.log("Settings updated for user:", socket.username);
+      } catch (err) {
+        console.error("Error updating settings:", err);
+        socket.emit("error", { message: "Failed to update settings" });
+      }
+    }
+  });
+
+  // Filter list handling
+  socket.on("createFilterList", async (data) => {
+    if (!socket.request.session?.user?.id) {
+      socket.emit("error", { message: "Not authenticated" });
+      return;
+    }
+
+    try {
+      const { name, ids, enabled, is_exclude, filter_type } = data;
+      const userId = socket.request.session.user.id;
+
+      const processedIds = Array.isArray(ids)
+        ? ids
+        : ids.map((id) => id.trim());
+
+      const result = await db.execute({
+        sql: "INSERT INTO filter_lists (user_id, name, ids, enabled, is_exclude, filter_type) VALUES (?, ?, ?, ?, ?, ?)",
+        args: [
+          userId,
+          name,
+          JSON.stringify(processedIds),
+          enabled ? 1 : 0,
+          is_exclude ? 1 : 0,
+          filter_type,
+        ],
+      });
+
+      const newFilterList = {
+        id: result.lastInsertRowid.toString(),
+        user_id: userId.toString(),
+        name,
+        ids: processedIds,
+        enabled: Boolean(enabled),
+        is_exclude: Boolean(is_exclude),
+        filter_type,
+      };
+
+      io.to(userId.toString()).emit("filterListCreated", newFilterList);
+    } catch (error) {
+      console.error("Error creating filter list:", error);
+      socket.emit("error", { message: "Failed to create filter list" });
+    }
+  });
+
+  socket.on(
+    "updateFilterList",
+    async ({ id, name, ids, enabled, is_exclude, filter_type }) => {
+      const processedIds = Array.isArray(ids) ? ids : JSON.parse(ids);
+
+      try {
+        const { rows } = await db.execute({
+          sql: "SELECT user_id FROM filter_lists WHERE id = ?",
+          args: [id],
+        });
+
+        if (rows.length === 0) {
+          socket.emit("error", { message: "Filter list not found" });
+          return;
+        }
+
+        await db.execute({
+          sql: "UPDATE filter_lists SET name = ?, ids = ?, enabled = ?, is_exclude = ?, filter_type = ? WHERE id = ?",
+          args: [
+            name,
+            JSON.stringify(processedIds),
+            enabled ? 1 : 0,
+            is_exclude ? 1 : 0,
+            filter_type,
+            id,
+          ],
+        });
+
+        const updatedList = {
+          id: id.toString(),
+          user_id: rows[0].user_id.toString(),
+          name,
+          ids: processedIds,
+          enabled: Boolean(enabled),
+          is_exclude: Boolean(is_exclude),
+          filter_type,
+        };
+
+        io.to(rows[0].user_id.toString()).emit(
+          "filterListUpdated",
+          updatedList
+        );
+      } catch (err) {
+        console.error("Error updating filter list:", err);
+        socket.emit("error", { message: "Failed to update filter list" });
+      }
+    }
+  );
+
+  socket.on("deleteFilterList", async ({ id }) => {
+    try {
+      await db.execute({
+        sql: "DELETE FROM filter_lists WHERE id = ?",
+        args: [id],
+      });
+      socket.emit("filterListDeleted", { id });
+    } catch (err) {
+      console.error("Error deleting filter list:", err);
+      socket.emit("error", { message: "Failed to delete filter list" });
+    }
+  });
+
+  // Profile handling
+  socket.on("saveProfile", async (data) => {
+    if (!socket.request.session?.user?.id) {
+      socket.emit("error", { message: "Not authenticated" });
+      return;
+    }
+
+    try {
+      const userId = socket.request.session.user.id;
+      const { name, settings, filterLists } = data;
+
+      const serializedFilterLists = filterLists.map((list) => ({
+        ...list,
+        id: list.id.toString(),
+      }));
+
+      const profileData = JSON.stringify({
+        settings,
+        filterLists: serializedFilterLists,
+      });
+
+      const { rows: existingProfile } = await db.execute({
+        sql: "SELECT id FROM user_profiles WHERE user_id = ? AND name = ?",
+        args: [userId, name],
+      });
+
+      let profileId;
+      if (existingProfile[0]) {
+        await db.execute({
+          sql: "UPDATE user_profiles SET settings = ? WHERE id = ?",
+          args: [profileData, existingProfile[0].id],
+        });
+        profileId = existingProfile[0].id;
+      } else {
+        const result = await db.execute({
+          sql: "INSERT INTO user_profiles (user_id, name, settings) VALUES (?, ?, ?)",
+          args: [userId, name, profileData],
+        });
+        profileId = result.lastInsertRowid;
+      }
+
+      const savedProfile = {
+        id: profileId.toString(),
+        name,
+        settings: JSON.parse(profileData),
+      };
+
+      socket.emit("profileSaved", savedProfile);
+    } catch (error) {
+      console.error("Error saving profile:", error);
+      socket.emit("error", { message: "Error saving profile" });
+    }
+  });
+
+  socket.on("loadProfile", async (profileId) => {
     if (!socket.request.session?.user?.id) {
       socket.emit("error", { message: "Not authenticated" });
       return;
@@ -1876,20 +2184,24 @@ io.on("connection", (socket) => {
 
     try {
       const { rows } = await db.execute({
-        sql: "SELECT id, name, settings FROM user_profiles WHERE user_id = ?",
-        args: [socket.request.session.user.id],
+        sql: "SELECT settings, name FROM user_profiles WHERE id = ? AND user_id = ?",
+        args: [profileId, socket.request.session.user.id],
       });
 
-      const profiles = rows.map((row) => ({
-        id: row.id,
-        name: row.name,
-        settings: JSON.parse(row.settings),
-      }));
+      if (!rows[0]) {
+        socket.emit("error", { message: "Profile not found" });
+        return;
+      }
 
-      socket.emit("profilesFetched", profiles);
+      const profileData = JSON.parse(rows[0].settings);
+      socket.emit("profileLoaded", {
+        id: profileId,
+        name: rows[0].name,
+        ...profileData,
+      });
     } catch (error) {
-      console.error("Error fetching profiles:", error);
-      socket.emit("error", { message: "Error fetching profiles" });
+      console.error("Error loading profile:", error);
+      socket.emit("error", { message: "Error loading profile" });
     }
   });
 
@@ -1927,512 +2239,43 @@ io.on("connection", (socket) => {
     }
   });
 
+  socket.on("fetchProfiles", async () => {
+    if (!socket.request.session?.user?.id) {
+      socket.emit("error", { message: "Not authenticated" });
+      return;
+    }
+
+    try {
+      const { rows } = await db.execute({
+        sql: "SELECT id, name, settings FROM user_profiles WHERE user_id = ?",
+        args: [socket.request.session.user.id],
+      });
+
+      const profiles = rows.map((row) => ({
+        id: row.id,
+        name: row.name,
+        settings: JSON.parse(row.settings),
+      }));
+
+      socket.emit("profilesFetched", profiles);
+    } catch (error) {
+      console.error("Error fetching profiles:", error);
+      socket.emit("error", { message: "Error fetching profiles" });
+    }
+  });
+
   socket.on("clearKills", () => {
     killmails = [];
     socket.emit("killmailsCleared");
   });
 
-  socket.on("updateSettings", async (newSettings) => {
-    if (socket.username) {
-      try {
-        await db.execute({
-          sql: "UPDATE users SET settings = ? WHERE username = ?",
-          args: [JSON.stringify(newSettings), socket.username],
-        });
-        console.log("Settings updated for user:", socket.username);
-      } catch (err) {
-        console.error("Error updating settings:", err);
-      }
-    }
-  });
-
-  socket.on("createFilterList", async (data) => {
-    console.log("Received createFilterList event:", data);
-
-    if (!socket.request.session?.user?.id) {
-      console.log("Rejecting createFilterList - user not authenticated");
-      socket.emit("error", { message: "Not authenticated" });
-      return;
-    }
-
-    try {
-      const { name, ids, enabled, is_exclude, filter_type } = data;
-      const userId = socket.request.session.user.id;
-
-      console.log("Processing filter list creation for user:", userId, {
-        name,
-        ids,
-        enabled,
-        is_exclude,
-        filter_type,
-      });
-
-      // Process IDs based on filter type
-      const processedIds = Array.isArray(ids)
-        ? ids
-        : ids.map((id) => id.trim());
-
-      console.log(
-        "Inserting filter list into database with processed IDs:",
-        processedIds
-      );
-
-      const result = await db.execute({
-        sql: "INSERT INTO filter_lists (user_id, name, ids, enabled, is_exclude, filter_type) VALUES (?, ?, ?, ?, ?, ?)",
-        args: [
-          userId,
-          name,
-          JSON.stringify(processedIds),
-          enabled ? 1 : 0,
-          is_exclude ? 1 : 0,
-          filter_type,
-        ],
-      });
-
-      console.log("Database insert result:", result);
-
-      const newFilterList = {
-        id: result.lastInsertRowid.toString(),
-        user_id: userId.toString(),
-        name,
-        ids: processedIds,
-        enabled: Boolean(enabled),
-        is_exclude: Boolean(is_exclude),
-        filter_type,
-      };
-
-      console.log(
-        "Broadcasting new filter list to room:",
-        userId,
-        newFilterList
-      );
-
-      // Emit to user's room
-      io.to(userId.toString()).emit("filterListCreated", newFilterList);
-
-      // Emit success back to sending socket
-      socket.emit("filterListCreated", newFilterList);
-    } catch (error) {
-      console.error("Error creating filter list:", error);
-      socket.emit("error", {
-        message: "Failed to create filter list",
-        details: error.message,
-      });
-    }
-  });
-
-  socket.on(
-    "updateFilterList",
-    async ({ id, name, ids, enabled, is_exclude, filter_type }) => {
-      const processedIds = Array.isArray(ids)
-        ? ids
-        : typeof ids === "string"
-        ? JSON.parse(ids)
-        : ids;
-
-      try {
-        const { rows } = await db.execute({
-          sql: "SELECT user_id FROM filter_lists WHERE id = ?",
-          args: [id],
-        });
-
-        if (rows.length === 0) {
-          socket.emit("error", { message: "Filter list not found" });
-          return;
-        }
-
-        await db.execute({
-          sql: "UPDATE filter_lists SET name = ?, ids = ?, enabled = ?, is_exclude = ?, filter_type = ? WHERE id = ?",
-          args: [
-            name,
-            JSON.stringify(processedIds),
-            enabled ? 1 : 0,
-            is_exclude ? 1 : 0,
-            filter_type,
-            id,
-          ],
-        });
-
-        const updatedList = {
-          id: id.toString(),
-          user_id: rows[0].user_id.toString(),
-          name,
-          ids: processedIds,
-          enabled: Boolean(enabled),
-          is_exclude: Boolean(is_exclude),
-          filter_type,
-        };
-
-        // Emit to specific user's room
-        io.to(rows[0].user_id.toString()).emit(
-          "filterListUpdated",
-          updatedList
-        );
-        socket.emit("filterListUpdated", updatedList);
-      } catch (err) {
-        console.error("Error updating filter list:", err);
-        socket.emit("error", { message: "Failed to update filter list" });
-      }
-    }
-  );
-  socket.on("deleteFilterList", async ({ id }) => {
-    try {
-      await db.execute({
-        sql: "DELETE FROM filter_lists WHERE id = ?",
-        args: [id],
-      });
-      console.log("Deleted filter list:", id);
-      socket.emit("filterListDeleted", { id });
-    } catch (err) {
-      console.error("Error deleting filter list:", err);
-    }
-  });
-
-  socket.on("saveProfile", async (data) => {
-    if (!socket.request.session?.user?.id) {
-      socket.emit("error", { message: "Not authenticated" });
-      return;
-    }
-
-    try {
-      const userId = socket.request.session.user.id;
-      const { name, settings, filterLists } = data;
-
-      // Convert BigInt values to strings in filterLists
-      const serializedFilterLists = filterLists.map((list) => ({
-        ...list,
-        id: list.id.toString(), // Convert BigInt to string
-      }));
-
-      const profileData = JSON.stringify({
-        settings,
-        filterLists: serializedFilterLists,
-      });
-
-      // Check if the profile already exists
-      const { rows: existingProfile } = await db.execute({
-        sql: "SELECT id FROM user_profiles WHERE user_id = ? AND name = ?",
-        args: [userId, name],
-      });
-
-      let profileId;
-      if (existingProfile[0]) {
-        // Update existing profile
-        await db.execute({
-          sql: "UPDATE user_profiles SET settings = ? WHERE id = ?",
-          args: [profileData, existingProfile[0].id],
-        });
-        profileId = existingProfile[0].id;
-      } else {
-        // Insert new profile
-        const result = await db.execute({
-          sql: "INSERT INTO user_profiles (user_id, name, settings) VALUES (?, ?, ?)",
-          args: [userId, name, profileData],
-        });
-        profileId = result.lastInsertRowid; // Use lastInsertRowid
-      }
-
-      // Create the saved profile object
-      const savedProfile = {
-        id: profileId.toString(), // Convert BigInt to string
-        name,
-        settings: JSON.parse(profileData),
-      };
-
-      // Emit the saved profile to the client
-      socket.emit("profileSaved", savedProfile);
-    } catch (error) {
-      console.error("Error saving profile:", error);
-      socket.emit("error", { message: "Error saving profile" });
-    }
-  });
-
-  // Account routes
-  socket.on("login", async ({ username, password }) => {
-    try {
-      // Log incoming data
-      console.log(
-        "Login attempt - username type:",
-        typeof username,
-        "password type:",
-        typeof password
-      );
-
-      // Ensure clean string values and null checks
-      if (!username || !password) {
-        socket.emit("loginError", {
-          message: "Username and password are required",
-        });
-        return;
-      }
-
-      const cleanUsername = String(username).trim();
-      const cleanPassword = String(password).trim();
-
-      // Log the query we're about to execute
-      console.log("Executing user query for username:", cleanUsername);
-
-      const { rows } = await db.execute({
-        sql: "SELECT id, username, password, settings, character_id, character_name, access_token FROM users WHERE username = ?",
-        args: [cleanUsername],
-      });
-
-      console.log("Query result rows:", rows?.length);
-
-      const user = rows[0];
-
-      if (user) {
-        try {
-          const match = await compare(cleanPassword, user.password);
-
-          if (match) {
-            // Create a clean session user object
-            const sessionUser = {
-              id: Number(user.id),
-              username: String(user.username),
-              character_id: user.character_id
-                ? String(user.character_id)
-                : null,
-              character_name: user.character_name
-                ? String(user.character_name)
-                : null,
-              access_token: user.access_token
-                ? String(user.access_token)
-                : null,
-            };
-
-            // Save to session
-            socket.request.session.user = sessionUser;
-
-            await new Promise((resolve, reject) => {
-              socket.request.session.save((err) => {
-                if (err) {
-                  console.error("Session save error:", err);
-                  reject(err);
-                  return;
-                }
-                console.log("Session saved with user:", sessionUser);
-                resolve();
-              });
-            });
-
-            socket.username = cleanUsername;
-
-            // Fetch filter lists with proper error handling
-            try {
-              const { rows: filterLists } = await db.execute({
-                sql: "SELECT * FROM filter_lists WHERE user_id = ?",
-                args: [sessionUser.id],
-              });
-
-              // Process filter lists properly
-              const processedFilterLists = filterLists.map((list) => ({
-                id: list.id.toString(),
-                user_id: list.user_id.toString(),
-                name: list.name,
-                ids: JSON.parse(list.ids || "[]"),
-                enabled: Boolean(list.enabled),
-                is_exclude: Boolean(list.is_exclude),
-                filter_type: list.filter_type || null,
-              }));
-
-              console.log(
-                "Sending processed filter lists to client:",
-                processedFilterLists
-              );
-
-              socket.emit("loginSuccess", {
-                settings: user.settings ? JSON.parse(user.settings) : {},
-                filterLists: processedFilterLists,
-              });
-            } catch (filterError) {
-              console.error("Error fetching filter lists:", filterError);
-              socket.emit("loginSuccess", {
-                settings: user.settings ? JSON.parse(user.settings) : {},
-                filterLists: [],
-              });
-            }
-          } else {
-            socket.emit("loginError", { message: "Invalid credentials" });
-          }
-        } catch (compareError) {
-          console.error("Password comparison error:", compareError);
-          socket.emit("loginError", { message: "Error verifying credentials" });
-        }
-      } else {
-        socket.emit("loginError", { message: "User not found" });
-      }
-    } catch (err) {
-      console.error("Detailed login error:", {
-        error: err,
-        message: err.message,
-        stack: err.stack,
-        username: username ? "provided" : "missing",
-        password: password ? "provided" : "missing",
-      });
-
-      socket.emit("loginError", {
-        message: "Error during login",
-        details: err.message,
-      });
-    }
-  });
-
-  socket.on("requestSync", async () => {
-    if (!socket.username) {
-      socket.emit("syncError", { message: "Not authenticated" });
-      return;
-    }
-
-    try {
-      const userData = await getUserData(socket.username);
-      socket.emit("syncComplete", userData);
-    } catch (error) {
-      socket.emit("syncError", { message: error.message });
-    }
-  });
-
-  socket.on("loadProfile", async (profileId) => {
-    if (!socket.request.session?.user?.id) {
-      socket.emit("error", { message: "Not authenticated" });
-      return;
-    }
-
-    try {
-      const { rows } = await db.execute({
-        sql: `SELECT settings, name FROM user_profiles 
-              WHERE id = ? AND user_id = ?`,
-        args: [profileId, socket.request.session.user.id],
-      });
-
-      if (!rows[0]) {
-        socket.emit("error", { message: "Profile not found" });
-        return;
-      }
-
-      const profileData = JSON.parse(rows[0].settings);
-      socket.emit("profileLoaded", {
-        id: profileId,
-        name: rows[0].name,
-        ...profileData,
-      });
-    } catch (error) {
-      console.error("Error loading profile:", error);
-      socket.emit("error", { message: "Error loading profile" });
-    }
-  });
-
   socket.on("disconnect", () => {
-    unsubscribe();
     console.log("Client disconnected");
   });
 });
 
-async function processKillmail(killmail) {
-  console.log("Starting processKillmail", {
-    killID: killmail.killID,
-    systemId: killmail.killmail.solar_system_id,
-    time: killmail.killmail.killmail_time,
-  });
-
-  try {
-    const systemId = killmail.killmail.solar_system_id;
-
-    console.log("Fetching celestial data...");
-    const celestialData = await fetchCelestialData(systemId);
-    console.log(
-      "Celestial data fetched:",
-      celestialData && celestialData.length
-    );
-
-    // Calculate pinpoint data including nearest celestial
-    console.log("Calculating pinpoints...");
-    const pinpointData = calculatePinpoints(
-      celestialData,
-      killmail.killmail.victim.position
-    );
-    // console.log("Pinpoint data calculated:", pinpointData);
-
-    // Get the first celestial entry which contains system info
-    const systemInfo = celestialData?.[0];
-    const celestialInfo = systemInfo
-      ? {
-          regionid: systemInfo.regionid,
-          regionname: systemInfo.regionname,
-          solarsystemid: systemInfo.solarsystemid,
-          solarsystemname: systemInfo.solarsystemname,
-        }
-      : {
-          regionid: null,
-          regionname: null,
-          solarsystemid: systemId,
-          solarsystemname: null,
-        };
-    pinpointData.celestialData = celestialInfo;
-
-    // Check for camp crusher rewards
-    console.log("Checking camp crusher targets...");
-    try {
-      const { rows: targets } = await db.execute({
-        sql: `SELECT ct.*, cc.bashbucks 
-              FROM camp_crusher_targets ct 
-              JOIN camp_crushers cc ON ct.character_id = cc.character_id 
-              WHERE ct.camp_id = ? AND ct.completed = FALSE AND ct.end_time > CURRENT_TIMESTAMP`,
-        args: [killmail.killmail.solar_system_id],
-      });
-      console.log(`Found ${targets.length} potential camp crusher targets`);
-
-      for (const target of targets) {
-        const isAttacker = killmail.killmail.attackers.some(
-          (a) => a.character_id === target.character_id
-        );
-
-        if (isAttacker) {
-          console.log(
-            `Processing camp crusher reward for character ${target.character_id}`
-          );
-          const bashbucksAwarded = Math.floor(
-            killmail.zkb.totalValue / 1000000
-          );
-
-          await db.execute({
-            sql: "UPDATE camp_crushers SET bashbucks = bashbucks + ? WHERE character_id = ?",
-            args: [bashbucksAwarded, target.character_id],
-          });
-
-          await db.execute({
-            sql: "UPDATE camp_crusher_targets SET completed = TRUE WHERE id = ?",
-            args: [target.id],
-          });
-
-          io.to(target.character_id).emit("bashbucksAwarded", {
-            amount: bashbucksAwarded,
-            newTotal: target.bashbucks + bashbucksAwarded,
-            killmail: {
-              id: killmail.killID,
-              value: killmail.zkb.totalValue,
-              system: celestialInfo.solarsystemname || systemId,
-            },
-          });
-        }
-      }
-    } catch (error) {
-      console.error("Error processing camp crusher rewards:", error);
-    }
-
-    return {
-      ...killmail,
-      pinpoints: pinpointData,
-    };
-  } catch (error) {
-    console.error("Fatal error in processKillmail:", error);
-    throw error;
-  }
-}
-
 // Function to poll for new killmails from RedisQ
 // Modify the polling function to use processKillmail
-// Function to poll for new killmails from RedisQ
 async function pollRedisQ() {
   try {
     const timestamp = new Date().toISOString();
@@ -2443,7 +2286,7 @@ async function pollRedisQ() {
     const response = await axios.get(REDISQ_URL, {
       timeout: 30000,
       headers: {
-        "User-Agent": "KM-Hunter/1.0.0",
+        "User-Agent": "Zcamp/1.0.0",
       },
     });
 
@@ -2474,46 +2317,23 @@ async function pollRedisQ() {
 
             try {
               const processedKillmail = await processKillmail(killmail);
-              console.log(
-                `[${timestamp}] Killmail processed with celestial data`
-              );
-
-              const enrichedKillmail = await addShipCategoriesToKillmail(
-                processedKillmail
-              );
-              console.log(
-                `[${timestamp}] Killmail enriched with ship categories`
-              );
 
               // Add to cache
-              killmails.push(enrichedKillmail);
+              killmails.push(processedKillmail);
               console.log(
                 `[${timestamp}] Added to cache. New total: ${killmails.length}`
               );
 
-              // Emit to connected clients
+              // Broadcast to clients
               const connectedClients = io.sockets.sockets.size;
               console.log(
                 `[${timestamp}] Broadcasting to ${connectedClients} connected clients`
               );
-              io.emit("newKillmail", enrichedKillmail);
+              io.emit("newKillmail", processedKillmail);
 
               // Process for roaming gangs
-              const updatedRoams =
-                roamStore.updateRoamingGangs(enrichedKillmail);
-              console.log(
-                `[${timestamp}] Updated roams: ${updatedRoams.length}`
-              );
-              activeRoams.set(updatedRoams);
-              io.emit("roamUpdate", updatedRoams);
-
-              // Process for gate camps
-              // When processing killmail
-              if (isGateCamp(enrichedKillmail)) {
-                console.log(`[${timestamp}] Processing gate camp...`);
-                const updatedCamps = updateCamps(enrichedKillmail);
-                io.emit("campUpdate", updatedCamps);
-              }
+              console.log(`[${timestamp}] Processing roaming gang...`);
+              roamManager.updateRoamingGangs(processedKillmail);
             } catch (processError) {
               console.error(
                 `[${timestamp}] Error processing killmail:`,
@@ -2529,10 +2349,6 @@ async function pollRedisQ() {
       } else {
         console.log(`[${timestamp}] No killmail package in response`);
       }
-    } else {
-      console.log(
-        `[${timestamp}] Unexpected response status: ${response.status}`
-      );
     }
   } catch (error) {
     console.error(`[${new Date().toISOString()}] Error polling RedisQ:`, {
@@ -2542,8 +2358,8 @@ async function pollRedisQ() {
     });
   }
 
-  const delay = 20; // 20 ms delay
-  setTimeout(pollRedisQ, delay);
+  // Queue next poll with a short delay
+  setTimeout(pollRedisQ, 20);
 }
 
 // There are sometimes duplicate killmails in the RedisQ
@@ -2564,6 +2380,25 @@ async function startServer() {
   try {
     await initializeDatabase();
     isDatabaseInitialized = true;
+
+    // Initialize managers
+    campManager.startUpdates(30000);
+    roamManager.startUpdates(30000);
+
+    // Listen for camp updates and broadcast to clients
+    campManager.on("campsUpdated", (camps) => {
+      console.log(
+        `[${new Date().toISOString()}] Emitting campsUpdated event with ${
+          camps.length
+        } active camps`
+      );
+      io.emit("campUpdate", camps);
+    });
+
+    // Listen for roam updates and broadcast to clients
+    roamManager.on("roamsUpdated", (roams) => {
+      io.emit("roamUpdate", roams);
+    });
 
     return new Promise((resolve, reject) => {
       server
@@ -2630,7 +2465,9 @@ app.get("*", (_, res) => {
 });
 
 process.on("SIGTERM", async () => {
-  console.log("SIGTERM received. Closing Redis connection...");
+  console.log("SIGTERM received. Cleaning up...");
+  campManager.cleanup();
+  roamManager.cleanup();
   await redisClient.quit();
   process.exit(0);
 });
