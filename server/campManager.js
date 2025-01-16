@@ -63,15 +63,6 @@ class CampManager extends EventEmitter {
   }
 
   processCamp(killmail) {
-    if (!this.isGateCamp(killmail)) {
-      console.log(
-        `[${new Date().toISOString()}] Killmail ${
-          killmail.killID
-        } is not a gate camp, skipping camp processing`
-      );
-      return this.activeCamps;
-    }
-
     const now = Date.now();
     const systemId = killmail.killmail.solar_system_id;
     const systemName =
@@ -126,7 +117,7 @@ class CampManager extends EventEmitter {
       this.activeCamps.push(newCamp);
     }
 
-    this.emit("campsUpdated", this.activeCamps);
+    // this.emit("campsUpdated", this.activeCamps); // Removed this as it is handled in updateAllProbabilities
     return this.activeCamps;
   }
 
@@ -339,9 +330,20 @@ class CampManager extends EventEmitter {
 
   isGateCamp(killmail) {
     if (!killmail.pinpoints?.nearestCelestial) return false;
-    return killmail.pinpoints.nearestCelestial.name
-      .toLowerCase()
-      .includes("stargate");
+
+    const isAtGate =
+      killmail.pinpoints.atCelestial &&
+      killmail.pinpoints.nearestCelestial.name
+        .toLowerCase()
+        .includes("stargate");
+    const isNearGate =
+      !killmail.pinpoints.atCelestial &&
+      killmail.pinpoints.nearestCelestial.name
+        .toLowerCase()
+        .includes("stargate") &&
+      killmail.pinpoints.triangulationPossible;
+
+    return isAtGate || isNearGate;
   }
 
   hasSmartbombs(kills) {

@@ -750,49 +750,6 @@ async function addShipCategoriesToKillmail(killmail) {
   }
 }
 
-async function processKillmail(killmail) {
-  try {
-    // 1. Basic validation
-    if (!killmail || !killmail.killmail) {
-      throw new Error("Invalid killmail data");
-    }
-
-    // 2. Check for position data
-    if (killmail.killmail.position) {
-      // Fetch celestial data for the system
-      const systemId = killmail.killmail.solar_system_id;
-      const celestialData = await fetchCelestialData(systemId);
-
-      // Calculate pinpoints
-      const pinpointData = calculatePinpoints(
-        celestialData,
-        killmail.killmail.position
-      );
-      killmail.pinpointData = pinpointData;
-    }
-
-    // 3. Add ship category data for victim and attackers
-    const enrichedKillmail = await addShipCategoriesToKillmail(killmail);
-
-    // 4. Add additional metadata
-    enrichedKillmail.processed = {
-      timestamp: new Date().toISOString(),
-      systemId: killmail.killmail.solar_system_id,
-      victimShipTypeId: killmail.killmail.victim.ship_type_id,
-      attackerCount: killmail.killmail.attackers.length,
-      totalValue: killmail.zkb?.totalValue || 0,
-    };
-
-    // 5. Process for gate camps using campManager
-    campManager.processCamp(enrichedKillmail);
-
-    return enrichedKillmail;
-  } catch (error) {
-    console.error("Error processing killmail:", error);
-    throw error; // Re-throw the error to be handled by the caller
-  }
-}
-
 // Function to get the total size of a user's filter lists
 async function getFilterListsSize(userId) {
   try {
@@ -2274,6 +2231,111 @@ io.on("connection", (socket) => {
   });
 });
 
+async function processKillmail(killmail) {
+  console.log("Starting processKillmail", {
+    killID: killmail.killID,
+    systemId: killmail.killmail.solar_system_id,
+    time: killmail.killmail.killmail_time,
+  });
+
+  try {
+    const systemId = killmail.killmail.solar_system_id;
+
+    console.log("Fetching celestial data...");
+    const celestialData = await fetchCelestialData(systemId);
+    console.log(
+      "Celestial data fetched:",
+      celestialData && celestialData.length
+    );
+
+    // Calculate pinpoint data including nearest celestial
+    console.log("Calculating pinpoints...");
+    const pinpointData = calculatePinpoints(
+      celestialData,
+      killmail.killmail.victim.position // Make sure this is the correct property for victim position
+    );
+    console.log("Pinpoint data calculated:", pinpointData);
+
+    // Get the first celestial entry which contains system info
+    const systemInfo = celestialData?.[0];
+    const celestialInfo = systemInfo
+      ? {
+          regionid: systemInfo.regionid,
+          regionname: systemInfo.regionname,
+          solarsystemid: systemInfo.solarsystemid,
+          solarsystemname: systemInfo.solarsystemname,
+        }
+      : {
+          regionid: null,
+          regionname: null,
+          solarsystemid: systemId,
+          solarsystemname: null,
+        };
+
+    // Set celestial data for pinpoints
+    pinpointData.celestialData = celestialInfo;
+
+    // Check for camp crusher rewards
+    console.log("Checking camp crusher targets...");
+    try {
+      const { rows: targets } = await db.execute({
+        sql: `SELECT ct.*, cc.bashbucks 
+              FROM camp_crusher_targets ct 
+              JOIN camp_crushers cc ON ct.character_id = cc.character_id
+ 
+              WHERE ct.camp_id = ? AND ct.completed = FALSE AND ct.end_time > CURRENT_TIMESTAMP`,
+        args: [killmail.killmail.solar_system_id],
+      });
+      console.log(`Found ${targets.length} potential camp crusher targets`);
+
+      for (const target of targets) {
+        const isAttacker = killmail.killmail.attackers.some(
+          (a) => a.character_id === target.character_id
+        );
+
+        if (isAttacker) {
+          console.log(
+            `Processing camp crusher reward for character ${target.character_id}`
+          );
+          const bashbucksAwarded = Math.floor(
+            killmail.zkb.totalValue / 1000000
+          );
+
+          await db.execute({
+            sql: "UPDATE camp_crushers SET bashbucks = bashbucks + ? WHERE character_id = ?",
+            args: [bashbucksAwarded, target.character_id],
+          });
+
+          await db.execute({
+            sql: "UPDATE camp_crusher_targets SET completed = TRUE WHERE id = ?",
+            args: [target.id],
+          });
+
+          io.to(target.character_id).emit("bashbucksAwarded", {
+            amount: bashbucksAwarded,
+            newTotal: target.bashbucks + bashbucksAwarded,
+            killmail: {
+              id: killmail.killID,
+              value: killmail.zkb.totalValue,
+              system: celestialInfo.solarsystemname || systemId,
+            },
+          });
+        }
+      }
+    } catch (error) {
+      console.error("Error processing camp crusher rewards:", error);
+    }
+
+    // Add the celestial data to the killmail object
+    killmail.pinpoints = pinpointData;
+
+    return killmail;
+  } catch (error) {
+    console.error("Fatal error in processKillmail:", error);
+    throw error;
+  }
+}
+
 // Function to poll for new killmails from RedisQ
 // Modify the polling function to use processKillmail
 async function pollRedisQ() {
@@ -2317,23 +2379,44 @@ async function pollRedisQ() {
 
             try {
               const processedKillmail = await processKillmail(killmail);
+              console.log(
+                `[${timestamp}] Killmail processed with celestial data`
+              );
+
+              const enrichedKillmail = await addShipCategoriesToKillmail(
+                processedKillmail
+              );
+              console.log(
+                `[${timestamp}] Killmail enriched with ship categories`
+              );
 
               // Add to cache
-              killmails.push(processedKillmail);
+              killmails.push(enrichedKillmail);
               console.log(
                 `[${timestamp}] Added to cache. New total: ${killmails.length}`
               );
 
-              // Broadcast to clients
+              // Emit to connected clients
               const connectedClients = io.sockets.sockets.size;
               console.log(
                 `[${timestamp}] Broadcasting to ${connectedClients} connected clients`
               );
-              io.emit("newKillmail", processedKillmail);
+              io.emit("newKillmail", enrichedKillmail);
 
               // Process for roaming gangs
-              console.log(`[${timestamp}] Processing roaming gang...`);
-              roamManager.updateRoamingGangs(processedKillmail);
+              const updatedRoams =
+                roamManager.updateRoamingGangs(enrichedKillmail);
+              console.log(
+                `[${timestamp}] Updated roams: ${updatedRoams.length}`
+              );
+              io.emit("roamUpdate", updatedRoams);
+
+              // Process for gate camps
+              if (campManager.isGateCamp(enrichedKillmail)) {
+                console.log(`[${timestamp}] Processing gate camp...`);
+                const updatedCamps = campManager.processCamp(enrichedKillmail);
+                io.emit("campUpdate", updatedCamps);
+              }
             } catch (processError) {
               console.error(
                 `[${timestamp}] Error processing killmail:`,
