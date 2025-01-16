@@ -61,6 +61,7 @@ class RoamManager extends EventEmitter {
     const systemId = killmail.killmail.solar_system_id;
     const systemName =
       killmail.pinpoints?.celestialData?.solarsystemname || systemId.toString();
+    const regionName = killmail.pinpoints?.celestialData?.regionname || null;
 
     // Get unique attacker character IDs, excluding capsules
     const attackerIds = new Set(
@@ -110,10 +111,15 @@ class RoamManager extends EventEmitter {
         new Set([...existingRoam.members, ...attackerIds])
       );
       existingRoam.lastActivity = killmail.killmail.killmail_time;
-      existingRoam.lastSystem = { id: systemId, name: systemName };
+      existingRoam.lastSystem = {
+        id: systemId,
+        name: systemName,
+        region: regionName,
+      };
       existingRoam.systems.push({
         id: systemId,
         name: systemName,
+        region: regionName,
         time: killmail.killmail.killmail_time,
       });
       existingRoam.kills.push(killmail);
@@ -135,10 +141,15 @@ class RoamManager extends EventEmitter {
           {
             id: systemId,
             name: systemName,
+            region: regionName,
             time: killmail.killmail.killmail_time,
           },
         ],
-        lastSystem: { id: systemId, name: systemName },
+        lastSystem: {
+          id: systemId,
+          name: systemName,
+          region: regionName,
+        },
         startTime: killmail.killmail.killmail_time,
         lastActivity: killmail.killmail.killmail_time,
         kills: [killmail],
@@ -180,11 +191,18 @@ class RoamManager extends EventEmitter {
     return roams.map((roam) => ({
       ...roam,
       members: Array.from(roam.members || []),
-      systems: roam.systems || [],
+      systems: (roam.systems || []).map((system) => ({
+        ...system,
+        region: system.region || "Unknown",
+      })),
       kills: roam.kills || [],
       totalValue: roam.totalValue || 0,
       lastActivity: roam.lastActivity || new Date().toISOString(),
-      lastSystem: roam.lastSystem || { id: 0, name: "Unknown" },
+      lastSystem: {
+        id: roam.lastSystem?.id || 0,
+        name: roam.lastSystem?.name || "Unknown",
+        region: roam.lastSystem?.region || "Unknown",
+      },
       startTime:
         roam.startTime || roam.lastActivity || new Date().toISOString(),
     }));

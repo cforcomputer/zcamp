@@ -134,15 +134,25 @@ class CampManager extends EventEmitter {
       return 0;
     }
 
-    // Filter out pods and structures
-    const validKills = camp.kills.filter(
-      (kill) =>
-        kill.killmail.victim.ship_type_id !== CAPSULE_ID &&
-        kill.shipCategories?.victim !== "structure"
-    );
+    // Check if this is a standalone capsule kill (not part of an existing ship kill)
+    const isStandaloneCapsule =
+      camp.kills.length === 1 &&
+      camp.kills[0].killmail.victim.ship_type_id === CAPSULE_ID;
+
+    // Filter out pods and structures, but keep standalone capsule kills
+    const validKills = camp.kills.filter((kill) => {
+      if (kill.shipCategories?.victim === "structure") return false;
+      if (kill.killmail.victim.ship_type_id === CAPSULE_ID) {
+        // Only keep capsule if it's a standalone kill
+        return isStandaloneCapsule;
+      }
+      return true;
+    });
 
     if (validKills.length === 0) {
-      log.push("Camp excluded: No valid kills (non-pod, non-structure)");
+      log.push(
+        "Camp excluded: No valid kills (non-structure) or secondary pod kills"
+      );
       camp.probabilityLog = log;
       return 0;
     }

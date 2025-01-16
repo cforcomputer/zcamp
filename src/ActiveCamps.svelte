@@ -1,33 +1,13 @@
 <script>
-  import { onMount } from "svelte";
   import CampCrusher from "./CampCrusher.svelte";
-  import socket from "./socket.js";
+  import { camps } from "./campStore.js";
   import { CAMP_PROBABILITY_FACTORS, CAPSULE_ID } from "./constants.js";
+  import { onDestroy, onMount } from "svelte";
 
   const { THREAT_SHIPS } = CAMP_PROBABILITY_FACTORS;
 
-  let camps = [];
-
   // Reactive statement to sort camps whenever the array is updated
-  $: camps = camps.sort((a, b) => b.probability - a.probability);
-
-  onMount(() => {
-    // Listen for initial camps data
-    socket.on("initialCamps", (initialCamps) => {
-      camps = initialCamps;
-    });
-
-    // Listen for camp updates
-    socket.on("campUpdate", (updatedCamps) => {
-      camps = updatedCamps;
-    });
-
-    // Clean up on component destroy
-    return () => {
-      socket.off("initialCamps");
-      socket.off("campUpdate");
-    };
-  });
+  $: sortedCamps = $camps.sort((a, b) => b.probability - a.probability);
 
   // debug log
   $: console.log("ActiveCamps component state:", {
@@ -44,6 +24,20 @@
     }
     return (value / 1000).toFixed(2) + "K";
   }
+
+  //  reactive variable to trigger updates
+  let now = Date.now();
+  let intervalId;
+
+  onMount(() => {
+    intervalId = setInterval(() => {
+      now = Date.now();
+    }, 1000);
+  });
+
+  onDestroy(() => {
+    clearInterval(intervalId);
+  });
 
   function getTimeAgo(timestamp) {
     const now = new Date().getTime();
@@ -115,7 +109,7 @@
     <h2>Active Gate Camps</h2>
   </div>
   <div class="camp-grid">
-    {#each camps as camp}
+    {#each sortedCamps as camp}
       <button
         class="camp-card"
         type="button"
@@ -153,7 +147,7 @@
               {Math.round(camp.probability)}% Confidence
             </span>
             <button
-              class="zk-button"
+              class="last-kill-btn"
               title="View Latest Kill"
               on:click|stopPropagation={(e) => {
                 e.preventDefault();
@@ -227,7 +221,8 @@
                   {/if}
                 {/if}
               {:else if camp.composition}
-                {camp.composition.activeCount}/{camp.composition.originalCount} active
+                {camp.composition.activeCount}/{camp.composition.originalCount}
+                active
                 {#if camp.composition.killedCount > 0}
                   <span class="killed-count"
                     >(-{camp.composition.killedCount})</span
@@ -277,7 +272,7 @@
       </button>
     {/each}
 
-    {#if camps.length === 0}
+    {#if sortedCamps.length === 0}
       <p class="no-camps">No active gate camps detected</p>
     {/if}
   </div>
@@ -319,6 +314,7 @@
     display: flex;
     align-items: center;
     gap: 0.5em;
+    flex-wrap: wrap;
   }
 
   .camp-type {
@@ -368,8 +364,13 @@
   .camp-header {
     display: flex;
     justify-content: space-between;
-    align-items: center;
+    align-items: flex-start;
     margin-bottom: 1em;
+    gap: 1em;
+  }
+
+  .last-kill-btn:hover {
+    background: rgba(255, 255, 255, 0.2);
   }
 
   .header {
@@ -384,6 +385,7 @@
     border-radius: 4px;
     font-size: 0.9em;
     font-weight: bold;
+    white-space: nowrap;
   }
 
   .camp-stats {
@@ -444,6 +446,17 @@
     right: 0;
     z-index: 99;
     pointer-events: none; /* Prevent log from blocking interactions */
+  }
+
+  .last-kill-btn {
+    background: rgba(255, 255, 255, 0.1);
+    color: white;
+    padding: 0.3em 0.6em;
+    border-radius: 4px;
+    font-size: 0.9em;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    cursor: pointer;
+    transition: all 0.2s ease;
   }
 
   .probability-log {
