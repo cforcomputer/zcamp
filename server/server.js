@@ -764,6 +764,41 @@ async function getFilterListsSize(userId) {
   }
 }
 
+// Add to server.js
+async function cleanupCelestialData() {
+  const OLD_DATA_THRESHOLD = 7 * 24 * 60 * 60 * 1000; // 7 days
+  await db.execute(`
+    DELETE FROM celestial_data 
+    WHERE last_updated < datetime('now', '-7 days')
+  `);
+}
+
+// Run cleanup daily
+setInterval(cleanupCelestialData, 24 * 60 * 60 * 1000);
+
+async function cleanupShipTypes() {
+  await db.execute(`
+    DELETE FROM ship_types 
+    WHERE last_updated < datetime('now', '-30 days')
+  `);
+}
+
+// Run cleanup weekly
+setInterval(cleanupShipTypes, 7 * 24 * 60 * 60 * 1000);
+
+function logMemoryUsage() {
+  const used = process.memoryUsage();
+  console.log("Memory usage:");
+  for (let key in used) {
+    console.log(
+      `${key}: ${Math.round((used[key] / 1024 / 1024) * 100) / 100} MB`
+    );
+  }
+}
+
+// Log every hour
+setInterval(logMemoryUsage, 60 * 60 * 1000);
+
 async function fetchCelestialData(systemId) {
   console.log(`Fetching celestial data for system ${systemId}`);
 

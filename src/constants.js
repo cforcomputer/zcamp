@@ -34,7 +34,7 @@ export const CAMP_PROBABILITY_FACTORS = {
     14213: "Large Electron Smartbomb II",
     14215: "Large Gamma Smartbomb II",
     14269: "Domination Large EMP Smartbomb",
-    14271: "Dark Blood Large EMP Smartbomb",
+    14188: "Dark Blood Large EMP Smartbomb",
     14273: "True Sansha Large EMP Smartbomb",
     14275: "Shadow Serpentis Large Electron Smartbomb",
     14277: "Dread Guristas Large Proton Smartbomb",
