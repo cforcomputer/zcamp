@@ -1,31 +1,37 @@
-const axios = require('axios');
+import axios from "axios";
 
 // Test ship type IDs (mix of capitals and non-capitals)
 const testShipIds = [
   23911, // Carrier
-  672,   // Battleship
+  672, // Battleship
   37604, // FAX
-  626,   // Cruiser
-  19720  // Dreadnought
+  626, // Cruiser
+  19720, // Dreadnought
 ];
 
 async function getShipCategory(typeId) {
   try {
-    const response = await axios.get(`https://esi.evetech.net/latest/universe/types/${typeId}/`);
+    const response = await axios.get(
+      `https://esi.evetech.net/latest/universe/types/${typeId}/`
+    );
+    console.log(response);
     return {
       typeId: typeId,
       name: response.data.name,
       groupId: response.data.group_id,
-      categoryId: response.data.category_id
+      categoryId: response.data.category_id,
     };
   } catch (error) {
-    console.error(`Error fetching data for ship type ${typeId}:`, error.message);
+    console.error(
+      `Error fetching data for ship type ${typeId}:`,
+      error.message
+    );
     return null;
   }
 }
 
 async function testShipCategories() {
-  console.log('Starting ship category test...\n');
+  console.log("Starting ship category test...\n");
 
   for (const shipId of testShipIds) {
     try {
@@ -35,7 +41,7 @@ async function testShipCategories() {
         console.log(`Name: ${shipData.name}`);
         console.log(`Group ID: ${shipData.groupId}`);
         console.log(`Category ID: ${shipData.categoryId}`);
-        console.log('-------------------');
+        console.log("-------------------");
       }
     } catch (error) {
       console.error(`Failed to process ship ID ${shipId}:`, error.message);

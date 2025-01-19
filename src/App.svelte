@@ -8,7 +8,7 @@
   import ActiveBattles from "./ActiveBattles.svelte";
   import ActiveCamps from "./ActiveCamps.svelte";
   import ActiveRoams from "./ActiveRoams.svelte";
-  import CampCrusher from "./CampCrusher.svelte";
+  import SalvageFields from "./SalvageFields.svelte";
   import { initializeSettings } from "./store.js";
   import Leaderboard from "./Leaderboard.svelte";
   import LocationTracker from "./LocationTracker.svelte";
@@ -132,6 +132,14 @@
               Gangs
             </button>
             <button
+              class="eve-nav-item {currentPage === 'salvage'
+                ? 'bg-eve-accent/20 text-eve-accent'
+                : ''}"
+              on:click={() => (currentPage = "salvage")}
+            >
+              Salvage Fields
+            </button>
+            <button
               class="eve-nav-item {currentPage === 'bountyboard'
                 ? 'bg-eve-accent/20 text-eve-accent'
                 : ''}"
@@ -180,6 +188,10 @@
       {:else if currentPage === "gangs"}
         <div class="eve-card">
           <ActiveRoams />
+        </div>
+      {:else if currentPage === "salvage"}
+        <div class="eve-card">
+          <SalvageFields />
         </div>
       {:else if currentPage === "bountyboard"}
         <div class="eve-card">

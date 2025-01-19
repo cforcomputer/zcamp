@@ -257,6 +257,8 @@ async function initializeDatabase() {
       CREATE TABLE IF NOT EXISTS ship_types (
         ship_type_id INTEGER PRIMARY KEY,
         category TEXT NOT NULL,
+        name TEXT NULL,
+        tier TEXT NULL,
         last_updated DATETIME DEFAULT CURRENT_TIMESTAMP
       )
     `);
@@ -541,22 +543,23 @@ function isNPC(shipTypeID, killmail) {
 async function getShipCategoryFromDb(shipTypeId) {
   try {
     const { rows } = await db.execute({
-      sql: "SELECT category FROM ship_types WHERE ship_type_id = ?",
+      sql: "SELECT category, name, tier FROM ship_types WHERE ship_type_id = ?",
       args: [shipTypeId],
     });
-    return rows[0]?.category;
+    return rows[0];
   } catch (err) {
     console.error(`Database error fetching ship type ${shipTypeId}:`, err);
     throw err;
   }
 }
 
-async function storeShipCategory(shipTypeId, category) {
+async function storeShipCategory(shipTypeId, shipData) {
   try {
     await db.execute({
-      sql: `INSERT OR REPLACE INTO ship_types (ship_type_id, category, last_updated) 
-            VALUES (?, ?, CURRENT_TIMESTAMP)`,
-      args: [shipTypeId, category],
+      sql: `INSERT OR REPLACE INTO ship_types 
+            (ship_type_id, category, name, tier, last_updated) 
+            VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+      args: [shipTypeId, shipData.category, shipData.name, shipData.tier],
     });
   } catch (error) {
     console.error(`Database error storing ship type ${shipTypeId}:`, error);
@@ -564,18 +567,18 @@ async function storeShipCategory(shipTypeId, category) {
   }
 }
 
-function serializeData(data) {
-  if (typeof data === "bigint") {
-    return data.toString();
-  } else if (Array.isArray(data)) {
-    return data.map(serializeData);
-  } else if (typeof data === "object" && data !== null) {
-    return Object.fromEntries(
-      Object.entries(data).map(([key, value]) => [key, serializeData(value)])
-    );
-  }
-  return data;
-}
+// function serializeData(data) {
+//   if (typeof data === "bigint") {
+//     return data.toString();
+//   } else if (Array.isArray(data)) {
+//     return data.map(serializeData);
+//   } else if (typeof data === "object" && data !== null) {
+//     return Object.fromEntries(
+//       Object.entries(data).map(([key, value]) => [key, serializeData(value)])
+//     );
+//   }
+//   return data;
+// }
 
 // async function isCapitalShip(marketGroupId) {
 //   try {
@@ -609,70 +612,108 @@ async function determineShipCategory(typeId, killmail) {
       `https://esi.evetech.net/latest/universe/types/${typeId}/`
     );
 
+    // Get ship name and default tier
+    const shipName = response.data.name;
+    let tier = "T1";
+    let category = "unknown";
+
     // Check for CONCORD group specifically
     if (response.data.group_id === 1180) {
-      return "concord";
+      return {
+        category: "concord",
+        name: shipName,
+        tier: tier,
+      };
     }
 
     if (response.data.group_id === 29) {
-      return "capsule";
-    }
-
-    // Check AT ships
-    if (SHIP_CATEGORIES.AT_SHIP_IDS.includes(typeId)) {
-      return "at_ship";
+      return {
+        category: "capsule",
+        name: shipName,
+        tier: tier,
+      };
     }
 
     // Check if it's an NPC based on killmail data
-    // Fixed version
     if (killmail && isNPC(typeId, killmail)) {
-      return "npc";
+      return {
+        category: "npc",
+        name: shipName,
+        tier: tier,
+      };
     }
 
     let marketGroupId = response.data.market_group_id;
     if (!marketGroupId) {
-      return "unknown";
+      return {
+        category: "unknown",
+        name: shipName,
+        tier: tier,
+      };
     }
 
-    // Market group checks for player ships
+    // Check market groups for both category and tier
     while (marketGroupId) {
       const marketResponse = await axios.get(
         `https://esi.evetech.net/latest/markets/groups/${marketGroupId}/`
       );
 
-      if (PARENT_MARKET_GROUPS.CAPITALS.includes(marketGroupId)) {
-        return "capital";
-      } else if (PARENT_MARKET_GROUPS.STRUCTURES.includes(marketGroupId)) {
-        return "structure";
-      } else if (PARENT_MARKET_GROUPS.SHUTTLES.includes(marketGroupId)) {
-        return "shuttle";
-      } else if (PARENT_MARKET_GROUPS.FIGHTERS.includes(marketGroupId)) {
-        return "fighter";
-      } else if (marketGroupId === PARENT_MARKET_GROUPS.CORVETTES) {
-        return "corvette";
-      } else if (PARENT_MARKET_GROUPS.FRIGATES.includes(marketGroupId)) {
-        return "frigate";
-      } else if (PARENT_MARKET_GROUPS.DESTROYERS.includes(marketGroupId)) {
-        return "destroyer";
-      } else if (PARENT_MARKET_GROUPS.CRUISERS.includes(marketGroupId)) {
-        return "cruiser";
-      } else if (PARENT_MARKET_GROUPS.BATTLECRUISERS.includes(marketGroupId)) {
-        return "battlecruiser";
-      } else if (PARENT_MARKET_GROUPS.BATTLESHIPS.includes(marketGroupId)) {
-        return "battleship";
-      } else if (marketGroupId === PARENT_MARKET_GROUPS.INDUSTRIAL) {
-        return "industrial";
-      } else if (marketGroupId === PARENT_MARKET_GROUPS.MINING) {
-        return "mining";
+      const marketGroupName = marketResponse.data.name;
+
+      // Check market group name for tier - only look for "Advanced"
+      if (marketGroupName.includes("Advanced")) {
+        tier = "T2";
       }
+
+      // Category checks - set category once
+      if (category === "unknown") {
+        if (PARENT_MARKET_GROUPS.CAPITALS.includes(marketGroupId)) {
+          category = "capital";
+        } else if (PARENT_MARKET_GROUPS.STRUCTURES.includes(marketGroupId)) {
+          category = "structure";
+        } else if (PARENT_MARKET_GROUPS.SHUTTLES.includes(marketGroupId)) {
+          category = "shuttle";
+        } else if (PARENT_MARKET_GROUPS.FIGHTERS.includes(marketGroupId)) {
+          category = "fighter";
+        } else if (marketGroupId === PARENT_MARKET_GROUPS.CORVETTES) {
+          category = "corvette";
+        } else if (PARENT_MARKET_GROUPS.FRIGATES.includes(marketGroupId)) {
+          category = "frigate";
+        } else if (PARENT_MARKET_GROUPS.DESTROYERS.includes(marketGroupId)) {
+          category = "destroyer";
+        } else if (PARENT_MARKET_GROUPS.CRUISERS.includes(marketGroupId)) {
+          category = "cruiser";
+        } else if (
+          PARENT_MARKET_GROUPS.BATTLECRUISERS.includes(marketGroupId)
+        ) {
+          category = "battlecruiser";
+        } else if (PARENT_MARKET_GROUPS.BATTLESHIPS.includes(marketGroupId)) {
+          category = "battleship";
+        } else if (marketGroupId === PARENT_MARKET_GROUPS.INDUSTRIAL) {
+          category = "industrial";
+        } else if (marketGroupId === PARENT_MARKET_GROUPS.MINING) {
+          category = "mining";
+        }
+      }
+
+      // Stop if we've reached the top level "Ships" market group
+      if (marketGroupId === 4) break;
 
       marketGroupId = marketResponse.data.parent_group_id;
     }
 
-    return "unknown";
+    return {
+      category: category,
+      name: shipName,
+      tier: tier,
+    };
   } catch (error) {
     console.error(`Error determining category for ship type ${typeId}:`, error);
-    return "unknown";
+    return {
+      category: "unknown",
+      name: "Unknown Ship",
+      tier: "T1",
+    };
   }
 }
 
@@ -680,18 +721,24 @@ async function getShipCategory(shipTypeId, killmail) {
   if (!shipTypeId) return null;
 
   try {
-    // First check database with await
-    let category = await getShipCategoryFromDb(shipTypeId);
+    // First check database
+    const shipData = await getShipCategoryFromDb(shipTypeId);
 
-    // If not in database, determine category and store it
-    if (!category) {
-      category = await determineShipCategory(shipTypeId, killmail);
-      // Ensure we wait for the storage operation to complete
-      await storeShipCategory(shipTypeId, category);
-      console.log(`Stored new ship category for ${shipTypeId}: ${category}`);
+    // If we have complete data, return it
+    if (shipData && shipData.name && shipData.tier) {
+      return {
+        category: shipData.category,
+        name: shipData.name,
+        tier: shipData.tier,
+      };
     }
 
-    return category;
+    // If data is missing or incomplete, determine category and store it
+    const newShipData = await determineShipCategory(shipTypeId, killmail);
+    await storeShipCategory(shipTypeId, newShipData);
+    console.log(`Stored new ship data for ${shipTypeId}:`, newShipData);
+
+    return newShipData;
   } catch (error) {
     console.error(`Error getting ship category for ${shipTypeId}:`, error);
     return null;
