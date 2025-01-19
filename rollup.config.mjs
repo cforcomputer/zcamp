@@ -1,18 +1,21 @@
+// rollup.config.mjs
 import svelte from "rollup-plugin-svelte";
 import resolve from "@rollup/plugin-node-resolve";
 import commonjs from "@rollup/plugin-commonjs";
-import css from "rollup-plugin-css-only";
 import { terser } from "rollup-plugin-terser";
 import copy from "rollup-plugin-copy";
 import json from "@rollup/plugin-json";
-import sveltePreprocess from "svelte-preprocess"; // Import correctly
+import sveltePreprocess from "svelte-preprocess";
+import postcss from "rollup-plugin-postcss";
+import tailwindcss from "tailwindcss";
+import autoprefixer from "autoprefixer";
 
 const production = !process.env.ROLLUP_WATCH;
 
 export default [
   // Client-side bundle
   {
-    input: "src/main.js", // Client entry point
+    input: "src/main.js",
     output: {
       sourcemap: true,
       format: "iife",
@@ -25,18 +28,29 @@ export default [
           dev: !production,
         },
         preprocess: sveltePreprocess({
-          // Use sveltePreprocess
-          postcss: true,
-          sourceMap: production ? false : true,
+          postcss: {
+            plugins: [tailwindcss, autoprefixer],
+          },
         }),
       }),
-      css({ output: "bundle.css" }),
+
+      postcss({
+        config: {
+          path: "./postcss.config.cjs",
+        },
+        extensions: [".css"],
+        extract: "bundle.css",
+        minimize: production,
+      }),
+
       resolve({
         browser: true,
         dedupe: ["svelte"],
         exportConditions: ["svelte", "browser", "import"],
       }),
+
       commonjs(),
+
       copy({
         targets: [
           {
@@ -49,22 +63,24 @@ export default [
         hook: "writeBundle",
         copyOnce: true,
       }),
+
       production && terser(),
     ],
   },
+
   // Server-side bundle
   {
-    input: "./server/server.js", // Server entry point
+    input: "./server/server.js",
     output: {
       sourcemap: "inline",
-      format: "esm", // Use CommonJS for Node.js
+      format: "esm",
       name: "server",
-      file: "build/server.js", // Output to a different directory
+      file: "build/server.js",
     },
     plugins: [
       json(),
       resolve({
-        browser: false, // Important: Don't resolve browser-specific versions of modules
+        browser: false,
         dedupe: [],
         exportConditions: ["node"],
       }),
@@ -85,6 +101,6 @@ export default [
       "fs",
       "events",
       "zlib",
-    ], // Treat these as external dependencies
+    ],
   },
 ];

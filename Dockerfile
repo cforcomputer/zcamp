@@ -8,6 +8,9 @@ RUN apt-get update && apt-get install -y wget curl
 
 # Copy package files
 COPY package*.json ./
+COPY postcss.config.cjs ./
+COPY tailwind.config.js ./
+COPY rollup.config.mjs ./
 
 # Install dependencies
 RUN apt-get update && apt-get install -y \

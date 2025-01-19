@@ -1,0 +1,41 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-eve-primary text-gray-200;
+    background-image: url('/bg.jpg');
+    background-size: cover;
+    background-position: center;
+    background-attachment: fixed;
+  }
+}
+
+@layer components {
+  .eve-card {
+    @apply bg-eve-card backdrop-blur-md rounded-lg border border-eve-accent/20 p-4 shadow-lg;
+  }
+
+  .eve-button {
+    @apply px-4 py-2 bg-eve-accent/20 hover:bg-eve-accent/30 text-eve-accent 
+           rounded border border-eve-accent/40 transition-all duration-200
+           hover:border-eve-accent/60 focus:outline-none focus:ring-2 
+           focus:ring-eve-accent/50;
+  }
+
+  .eve-input {
+    @apply bg-eve-dark/50 border border-eve-accent/20 rounded px-3 py-2
+           text-gray-200 focus:outline-none focus:ring-2 focus:ring-eve-accent/50
+           placeholder-gray-500;
+  }
+
+  .eve-select {
+    @apply eve-input appearance-none bg-no-repeat bg-right pr-8;
+  }
+
+  .eve-nav-item {
+    @apply px-4 py-2 rounded-md transition-all duration-200
+           hover:bg-eve-accent/20 text-gray-300 hover:text-eve-accent;
+  }
+}

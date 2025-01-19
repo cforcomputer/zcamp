@@ -3,13 +3,12 @@
   import MapVisualization from "./MapVisualization.svelte";
   import { onMount } from "svelte";
 
+  export let openMap; // Receive openMap function from App.svelte
+
   let previousKillmailIds = new Set();
-  let selectedKillmailId = null;
-  let selectedKillmail = null;
   let scrollContainer;
   let isUserScrolling = false;
   let shouldAutoScroll = true;
-  let showMap = false;
 
   $: killmailsToDisplay = $filteredKillmails;
 
@@ -64,17 +63,10 @@
     ) {
       return `Near celestial: ${killmail.pinpoints.nearestCelestial.name}`;
     } else if (killmail.pinpoints.hasTetrahedron) {
-      // Changed from hasBox
       return "Triangulation possible";
     } else {
       return "Cannot be triangulated";
     }
-  }
-
-  function viewMap(killmail) {
-    selectedKillmailId = killmail.killID;
-    selectedKillmail = killmail;
-    showMap = true;
   }
 
   function formatDroppedValue(value) {
@@ -125,143 +117,75 @@
   }
 </script>
 
-<table>
-  <thead>
-    <tr>
-      <th>Dropped Value</th>
-      <th>Occurred</th>
-      <th>URL</th>
-      <th>Actions</th>
-    </tr>
-  </thead>
-</table>
-<div class="scroll-box" bind:this={scrollContainer} on:scroll={handleScroll}>
-  <table>
-    <tbody>
-      {#each sortedKillmails as killmail (killmail.killID)}
-        <tr>
-          <td>{formatDroppedValue(killmail.zkb.droppedValue)}</td>
-          <td>{calculateTimeDifference(killmail.killmail.killmail_time)}</td>
-          <td>
-            <a
-              href={`https://zkillboard.com/kill/${killmail.killID}/`}
-              target="_blank"
-            >
-              View
-            </a>
-          </td>
-          <td class="actions">
-            <button on:click={() => viewMap(killmail)}>Map</button>
-            <span
-              class="triangulate-indicator"
-              class:can-triangulate={killmail?.pinpoints?.triangulationPossible}
-              title={getTriangulationStatus(killmail)}
-            >
-              {killmail?.pinpoints?.triangulationPossible ? "✅" : "❌"}
-            </span>
-          </td>
+<div class="flex flex-col bg-eve-dark/95 rounded-lg shadow-lg overflow-hidden">
+  <div class="overflow-x-auto">
+    <table class="w-full">
+      <thead>
+        <tr class="text-left bg-eve-secondary/80">
+          <th class="px-4 py-3 text-sm font-medium text-gray-300">Value</th>
+          <th class="px-4 py-3 text-sm font-medium text-gray-300">Time</th>
+          <th class="px-4 py-3 text-sm font-medium text-gray-300">Link</th>
+          <th class="px-4 py-3 text-sm font-medium text-gray-300">Actions</th>
         </tr>
-      {/each}
-    </tbody>
-  </table>
+      </thead>
+    </table>
+  </div>
 
-  {#if showMap && selectedKillmailId}
-    <div class="map-overlay">
-      <div class="map-container">
-        <MapVisualization
-          killmailId={selectedKillmailId}
-          kill={selectedKillmail}
-        />
-        <button class="close-map" on:click={() => (showMap = false)}>
-          Close Map
-        </button>
-      </div>
-    </div>
-  {/if}
+  <div
+    class="overflow-y-auto max-h-[calc(100vh-16rem)]"
+    bind:this={scrollContainer}
+    on:scroll={handleScroll}
+  >
+    <table class="w-full">
+      <tbody>
+        {#each sortedKillmails as killmail (killmail.killID)}
+          <tr
+            class="border-b border-eve-secondary/30 hover:bg-eve-secondary/20 transition-colors"
+          >
+            <td class="px-4 py-3 text-eve-accent">
+              {formatDroppedValue(killmail.zkb.droppedValue)}
+            </td>
+            <td class="px-4 py-3 text-gray-400">
+              {calculateTimeDifference(killmail.killmail.killmail_time)}
+            </td>
+            <td class="px-4 py-3">
+              <a
+                href={`https://zkillboard.com/kill/${killmail.killID}/`}
+                target="_blank"
+                class="text-eve-accent hover:text-eve-accent/80 transition-colors"
+              >
+                View
+              </a>
+            </td>
+            <td class="px-4 py-3">
+              <div class="flex items-center gap-3">
+                <button
+                  on:click={() => openMap(killmail)}
+                  class="px-3 py-1 text-sm bg-eve-secondary hover:bg-eve-secondary/80 text-eve-accent rounded transition-colors"
+                >
+                  Map
+                </button>
+                <span
+                  class="flex items-center justify-center w-6 h-6 rounded-full {killmail
+                    ?.pinpoints?.triangulationPossible
+                    ? 'bg-green-500/20 text-green-400'
+                    : 'bg-red-500/20 text-red-400'}"
+                  title={getTriangulationStatus(killmail)}
+                >
+                  {killmail?.pinpoints?.triangulationPossible ? "✓" : "×"}
+                </span>
+              </div>
+            </td>
+          </tr>
+        {/each}
+      </tbody>
+    </table>
+  </div>
 </div>
 
 <style>
-  .actions {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-
-  .triangulate-indicator {
-    display: inline-flex;
-    align-items: center;
-    cursor: help;
-  }
-
   :global(.killmail-section) {
-    height: calc(100vh - 150px); /* Adjust value as needed */
+    height: calc(100vh - 150px);
     overflow-y: auto;
-  }
-
-  table {
-    width: 100%;
-    border-collapse: collapse;
-    background-color: white;
-  }
-
-  th,
-  td {
-    border: 1px solid #ddd;
-    padding: 8px;
-    text-align: left;
-  }
-
-  thead {
-    position: sticky;
-    top: 0;
-    background-color: #f8f9fa;
-    z-index: 1;
-  }
-
-  th {
-    background-color: #f8f9fa;
-    font-weight: 600;
-  }
-
-  tr:nth-child(even) {
-    background-color: #f8f9fa;
-  }
-
-  .map-overlay {
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background-color: rgba(0, 0, 0, 0.75);
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    z-index: 1000;
-  }
-
-  .map-container {
-    position: relative;
-    width: 80%;
-    height: 80%;
-    background-color: black;
-    border-radius: 8px;
-    overflow: hidden;
-  }
-
-  .close-map {
-    position: absolute;
-    top: 16px;
-    right: 16px;
-    padding: 8px 16px;
-    background-color: #dc3545;
-    color: white;
-    border: none;
-    border-radius: 4px;
-    cursor: pointer;
-  }
-
-  button:hover {
-    opacity: 0.9;
   }
 </style>

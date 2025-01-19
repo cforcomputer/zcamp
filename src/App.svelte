@@ -1,4 +1,3 @@
-<!-- src/App.svelte -->
 <script>
   import { onMount } from "svelte";
   import socket from "./socket.js";
@@ -13,44 +12,49 @@
   import { initializeSettings } from "./store.js";
   import Leaderboard from "./Leaderboard.svelte";
   import LocationTracker from "./LocationTracker.svelte";
+  import MapVisualization from "./MapVisualization.svelte";
 
   let loggedIn = false;
   let username = "";
   let settingsManagerComponent;
   let currentPage = "kills";
+  let showMapOverlay = false; // Add a variable to control the map overlay
+  let selectedKillmailId = null;
+  let selectedKillmail = null;
 
-  // Subscribe to stores
   $: userSettings = $settings;
   $: kills = $killmails;
   $: userFilterLists = $filterLists;
   $: userProfiles = $profiles;
 
-  $: {
-    console.log("App.svelte - userProfiles updated:", userProfiles);
-  }
-
-  // Function to clear all kills
   export function clearKills() {
     killmails.set([]);
   }
 
-  // Handle login event from Login.svelte
   function handleLogin(event) {
     if (event.detail.type === "credentials") {
       username = event.detail.username;
       loggedIn = true;
       socket.emit("login", { username, password: event.detail.password });
     } else if (event.detail.type === "eve") {
-      // EVE SSO login - just set logged in state, session already exists
       loggedIn = true;
     }
   }
 
-  // Lifecycle hook
-  onMount(() => {
-    console.log("App.svelte - onMount");
+  // Add functions to show and close the map overlay
+  function openMap(killmail) {
+    selectedKillmailId = killmail.killID;
+    selectedKillmail = killmail;
+    showMapOverlay = true;
+  }
 
-    // Only handle connection events here
+  function closeMap() {
+    showMapOverlay = false;
+    selectedKillmailId = null;
+    selectedKillmail = null;
+  }
+
+  onMount(() => {
     socket.on("connect", () => {
       console.log("App.svelte - Connected to server");
     });
@@ -59,16 +63,13 @@
       console.log("App.svelte - Disconnected from server");
     });
 
-    // This is the only place we should initialize stores
     socket.on("initialData", (data) => {
       try {
-        console.log("App.svelte - Received initialData:", data);
         const initializedSettings = initializeSettings(data.settings);
-        settings.set(initializedSettings); // This will properly merge defaults with saved settings
+        settings.set(initializedSettings);
         killmails.set([]);
         filterLists.set(data.filterLists || []);
         profiles.set(data.profiles || []);
-        console.log("App.svelte - Stores initialized");
       } catch (e) {
         console.error("Error initializing data:", e);
         settings.set(DEFAULT_SETTINGS);
@@ -86,153 +87,166 @@
   });
 </script>
 
-<main>
+<div class="min-h-screen bg-gradient-to-b from-eve-primary to-eve-primary/95">
   {#if !loggedIn}
-    <Login on:login={handleLogin} />
+    <div class="flex items-center justify-center min-h-screen px-4">
+      <Login on:login={handleLogin} />
+    </div>
   {:else}
-    <nav class="navigation">
-      <div class="nav-tabs">
-        <button
-          class:active={currentPage === "kills"}
-          on:click={() => (currentPage = "kills")}
-        >
-          Kills
-        </button>
-        <button
-          class:active={currentPage === "battles"}
-          on:click={() => (currentPage = "battles")}
-        >
-          Active Battles
-        </button>
-        <button
-          class:active={currentPage === "camps"}
-          on:click={() => (currentPage = "camps")}
-        >
-          Gate Camps
-        </button>
-        <button
-          class:active={currentPage === "gangs"}
-          on:click={() => (currentPage = "gangs")}
-        >
-          Gangs Map
-        </button>
-        <button
-          class:active={currentPage === "bountyboard"}
-          on:click={() => (currentPage = "bountyboard")}
-        >
-          Bountyboard
-        </button>
-      </div>
-      <div class="nav-right">
-        <LocationTracker />
+    <nav
+      class="fixed top-0 left-0 right-0 bg-eve-dark/90 backdrop-blur-md border-b border-eve-accent/20 z-40"
+    >
+      <div class="max-w-7xl mx-auto px-4">
+        <div class="flex items-center justify-between h-16">
+          <div class="flex space-x-1">
+            <button
+              class="eve-nav-item {currentPage === 'kills'
+                ? 'bg-eve-accent/20 text-eve-accent'
+                : ''}"
+              on:click={() => (currentPage = "kills")}
+            >
+              Kills
+            </button>
+            <button
+              class="eve-nav-item {currentPage === 'battles'
+                ? 'bg-eve-accent/20 text-eve-accent'
+                : ''}"
+              on:click={() => (currentPage = "battles")}
+            >
+              Battles
+            </button>
+            <button
+              class="eve-nav-item {currentPage === 'camps'
+                ? 'bg-eve-accent/20 text-eve-accent'
+                : ''}"
+              on:click={() => (currentPage = "camps")}
+            >
+              Gate Camps
+            </button>
+            <button
+              class="eve-nav-item {currentPage === 'gangs'
+                ? 'bg-eve-accent/20 text-eve-accent'
+                : ''}"
+              on:click={() => (currentPage = "gangs")}
+            >
+              Gangs
+            </button>
+            <button
+              class="eve-nav-item {currentPage === 'bountyboard'
+                ? 'bg-eve-accent/20 text-eve-accent'
+                : ''}"
+              on:click={() => (currentPage = "bountyboard")}
+            >
+              Bountyboard
+            </button>
+          </div>
+
+          <div class="flex items-center">
+            <LocationTracker />
+          </div>
+        </div>
       </div>
     </nav>
 
-    {#if currentPage === "kills"}
-      <div class="dashboard">
-        <div class="settings-section">
-          <SettingsManager bind:this={settingsManagerComponent} {socket} />
+    <main class="pt-20 px-4 max-w-7xl mx-auto">
+      {#if currentPage === "kills"}
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div class="eve-card">
+            <SettingsManager bind:this={settingsManagerComponent} {socket} />
+          </div>
+          <div class="eve-card">
+            <KillmailViewer {openMap} />
+            <div class="mt-4">
+              <button
+                class="eve-button w-full"
+                on:click={() => {
+                  socket.emit("clearKills");
+                  clearKills();
+                }}
+              >
+                Clear All Kills
+              </button>
+            </div>
+          </div>
         </div>
-        <div class="killmail-section">
-          <KillmailViewer />
-          <button
-            on:click={() => {
-              socket.emit("clearKills");
-              clearKills();
-            }}>Clear All Kills</button
-          >
+      {:else if currentPage === "battles"}
+        <div class="eve-card">
+          <ActiveBattles />
         </div>
-      </div>
-    {:else if currentPage === "battles"}
-      <ActiveBattles />
-    {:else if currentPage === "camps"}
-      <ActiveCamps />
-    {:else if currentPage === "gangs"}
-      <ActiveRoams />
-    {:else if currentPage === "bountyboard"}
-      <Leaderboard />
-    {/if}
+      {:else if currentPage === "camps"}
+        <div class="eve-card">
+          <ActiveCamps />
+        </div>
+      {:else if currentPage === "gangs"}
+        <div class="eve-card">
+          <ActiveRoams />
+        </div>
+      {:else if currentPage === "bountyboard"}
+        <div class="eve-card">
+          <Leaderboard />
+        </div>
+      {/if}
+    </main>
   {/if}
-</main>
+</div>
+
+{#if showMapOverlay && selectedKillmailId}
+  <div class="map-overlay">
+    <div class="map-container">
+      <MapVisualization
+        killmailId={selectedKillmailId}
+        kill={selectedKillmail}
+      />
+      <button class="close-map" on:click={closeMap}> Close Map </button>
+    </div>
+  </div>
+{/if}
 
 <style>
-  main {
-    text-align: center;
-    max-width: 1200px;
-    margin: 0 auto;
-    padding-top: 0;
+  :global(body) {
+    @apply bg-eve-primary text-gray-200;
+    background-image: url("/bg.jpg");
+    background-size: cover;
+    background-position: center;
+    background-attachment: fixed;
   }
-
-  .navigation {
+  .map-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.75);
     display: flex;
-    justify-content: space-between;
+    justify-content: center;
     align-items: center;
-    background: rgba(0, 0, 0, 0.3);
-    padding: 0.5rem 1rem;
-    margin-bottom: 1rem;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    z-index: 50; /* Ensure it's on top of everything */
+    backdrop-filter: blur(5px); /* Add the background blur */
   }
 
-  .nav-tabs {
-    display: flex;
-    gap: 0.5rem;
+  .map-container {
+    position: relative;
+    width: 80vw; /* Adjust as needed */
+    height: 80vh; /* Adjust as needed */
+    background-color: #222; /* Use your desired background color */
+    border-radius: 5px;
+    overflow: hidden;
   }
 
-  .nav-right {
-    display: flex;
-    align-items: center;
-  }
-
-  .nav-tabs button {
-    padding: 0.5em 1em;
-    border: none;
-    background: #333;
-    color: #fff;
-    cursor: pointer;
-    border-radius: 4px;
-    transition: background-color 0.2s;
-    font-size: 0.9em;
-  }
-
-  .nav-tabs button.active {
-    background: #007bff;
+  .close-map {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    padding: 8px 16px;
+    background-color: #dc3545;
     color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    z-index: 60; /* Ensure it's above the map */
   }
 
-  .nav-tabs button:hover {
-    background: #0056b3;
-  }
-
-  .dashboard {
-    display: flex;
-    flex-direction: column;
-    height: calc(100vh - 120px);
-  }
-
-  .settings-section {
-    flex: 1;
-    overflow-y: auto;
-    margin-bottom: 1em;
-  }
-
-  .killmail-section {
-    flex: 1;
-    overflow-y: auto;
-  }
-
-  @media (min-width: 768px) {
-    .dashboard {
-      flex-direction: row;
-    }
-
-    .settings-section,
-    .killmail-section {
-      width: 50%;
-    }
-
-    .settings-section {
-      margin-right: 1em;
-      margin-bottom: 0;
-    }
+  .close-map:hover {
+    background-color: #c82333;
   }
 </style>
