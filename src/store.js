@@ -4,6 +4,11 @@ export const killmails = writable([]);
 export const filterLists = writable([]);
 export const profiles = writable([]);
 
+const currentTime = writable(Date.now());
+setInterval(() => {
+  currentTime.set(Date.now());
+}, 1000);
+
 export const DEFAULT_SETTINGS = {
   dropped_value_enabled: false,
   total_value_enabled: false,
