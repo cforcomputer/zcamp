@@ -1,14 +1,9 @@
-<!-- SalvageFields.svelte -->
 <script>
   import { onMount } from "svelte";
-  import socket from "./socket.js";
+  import { salvageFields } from "./salvage.js";
+  import { killmails } from "./settingsStore.js";
+  import { initializeSalvage } from "./salvage.js";
   import WreckFieldDialog from "./WreckFieldDialog.svelte";
-  import {
-    salvageFields,
-    processNewKillmail,
-    initializeSalvageFields,
-  } from "./salvageStore.js";
-  import { killmails } from "./store.js";
 
   let minValue = 0;
   let showTriangulatable = false;
@@ -26,7 +21,7 @@
   function formatValue(value) {
     if (value >= 1_000_000_000) return `${(value / 1_000_000_000).toFixed(1)}B`;
     if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
-    return `${(value / 1_000).toFixed(1)}K`;
+    return `${(value / 1000).toFixed(1)}K`;
   }
 
   function getTimeRemaining(expiryTime) {
@@ -46,22 +41,7 @@
   }
 
   onMount(() => {
-    // Initialize with existing killmails
-    initializeSalvageFields($killmails);
-
-    // Listen for new killmails
-    socket.on("newKillmail", (killmail) => {
-      console.log("New killmail received:", {
-        id: killmail?.killID,
-        isT2: killmail?.shipCategories?.victim?.tier === "T2",
-        category: killmail?.shipCategories?.victim?.category,
-      });
-      processNewKillmail(killmail);
-    });
-
-    return () => {
-      socket.off("newKillmail");
-    };
+    initializeSalvage($killmails);
   });
 </script>
 
@@ -118,6 +98,13 @@
             <tr
               class="border-t border-eve-secondary/10 bg-eve-dark/40 hover:bg-eve-dark/60 transition-colors cursor-pointer"
               on:click={(e) => openWreckField(system, e)}
+              on:keydown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  openWreckField(system, e);
+                }
+              }}
+              tabindex="0"
+              role="button"
             >
               <td class="px-4 py-3 text-white">{system.systemName}</td>
               <td class="px-4 py-3 text-gray-300">{system.nearestCelestial}</td>
@@ -134,7 +121,7 @@
                     timeLeft
                   )}"
                   style="width: {(timeLeft / 120) * 100}%"
-                ></div>
+                />
               </td>
               <td class="px-4 py-3">
                 <span

@@ -1,5 +1,5 @@
 <script>
-  import { filteredKillmails, settings } from "./store";
+  import { filteredKillmails, settings } from "./settingsStore";
   import MapVisualization from "./MapVisualization.svelte";
   import { onMount } from "svelte";
 

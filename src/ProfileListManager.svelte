@@ -3,7 +3,7 @@
 <!-- switched to sockets to update state-->
 <script>
   import { createEventDispatcher } from "svelte";
-  import { settings, filterLists, profiles } from "./store";
+  import { settings, filterLists, profiles } from "./settingsStore";
   import socket from "./socket.js";
   import { onMount } from "svelte";
 

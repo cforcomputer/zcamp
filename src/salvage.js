@@ -1,14 +1,19 @@
-// salvageStore.js
+// salvage.js
 import { writable, derived } from "svelte/store";
-import { killmails } from "./store.js";
 import { SALVAGE_VALUES } from "./constants.js";
 
+// Constants
+const WRECK_TIMEOUT = 2 * 60 * 60 * 1000; // 2 hours in milliseconds
+const CLEANUP_INTERVAL = 30000; // 30 seconds
+
+// Stores
 export const salvageFields = writable(new Map());
 
-export function processNewKillmail(killmail) {
+// Process new killmail for salvage opportunities
+export function processNewSalvage(killmail) {
   salvageFields.update((fields) => {
     const now = Date.now();
-    const twoHoursAgo = now - 2 * 60 * 60 * 1000;
+    const twoHoursAgo = now - WRECK_TIMEOUT;
 
     // Clean up old wrecks first
     for (const [systemId, system] of fields) {
@@ -16,7 +21,6 @@ export function processNewKillmail(killmail) {
       if (system.wrecks.length === 0) {
         fields.delete(systemId);
       } else {
-        // Recalculate total value
         system.totalValue = system.wrecks.reduce(
           (sum, wreck) => sum + wreck.estimatedValue,
           0
@@ -31,11 +35,12 @@ export function processNewKillmail(killmail) {
 
       const systemId = killmail.killmail.solar_system_id;
       const systemName =
-        killmail.pinpoints?.celestialData?.solarsystemname ||
-        `System ${systemId}`;
+        killmail.pinpoints?.celestialData?.systemName || `System ${systemId}`;
+      const regionName =
+        killmail.pinpoints?.celestialData?.regionName || "Unknown Region";
       const category = killmail.shipCategories.victim.category.toLowerCase();
       const estimatedValue = SALVAGE_VALUES[category] || SALVAGE_VALUES.unknown;
-      const expiryTime = killTime + 2 * 60 * 60 * 1000;
+      const expiryTime = killTime + WRECK_TIMEOUT;
       const isTriangulatable = killmail.pinpoints?.triangulationPossible;
       const nearestCelestial =
         killmail.pinpoints?.nearestCelestial?.name || "Unknown";
@@ -43,6 +48,7 @@ export function processNewKillmail(killmail) {
       if (!fields.has(systemId)) {
         fields.set(systemId, {
           systemName,
+          regionName,
           wrecks: [],
           totalValue: 0,
           isTriangulatable,
@@ -58,6 +64,7 @@ export function processNewKillmail(killmail) {
         expiryTime,
         isTriangulatable,
         killmailId: killmail.killID,
+        celestialData: killmail.pinpoints?.celestialData,
       });
       system.totalValue += estimatedValue;
     }
@@ -66,11 +73,11 @@ export function processNewKillmail(killmail) {
   });
 }
 
-// Process initial killmails and set up auto-cleanup
-export function initializeSalvageFields(initialKillmails) {
+// Initialize salvage tracking
+export function initializeSalvage(initialKillmails) {
   const fields = new Map();
   const now = Date.now();
-  const twoHoursAgo = now - 2 * 60 * 60 * 1000;
+  const twoHoursAgo = now - WRECK_TIMEOUT;
 
   initialKillmails.forEach((killmail) => {
     if (killmail.shipCategories?.victim?.tier === "T2") {
@@ -83,7 +90,7 @@ export function initializeSalvageFields(initialKillmails) {
         `System ${systemId}`;
       const category = killmail.shipCategories.victim.category.toLowerCase();
       const estimatedValue = SALVAGE_VALUES[category] || SALVAGE_VALUES.unknown;
-      const expiryTime = killTime + 2 * 60 * 60 * 1000;
+      const expiryTime = killTime + WRECK_TIMEOUT;
       const isTriangulatable = killmail.pinpoints?.triangulationPossible;
       const nearestCelestial =
         killmail.pinpoints?.nearestCelestial?.name || "Unknown";
@@ -114,7 +121,7 @@ export function initializeSalvageFields(initialKillmails) {
   salvageFields.set(fields);
 
   // Set up periodic cleanup
-  setInterval(() => {
+  const cleanupInterval = setInterval(() => {
     salvageFields.update((fields) => {
       const now = Date.now();
       for (const [systemId, system] of fields) {
@@ -130,11 +137,27 @@ export function initializeSalvageFields(initialKillmails) {
       }
       return fields;
     });
-  }, 30000); // Clean up every 30 seconds
+  }, CLEANUP_INTERVAL);
+
+  return cleanupInterval;
 }
 
-// Export a derived store that can be used to get sorted/filtered fields
+// Derived store for filtered/sorted salvage fields
 export const filteredSalvageFields = derived(
   salvageFields,
-  ($salvageFields) => $salvageFields
+  ($salvageFields) => {
+    return Array.from($salvageFields.entries()).sort(
+      ([, a], [, b]) => b.totalValue - a.totalValue
+    );
+  }
 );
+
+// Cleanup function
+export function cleanup() {
+  salvageFields.set(new Map());
+}
+
+export function getTimeRemaining(expiryTime) {
+  const now = Date.now();
+  return Math.max(0, Math.floor((expiryTime - now) / 1000 / 60));
+}

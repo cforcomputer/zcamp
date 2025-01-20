@@ -1,6 +1,11 @@
 <script>
   import { createEventDispatcher, onMount, afterUpdate } from "svelte";
-  import { settings, filterLists, profiles, DEFAULT_SETTINGS } from "./store";
+  import {
+    settings,
+    filterLists,
+    profiles,
+    DEFAULT_SETTINGS,
+  } from "./settingsStore";
   import ProfileListManager from "./ProfileListManager.svelte";
   import FilterListManager from "./FilterListManager.svelte";
 

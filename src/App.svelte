@@ -1,15 +1,27 @@
 <script>
-  import { onMount } from "svelte";
-  import socket from "./socket.js";
+  import { onMount, onDestroy } from "svelte";
+  import {
+    initializeSocketStore,
+    cleanup,
+    socketConnected,
+    lastSocketError,
+    socket,
+  } from "./dataManager.js";
   import SettingsManager from "./SettingsManager.svelte";
   import KillmailViewer from "./KillmailViewer.svelte";
-  import { killmails, settings, filterLists, profiles } from "./store";
+  import {
+    killmails,
+    settings,
+    filterLists,
+    profiles,
+    clearKills,
+  } from "./settingsStore.js";
   import Login from "./Login.svelte";
   import ActiveBattles from "./ActiveBattles.svelte";
   import ActiveCamps from "./ActiveCamps.svelte";
   import ActiveRoams from "./ActiveRoams.svelte";
   import SalvageFields from "./SalvageFields.svelte";
-  import { initializeSettings } from "./store.js";
+  import { initializeSettings } from "./settingsStore.js";
   import Leaderboard from "./Leaderboard.svelte";
   import LocationTracker from "./LocationTracker.svelte";
   import MapVisualization from "./MapVisualization.svelte";
@@ -18,7 +30,7 @@
   let username = "";
   let settingsManagerComponent;
   let currentPage = "kills";
-  let showMapOverlay = false; // Add a variable to control the map overlay
+  let showMapOverlay = false;
   let selectedKillmailId = null;
   let selectedKillmail = null;
 
@@ -26,22 +38,19 @@
   $: kills = $killmails;
   $: userFilterLists = $filterLists;
   $: userProfiles = $profiles;
-
-  export function clearKills() {
-    killmails.set([]);
-  }
+  $: isConnected = $socketConnected;
+  $: socketError = $lastSocketError;
 
   function handleLogin(event) {
     if (event.detail.type === "credentials") {
       username = event.detail.username;
       loggedIn = true;
-      socket.emit("login", { username, password: event.detail.password });
     } else if (event.detail.type === "eve") {
       loggedIn = true;
     }
+    initializeSocketStore();
   }
 
-  // Add functions to show and close the map overlay
   function openMap(killmail) {
     selectedKillmailId = killmail.killID;
     selectedKillmail = killmail;
@@ -55,35 +64,13 @@
   }
 
   onMount(() => {
-    socket.on("connect", () => {
-      console.log("App.svelte - Connected to server");
-    });
+    if (loggedIn) {
+      initializeSocketStore();
+    }
+  });
 
-    socket.on("disconnect", () => {
-      console.log("App.svelte - Disconnected from server");
-    });
-
-    socket.on("initialData", (data) => {
-      try {
-        const initializedSettings = initializeSettings(data.settings);
-        settings.set(initializedSettings);
-        killmails.set([]);
-        filterLists.set(data.filterLists || []);
-        profiles.set(data.profiles || []);
-      } catch (e) {
-        console.error("Error initializing data:", e);
-        settings.set(DEFAULT_SETTINGS);
-        killmails.set([]);
-        filterLists.set([]);
-        profiles.set([]);
-      }
-    });
-
-    return () => {
-      socket.off("connect");
-      socket.off("disconnect");
-      socket.off("initialData");
-    };
+  onDestroy(() => {
+    cleanup();
   });
 </script>
 
@@ -232,15 +219,15 @@
     display: flex;
     justify-content: center;
     align-items: center;
-    z-index: 50; /* Ensure it's on top of everything */
-    backdrop-filter: blur(5px); /* Add the background blur */
+    z-index: 50;
+    backdrop-filter: blur(5px);
   }
 
   .map-container {
     position: relative;
-    width: 80vw; /* Adjust as needed */
-    height: 80vh; /* Adjust as needed */
-    background-color: #222; /* Use your desired background color */
+    width: 80vw;
+    height: 80vh;
+    background-color: #222;
     border-radius: 5px;
     overflow: hidden;
   }
@@ -255,7 +242,7 @@
     border: none;
     border-radius: 4px;
     cursor: pointer;
-    z-index: 60; /* Ensure it's above the map */
+    z-index: 60;
   }
 
   .close-map:hover {

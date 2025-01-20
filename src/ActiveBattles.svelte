@@ -1,6 +1,6 @@
 <!-- src/ActiveBattles.svelte -->
 <script>
-  import { filteredBattles } from "./battleStore.js";
+  import { filteredBattles } from "./battles.js";
   import { onMount, onDestroy } from "svelte";
 
   let minInvolved = 2;

@@ -227,12 +227,14 @@
 <div
   class="fixed inset-0 bg-black/70 flex items-center justify-center z-50"
   on:click={onClose}
+  on:keydown={(e) => e.key === "Escape" && onClose()}
+  role="dialog"
   transition:fade
 >
   <div
     class="bg-black border border-eve-secondary/30 rounded-lg p-4 w-[800px] h-[600px] shadow-xl shadow-black/50"
     on:click|stopPropagation
-    transition:fly={{ y: 20, duration: 200 }}
+    role="document"
   >
     <div class="flex justify-between items-center mb-4">
       <h3 class="text-lg font-semibold text-eve-accent">

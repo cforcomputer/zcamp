@@ -2,7 +2,7 @@
 <script>
   import { createEventDispatcher } from "svelte";
   import socket from "./socket.js";
-  import { filterLists } from "./store";
+  import { filterLists } from "./settingsStore.js";
   import { onMount } from "svelte";
 
   const dispatch = createEventDispatcher();
