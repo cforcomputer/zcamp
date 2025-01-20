@@ -4,6 +4,20 @@ export const CAMP_TIMEOUT = 40 * 60 * 1000; // 40 minutes
 export const DECAY_START = 20 * 60 * 1000; // 20 minutes
 export const CAPSULE_ID = 670;
 
+export const SALVAGE_VALUES = {
+  frigate: 3_000_000,
+  destroyer: 6_000_000,
+  cruiser: 12_000_000,
+  battlecruiser: 25_000_000,
+  battleship: 40_000_000,
+  industrial: 5_000_000,
+  mining: 5_000_000,
+  capital: 100_000_000,
+  structure: 50_000_000,
+  // Default to frigate value for unknown types
+  unknown: 3_000_000,
+};
+
 export const CAMP_PROBABILITY_FACTORS = {
   BASE: {
     SINGLE_KILL: 0.3,

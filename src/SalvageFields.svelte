@@ -1,107 +1,122 @@
 <script>
-  import { onMount, onDestroy } from "svelte";
   import { killmails } from "./store.js";
+  import { SALVAGE_VALUES } from "./constants.js";
 
-  let canvas;
-  let ctx;
-  let systemBubbles = new Map();
-  let animationFrame;
-
-  class SystemBubble {
-    constructor(systemId, systemName) {
-      this.systemId = systemId;
-      this.systemName = systemName;
-      this.t2Count = 0;
-      this.wrecks = new Map(); // Map of killmail IDs to expiry times
-      this.x = 0;
-      this.y = 0;
-      this.size = 0;
-      this.needsPositioning = true;
-    }
-
-    addWreck(killmailId, killTime) {
-      const expiryTime = new Date(killTime).getTime() + 2 * 60 * 60 * 1000; // 2 hours
-      this.wrecks.set(killmailId, expiryTime);
-      this.updateT2Count();
-    }
-
-    updateT2Count() {
-      const now = Date.now();
-      // Clear expired wrecks
-      for (const [killId, expiry] of this.wrecks) {
-        if (expiry < now) {
-          this.wrecks.delete(killId);
-        }
-      }
-      this.t2Count = this.wrecks.size;
-    }
-
-    timeUntilFirstExpiry() {
-      if (this.wrecks.size === 0) return 0;
-      const now = Date.now();
-      return Math.min(...Array.from(this.wrecks.values())) - now;
-    }
-
-    draw(ctx) {
-      // Similar to battle bubbles but with T2 count and expiry timer
-      // Draw implementation...
-    }
-  }
+  $: systemWrecks = new Map();
 
   $: {
-    // Process killmails
     const now = Date.now();
     const twoHoursAgo = now - 2 * 60 * 60 * 1000;
+    systemWrecks.clear();
 
     $killmails.forEach((killmail) => {
       const killTime = new Date(killmail.killmail.killmail_time).getTime();
       if (killTime < twoHoursAgo) return;
 
-      const systemId = killmail.killmail.solar_system_id;
-      const systemName =
-        killmail.pinpoints?.celestialData?.solarsystemname ||
-        systemId.toString();
-      const isT2 = killmail.shipCategories?.victim?.tier === "T2";
+      // Check if it's a T2 kill
+      if (killmail.shipCategories?.victim?.tier === "T2") {
+        const systemId = killmail.killmail.solar_system_id;
+        const systemName =
+          killmail.pinpoints?.celestialData?.solarsystemname ||
+          `System ${systemId}`;
+        const category = killmail.shipCategories.victim.category;
+        const estimatedValue =
+          SALVAGE_VALUES[category] || SALVAGE_VALUES.unknown;
+        const expiryTime = killTime + 2 * 60 * 60 * 1000;
 
-      if (!isT2) return;
+        if (!systemWrecks.has(systemId)) {
+          systemWrecks.set(systemId, {
+            systemName,
+            wrecks: [],
+            totalValue: 0,
+          });
+        }
 
-      if (!systemBubbles.has(systemId)) {
-        systemBubbles.set(systemId, new SystemBubble(systemId, systemName));
+        const system = systemWrecks.get(systemId);
+        system.wrecks.push({
+          shipName: killmail.shipCategories.victim.name,
+          category,
+          estimatedValue,
+          expiryTime,
+        });
+        system.totalValue += estimatedValue;
       }
-
-      const bubble = systemBubbles.get(systemId);
-      bubble.addWreck(killmail.killID, killmail.killmail.killmail_time);
     });
   }
 
-  // Animation loop similar to ActiveBattles.svelte
-  function animate() {
-    // Animation implementation...
+  function formatValue(value) {
+    if (value >= 1_000_000_000) return `${(value / 1_000_000_000).toFixed(1)}B`;
+    if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
+    return `${(value / 1_000).toFixed(1)}K`;
   }
 
-  onMount(() => {
-    // Setup similar to ActiveBattles.svelte
-  });
+  function getTimeRemaining(expiryTime) {
+    const now = Date.now();
+    return Math.max(0, Math.floor((expiryTime - now) / 1000 / 60));
+  }
 
-  onDestroy(() => {
-    if (animationFrame) {
-      cancelAnimationFrame(animationFrame);
-    }
-  });
+  function getTimeColor(minutes) {
+    if (minutes < 15) return "bg-red-500";
+    if (minutes < 30) return "bg-orange-500";
+    return "bg-green-500";
+  }
 </script>
 
-<div class="salvage-fields">
-  <canvas bind:this={canvas} />
+<div class="p-4 space-y-4">
+  <h2 class="text-xl font-bold text-white mb-4">T2 Salvage Fields</h2>
+
+  {#if systemWrecks.size === 0}
+    <div class="text-gray-400 text-center py-8">No active T2 wrecks found</div>
+  {:else}
+    <div class="space-y-4">
+      {#each Array.from(systemWrecks).sort(([, a], [, b]) => b.totalValue - a.totalValue) as [systemId, system]}
+        {@const earliestExpiry = Math.min(
+          ...system.wrecks.map((w) => w.expiryTime)
+        )}
+        {@const timeLeft = getTimeRemaining(earliestExpiry)}
+        <div
+          class="bg-eve-secondary/40 rounded-lg p-4 relative overflow-hidden"
+        >
+          <!-- Progress bar for time remaining -->
+          <div
+            class="absolute bottom-0 left-0 h-1 {getTimeColor(timeLeft)}"
+            style="width: {(timeLeft / 120) * 100}%"
+          ></div>
+
+          <div class="flex justify-between items-center">
+            <div>
+              <h3 class="text-white font-bold">{system.systemName}</h3>
+              <div class="text-sm text-gray-300">
+                {system.wrecks.length} T2 {system.wrecks.length === 1
+                  ? "wreck"
+                  : "wrecks"}
+              </div>
+            </div>
+
+            <div class="text-right">
+              <div class="text-eve-accent font-mono">
+                Est. {formatValue(system.totalValue)}
+              </div>
+              <div
+                class="text-sm {timeLeft < 30
+                  ? 'text-red-400'
+                  : 'text-gray-400'}"
+              >
+                {timeLeft}m remaining
+              </div>
+            </div>
+          </div>
+
+          <!-- Wreck details -->
+          <div class="mt-2 text-sm text-gray-400">
+            {#each system.wrecks as wreck}
+              <div class="inline-block mr-2">
+                {wreck.shipName}
+              </div>
+            {/each}
+          </div>
+        </div>
+      {/each}
+    </div>
+  {/if}
 </div>
-
-<style>
-  .salvage-fields {
-    width: 100%;
-    height: 100%;
-  }
-
-  canvas {
-    width: 100%;
-    height: 100%;
-  }
-</style>

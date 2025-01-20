@@ -765,7 +765,11 @@ async function addShipCategoriesToKillmail(killmail) {
     }
 
     killmail.shipCategories = {
-      victim: victimCategory,
+      victim: {
+        category: victimCategory.category,
+        name: victimCategory.name,
+        tier: victimCategory.tier,
+      },
       attackers: [],
     };
 
@@ -784,7 +788,9 @@ async function addShipCategoriesToKillmail(killmail) {
       if (category) {
         killmail.shipCategories.attackers.push({
           shipTypeId,
-          category,
+          category: category.category,
+          name: category.name,
+          tier: category.tier,
         });
       }
     }

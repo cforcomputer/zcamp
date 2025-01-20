@@ -77,10 +77,22 @@ socket.on("connect_error", (error) => {
 });
 
 socket.on("newKillmail", (killmail) => {
-  console.log(`[${new Date().toISOString()}] Received new killmail:`, {
-    id: killmail.killID,
+  console.log("Enriched killmail data:", {
+    killID: killmail.killID,
     system: killmail.killmail.solar_system_id,
+    systemInfo: killmail.pinpoints?.celestialData,
     time: killmail.killmail.killmail_time,
+    value: killmail.zkb?.totalValue,
+    victim: {
+      shipTypeId: killmail.killmail.victim.ship_type_id,
+      shipInfo: killmail.shipCategories?.victim,
+    },
+    attackers: killmail.shipCategories?.attackers?.map((attacker) => ({
+      shipTypeId: attacker.shipTypeId,
+      category: attacker.category,
+      name: attacker.name,
+      tier: attacker.tier,
+    })),
   });
 
   killmails.update((currentKillmails) => {
