@@ -4,8 +4,6 @@ import { createServer } from "http";
 import { Server } from "socket.io";
 import axios from "axios";
 import { createClient as createSqlClient } from "@libsql/client";
-import campManager from "./campManager.js";
-import roamManager from "./roamManager.js";
 import path from "path";
 import { fileURLToPath } from "url";
 import cors from "cors";
@@ -429,14 +427,14 @@ app.get("/api/campcrushers/leaderboard", async (req, res) => {
 // });
 
 // Add health check endpoint
+// server.js
+
 app.get("/health", async (_, res) => {
   try {
     if (!isDatabaseInitialized) {
       return res.status(503).json({
         status: "initializing",
         killmails: killmails.length,
-        camps: campManager.getActiveCamps().length,
-        roams: roamManager.getRoams().length,
         lastPoll: new Date().toISOString(),
       });
     }
@@ -446,10 +444,43 @@ app.get("/health", async (_, res) => {
       return res.status(200).json({
         status: "healthy",
         killmails: killmails.length,
-        camps: campManager.getActiveCamps().length,
-        roams: roamManager.getRoams().length,
         lastPoll: new Date().toISOString(),
         redisConnected: redisClient.isReady,
+        socketConnections: io.engine.clientsCount,
+        memoryUsage: {
+          ...process.memoryUsage(),
+          formattedHeapUsed: `${Math.round(
+            process.memoryUsage().heapUsed / 1024 / 1024
+          )}MB`,
+        },
+        cache: {
+          killmailsLast24h: killmails.filter(
+            (km) =>
+              new Date(km.killmail.killmail_time) >
+              new Date(Date.now() - 24 * 60 * 60 * 1000)
+          ).length,
+          killmailsLast2h: killmails.filter(
+            (km) =>
+              new Date(km.killmail.killmail_time) >
+              new Date(Date.now() - 2 * 60 * 60 * 1000)
+          ).length,
+          oldestKillmail:
+            killmails.length > 0
+              ? Math.min(
+                  ...killmails.map((km) =>
+                    new Date(km.killmail.killmail_time).getTime()
+                  )
+                )
+              : null,
+          newestKillmail:
+            killmails.length > 0
+              ? Math.max(
+                  ...killmails.map((km) =>
+                    new Date(km.killmail.killmail_time).getTime()
+                  )
+                )
+              : null,
+        },
       });
     } else {
       throw new Error("Database query returned unexpected result");
@@ -460,8 +491,6 @@ app.get("/health", async (_, res) => {
       status: "unhealthy",
       error: error.message,
       killmails: killmails.length,
-      camps: campManager.getActiveCamps().length,
-      roams: roamManager.getRoams().length,
       lastPoll: new Date().toISOString(),
     });
   }
@@ -838,19 +867,6 @@ async function cleanupShipTypes() {
 
 // Run cleanup weekly
 setInterval(cleanupShipTypes, 7 * 24 * 60 * 60 * 1000);
-
-function logMemoryUsage() {
-  const used = process.memoryUsage();
-  console.log("Memory usage:");
-  for (let key in used) {
-    console.log(
-      `${key}: ${Math.round((used[key] / 1024 / 1024) * 100) / 100} MB`
-    );
-  }
-}
-
-// Log every hour
-setInterval(logMemoryUsage, 60 * 60 * 1000);
 
 async function fetchCelestialData(systemId) {
   console.log(`Fetching celestial data for system ${systemId}`);
@@ -1935,34 +1951,56 @@ redisClient.on("reconnecting", () => {
 io.on("connection", (socket) => {
   console.log("New client connected");
 
-  // Send initial states
-  socket.emit("initialCamps", campManager.getActiveCamps());
-  socket.emit("initialRoams", roamManager.getRoams());
+  socket.on("requestInitialKillmails", async () => {
+    await streamKillmailsToClient(socket);
+  });
 
-  socket.on("requestCamps", (callback) => {
-    console.log(`[${new Date().toISOString()}] Client requested camp data`);
-    if (typeof callback === "function") {
-      try {
-        const activeCamps = campManager.getActiveCamps();
-        console.log(
-          `[${new Date().toISOString()}] Sending camp data to client:`,
-          socket.id
-        );
-        callback(activeCamps);
-      } catch (error) {
-        console.error(
-          `[${new Date().toISOString()}] Error getting active camps:`,
-          error
-        );
-        // Send an error back to the client
-        callback({ error: "Error retrieving camp data" });
+  async function streamKillmailsToClient(socket) {
+    try {
+      // Sort killmails by time, newest first
+      const sortedKillmails = killmails.sort(
+        (a, b) =>
+          new Date(b.killmail.killmail_time) -
+          new Date(a.killmail.killmail_time)
+      );
+
+      // Calculate cutoff time for 24 hours ago
+      const cutoffTime = new Date(Date.now() - 24 * 60 * 60 * 1000);
+
+      // Filter to last 24 hours and split into chunks
+      const recentKillmails = sortedKillmails.filter(
+        (km) => new Date(km.killmail.killmail_time) > cutoffTime
+      );
+
+      // First send the most recent 2 hours of kills (important for camps/roams)
+      const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
+      const recentChunk = recentKillmails.filter(
+        (km) => new Date(km.killmail.killmail_time) > twoHoursAgo
+      );
+
+      if (recentChunk.length > 0) {
+        socket.emit("killmailBatch", recentChunk);
+        await new Promise((resolve) => setTimeout(resolve, 100)); // Small delay
       }
-    }
-  });
 
-  socket.on("requestRoams", () => {
-    socket.emit("roamUpdate", roamManager.getRoams());
-  });
+      // Then send the rest in batches
+      const olderKillmails = recentKillmails.filter(
+        (km) => new Date(km.killmail.killmail_time) <= twoHoursAgo
+      );
+
+      const BATCH_SIZE = 100;
+      for (let i = 0; i < olderKillmails.length; i += BATCH_SIZE) {
+        const batch = olderKillmails.slice(i, i + BATCH_SIZE);
+        socket.emit("killmailBatch", batch);
+        await new Promise((resolve) => setTimeout(resolve, 100)); // Prevent overwhelming client
+      }
+
+      socket.emit("initialLoadComplete");
+    } catch (error) {
+      console.error("Error streaming killmails:", error);
+      socket.emit("error", { message: "Failed to load killmails" });
+    }
+  }
 
   socket.on("requestSync", async () => {
     if (!socket.username) {
@@ -2424,6 +2462,52 @@ async function processKillmail(killmail) {
   }
 }
 
+async function streamKillmailsToClient(socket) {
+  try {
+    // Sort killmails by time, newest first
+    const sortedKillmails = killmails.sort(
+      (a, b) =>
+        new Date(b.killmail.killmail_time) - new Date(a.killmail.killmail_time)
+    );
+
+    // Calculate cutoff time for 24 hours ago
+    const cutoffTime = new Date(Date.now() - 24 * 60 * 60 * 1000);
+
+    // Filter to last 24 hours and split into chunks
+    const recentKillmails = sortedKillmails.filter(
+      (km) => new Date(km.killmail.killmail_time) > cutoffTime
+    );
+
+    // First send the most recent 2 hours of kills (important for camps/roams)
+    const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
+    const recentChunk = recentKillmails.filter(
+      (km) => new Date(km.killmail.killmail_time) > twoHoursAgo
+    );
+
+    if (recentChunk.length > 0) {
+      socket.emit("killmailBatch", recentChunk);
+      await new Promise((resolve) => setTimeout(resolve, 100)); // Small delay
+    }
+
+    // Then send the rest in batches
+    const olderKillmails = recentKillmails.filter(
+      (km) => new Date(km.killmail.killmail_time) <= twoHoursAgo
+    );
+
+    const BATCH_SIZE = 100;
+    for (let i = 0; i < olderKillmails.length; i += BATCH_SIZE) {
+      const batch = olderKillmails.slice(i, i + BATCH_SIZE);
+      socket.emit("killmailBatch", batch);
+      await new Promise((resolve) => setTimeout(resolve, 100)); // Prevent overwhelming client
+    }
+
+    socket.emit("initialLoadComplete");
+  } catch (error) {
+    console.error("Error streaming killmails:", error);
+    socket.emit("error", { message: "Failed to load killmails" });
+  }
+}
+
 // Function to poll for new killmails from RedisQ
 // Modify the polling function to use processKillmail
 async function pollRedisQ() {
@@ -2440,89 +2524,39 @@ async function pollRedisQ() {
       },
     });
 
-    console.log(`[${timestamp}] RedisQ response status: ${response.status}`);
+    if (response.status === 200 && response.data.package) {
+      const killmail = response.data.package;
 
-    if (response.status === 200) {
-      if (response.data.package) {
-        const killmail = response.data.package;
-        console.log(`[${timestamp}] Received killmail:`, {
-          id: killmail.killID,
-          system: killmail.killmail.solar_system_id,
-          time: killmail.killmail.killmail_time,
-          totalValue: killmail.zkb?.totalValue,
-        });
+      // Process killmail
+      if (
+        !isDuplicate(killmail) &&
+        isWithinLast24Hours(killmail.killmail.killmail_time)
+      ) {
+        try {
+          const enrichedKillmail = await addShipCategoriesToKillmail(killmail);
 
-        // Clean old killmails first
-        const beforeCleanCount = killmails.length;
-        killmails = cleanKillmailsCache(killmails);
-        console.log(
-          `[${timestamp}] Cleaned killmail cache: ${beforeCleanCount} -> ${killmails.length}`
-        );
+          // Add to server cache
+          killmails.push(enrichedKillmail);
 
-        if (!isDuplicate(killmail)) {
-          console.log(`[${timestamp}] Not a duplicate, checking time...`);
+          // Clean old killmails
+          const beforeCleanCount = killmails.length;
+          killmails = cleanKillmailsCache(killmails);
+          console.log(
+            `[${timestamp}] Cleaned killmail cache: ${beforeCleanCount} -> ${killmails.length}`
+          );
 
-          if (isWithinLast24Hours(killmail.killmail.killmail_time)) {
-            console.log(`[${timestamp}] Within time window, processing...`);
-
-            try {
-              const processedKillmail = await processKillmail(killmail);
-              console.log(
-                `[${timestamp}] Killmail processed with celestial data`
-              );
-
-              const enrichedKillmail = await addShipCategoriesToKillmail(
-                processedKillmail
-              );
-              console.log(
-                `[${timestamp}] Killmail enriched with ship categories`
-              );
-
-              // Add to cache
-              killmails.push(enrichedKillmail);
-              console.log(
-                `[${timestamp}] Added to cache. New total: ${killmails.length}`
-              );
-
-              // Emit to connected clients
-              const connectedClients = io.sockets.sockets.size;
-              console.log(
-                `[${timestamp}] Broadcasting to ${connectedClients} connected clients`
-              );
-              io.emit("newKillmail", enrichedKillmail);
-
-              // Process for roaming gangs
-              const updatedRoams =
-                roamManager.updateRoamingGangs(enrichedKillmail);
-              console.log(
-                `[${timestamp}] Updated roams: ${updatedRoams.length}`
-              );
-              io.emit("roamUpdate", updatedRoams);
-
-              // Process for gate camps
-              if (campManager.isGateCamp(enrichedKillmail)) {
-                console.log(`[${timestamp}] Processing gate camp...`);
-                const updatedCamps = campManager.processCamp(enrichedKillmail);
-                io.emit("campUpdate", updatedCamps);
-              }
-            } catch (processError) {
-              console.error(
-                `[${timestamp}] Error processing killmail:`,
-                processError
-              );
-            }
-          } else {
-            console.log(`[${timestamp}] Killmail too old, skipping`);
-          }
-        } else {
-          console.log(`[${timestamp}] Duplicate killmail, skipping`);
+          // Emit to all connected clients
+          io.emit("newKillmail", enrichedKillmail);
+        } catch (processError) {
+          console.error(
+            `[${timestamp}] Error processing killmail:`,
+            processError
+          );
         }
-      } else {
-        console.log(`[${timestamp}] No killmail package in response`);
       }
     }
   } catch (error) {
-    console.error(`[${new Date().toISOString()}] Error polling RedisQ:`, {
+    console.error(`[${timestamp}] Error polling RedisQ:`, {
       message: error.message,
       code: error.code,
       response: error.response?.data,
@@ -2552,30 +2586,15 @@ async function startServer() {
     await initializeDatabase();
     isDatabaseInitialized = true;
 
-    // Initialize managers
-    campManager.startUpdates(30000);
-    roamManager.startUpdates(30000);
+    console.log("Starting server...");
 
-    // Listen for camp updates and broadcast to clients
-    campManager.on("campsUpdated", (camps) => {
-      console.log(
-        `[${new Date().toISOString()}] Emitting campsUpdated event with ${
-          camps.length
-        } active camps`
-      );
-      io.emit("campUpdate", camps);
-    });
-
-    // Listen for roam updates and broadcast to clients
-    roamManager.on("roamsUpdated", (roams) => {
-      io.emit("roamUpdate", roams);
-    });
+    // Start RedisQ polling
+    pollRedisQ();
 
     return new Promise((resolve, reject) => {
       server
         .listen(PORT, "0.0.0.0", () => {
           console.log(`Server running on 0.0.0.0:${PORT}`);
-          pollRedisQ();
           resolve();
         })
         .on("error", (err) => {
@@ -2637,8 +2656,6 @@ app.get("*", (_, res) => {
 
 process.on("SIGTERM", async () => {
   console.log("SIGTERM received. Cleaning up...");
-  campManager.cleanup();
-  roamManager.cleanup();
   await redisClient.quit();
   process.exit(0);
 });

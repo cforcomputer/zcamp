@@ -1,18 +1,28 @@
 // campManager.js
-import EventEmitter from "events";
+import { writable, derived } from "svelte/store";
+import { killmails } from "./settingsStore.js";
+import { EventEmitter } from "./browserEvents.js";
 import {
   CAMP_TIMEOUT,
   DECAY_START,
   CAPSULE_ID,
   CAMP_PROBABILITY_FACTORS,
-} from "../src/constants.js";
+} from "./constants.js";
+
+// Create a store for active camps
+export const activeCamps = writable([]);
 
 class CampManager extends EventEmitter {
   constructor() {
     super();
-    this.activeCamps = [];
+    this._camps = [];
     this.updateInterval = null;
     this.lastUpdate = Date.now();
+
+    // Subscribe to killmail store to process new kills
+    killmails.subscribe((kills) => {
+      this.processKillmails(kills);
+    });
   }
 
   startUpdates(interval = 30000) {
@@ -40,7 +50,7 @@ class CampManager extends EventEmitter {
   updateAllProbabilities() {
     const now = Date.now();
 
-    this.activeCamps = this.activeCamps
+    this._camps = this._camps
       .filter((camp) => {
         const timeSinceLastKill = now - new Date(camp.lastKill).getTime();
         return timeSinceLastKill <= CAMP_TIMEOUT;
@@ -51,15 +61,40 @@ class CampManager extends EventEmitter {
       }));
 
     // Sort camps by probability (descending order) after updating
-    this.activeCamps.sort((a, b) => b.probability - a.probability);
+    this._camps.sort((a, b) => b.probability - a.probability);
 
     this.lastUpdate = now;
     console.log(
-      `[${new Date().toISOString()}] Emitting campsUpdated event with ${
-        this.activeCamps.length
+      `[${new Date().toISOString()}] Updated camp probabilities for ${
+        this._camps.length
       } active camps`
     );
-    this.emit("campsUpdated", this.activeCamps);
+
+    // Update the store
+    activeCamps.set(this._camps);
+
+    // Emit event for compatibility
+    this.emit("campsUpdated", this._camps);
+  }
+
+  processKillmails(kills) {
+    // Process only recent kills (last 2 hours)
+    const twoHoursAgo = Date.now() - 2 * 60 * 60 * 1000;
+    const recentKills = kills.filter(
+      (kill) => new Date(kill.killmail.killmail_time).getTime() > twoHoursAgo
+    );
+
+    // Process each kill
+    recentKills.forEach((kill) => {
+      this.processCamp(kill);
+    });
+
+    // Update store
+    activeCamps.set(this._camps);
+  }
+
+  getActiveCamps() {
+    return [...this._camps].sort((a, b) => b.probability - a.probability);
   }
 
   processCamp(killmail) {
@@ -71,13 +106,13 @@ class CampManager extends EventEmitter {
       killmail.pinpoints?.nearestCelestial?.name || "Unknown Gate";
     const campId = `${systemId}-${stargateName}`;
 
-    const existingCampIndex = this.activeCamps.findIndex(
+    const existingCampIndex = this._camps.findIndex(
       (camp) => camp.id === campId
     );
 
     if (existingCampIndex !== -1) {
       // Update existing camp
-      const camp = this.activeCamps[existingCampIndex];
+      const camp = this._camps[existingCampIndex];
       camp.kills.push(killmail);
       camp.lastKill = killmail.killmail.killmail_time;
       camp.totalValue += killmail.zkb.totalValue;
@@ -90,7 +125,7 @@ class CampManager extends EventEmitter {
       camp.composition = this.updateCampComposition(camp, killmail);
       camp.metrics = this.getMetrics(camp.kills, now);
 
-      this.activeCamps[existingCampIndex] = camp;
+      this._camps[existingCampIndex] = camp;
     } else {
       // Create new camp
       const newCamp = {
@@ -114,11 +149,13 @@ class CampManager extends EventEmitter {
         metrics: this.getMetrics([killmail], now),
       };
       newCamp.probability = this.calculateCampProbability(newCamp);
-      this.activeCamps.push(newCamp);
+      this._camps.push(newCamp);
     }
 
-    // this.emit("campsUpdated", this.activeCamps); // Removed this as it is handled in updateAllProbabilities
-    return this.activeCamps;
+    // Update store
+    activeCamps.set(this._camps);
+
+    return this._camps;
   }
 
   calculateCampProbability(camp) {
@@ -440,13 +477,14 @@ class CampManager extends EventEmitter {
   cleanup() {
     this.stopUpdates();
     this.removeAllListeners();
-    this.activeCamps = [];
+    this._camps = [];
+    activeCamps.set([]);
   }
 }
 
-// Export a singleton instance
+// Create singleton instance
 const campManager = new CampManager();
-export default campManager;
 
-// Also export the class for testing or if multiple instances are needed
+// Export singleton and classes
+export default campManager;
 export { CampManager };

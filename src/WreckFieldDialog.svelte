@@ -224,6 +224,7 @@
   });
 </script>
 
+<!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
 <div
   class="fixed inset-0 bg-black/70 flex items-center justify-center z-50"
   on:click={onClose}
@@ -231,6 +232,8 @@
   role="dialog"
   transition:fade
 >
+  <!-- svelte-ignore a11y-click-events-have-key-events -->
+  <!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
   <div
     class="bg-black border border-eve-secondary/30 rounded-lg p-4 w-[800px] h-[600px] shadow-xl shadow-black/50"
     on:click|stopPropagation

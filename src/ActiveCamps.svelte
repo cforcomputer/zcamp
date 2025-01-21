@@ -1,33 +1,25 @@
 <script>
-  import { onMount } from "svelte";
+  import { onMount, onDestroy } from "svelte";
   import CampCrusher from "./CampCrusher.svelte";
-  import socket from "./socket.js";
+  import campManager, { activeCamps } from "./campManager.js";
   import { CAMP_PROBABILITY_FACTORS, CAPSULE_ID } from "./constants.js";
 
   const { THREAT_SHIPS } = CAMP_PROBABILITY_FACTORS;
 
-  let camps = [];
   let viewMode = "cards"; // "cards" or "chart"
   let isLoading = true;
 
   // Reactive statement to sort camps whenever the array is updated
-  $: camps = camps.sort((a, b) => b.probability - a.probability);
+  // Reactive subscription to activeCamps store
+  $: camps = $activeCamps.sort((a, b) => b.probability - a.probability);
 
   onMount(() => {
-    socket.on("initialCamps", (initialCamps) => {
-      camps = initialCamps;
-      isLoading = false;
-    });
+    campManager.startUpdates();
+    isLoading = false;
+  });
 
-    socket.on("campUpdate", (updatedCamps) => {
-      camps = updatedCamps;
-      isLoading = false;
-    });
-
-    return () => {
-      socket.off("initialCamps");
-      socket.off("campUpdate");
-    };
+  onDestroy(() => {
+    campManager.cleanup();
   });
 
   function formatValue(value) {

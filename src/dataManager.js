@@ -3,6 +3,7 @@ import { writable, get } from "svelte/store";
 import socket from "./socket.js";
 import { processNewSalvage } from "./salvage.js";
 import { addKillmailToBattles } from "./battles.js";
+import campManager, { activeCamps } from "./campManager.js";
 import {
   killmails,
   settings,
@@ -12,16 +13,17 @@ import {
 } from "./settingsStore.js";
 
 // Create stores for different data types
-export const activeCamps = writable([]);
-export const activeRoams = writable([]);
 export const socketConnected = writable(false);
 export const lastSocketError = writable(null);
+export const isInitialLoadComplete = writable(false);
 
 // Audio setup for alerts
 const audio =
   typeof Audio !== "undefined"
     ? new Audio("/build/audio_files/alert.wav")
     : null;
+
+let processedKillIds = new Set();
 
 async function fetchCelestialData(systemId) {
   try {
@@ -34,6 +36,17 @@ async function fetchCelestialData(systemId) {
   }
 }
 
+async function handleKillmailBatch(killmails) {
+  console.log(`Processing batch of ${killmails.length} killmails`);
+
+  for (const killmail of killmails) {
+    if (!processedKillIds.has(killmail.killID)) {
+      await handleNewKillmail(killmail);
+      processedKillIds.add(killmail.killID);
+    }
+  }
+}
+
 async function handleNewKillmail(killmail) {
   console.log("Processing new killmail:", {
     id: killmail.killID,
@@ -41,7 +54,7 @@ async function handleNewKillmail(killmail) {
     time: killmail.killmail.killmail_time,
   });
 
-  // Fetch celestial data first
+  // Fetch celestial data and continue processing...
   const systemId = killmail.killmail.solar_system_id;
   const celestialData = await fetchCelestialData(systemId);
 
@@ -99,6 +112,7 @@ async function handleNewKillmail(killmail) {
     try {
       processNewSalvage(killmail);
       addKillmailToBattles(killmail);
+      campManager.processCamp(killmail); // Use campManager directly instead of processCamp
 
       // Handle audio alerts
       if (
@@ -119,7 +133,7 @@ async function handleNewKillmail(killmail) {
 }
 
 // Initialize socket connection and event handlers
-function initializeSocket() {
+export function initializeSocketStore() {
   // Connection events
   socket.on("connect", () => {
     console.log("Socket connected");
@@ -127,6 +141,7 @@ function initializeSocket() {
     lastSocketError.set(null);
 
     // Request initial data
+    socket.emit("requestInitialKillmails");
     socket.emit("requestCamps");
     socket.emit("requestRoams");
   });
@@ -134,6 +149,7 @@ function initializeSocket() {
   socket.on("disconnect", (reason) => {
     console.log("Socket disconnected:", reason);
     socketConnected.set(false);
+    processedKillIds.clear();
   });
 
   socket.on("connect_error", (error) => {
@@ -142,6 +158,12 @@ function initializeSocket() {
   });
 
   // Data events
+  socket.on("killmailBatch", handleKillmailBatch);
+  socket.on("initialLoadComplete", () => {
+    isInitialLoadComplete.set(true);
+    console.log("Initial killmail load complete");
+  });
+
   socket.on("newKillmail", handleNewKillmail);
 
   socket.on("campUpdate", (camps) => {
@@ -195,6 +217,8 @@ function cleanupSocket() {
     "disconnect",
     "connect_error",
     "newKillmail",
+    "killmailBatch",
+    "initialLoadComplete",
     "campUpdate",
     "roamUpdate",
     "filterListCreated",
@@ -205,14 +229,8 @@ function cleanupSocket() {
   ];
 
   events.forEach((event) => socket.off(event));
+  processedKillIds.clear();
 }
-
-// Export initialization and cleanup functions
-export function initializeSocketStore() {
-  cleanupSocket(); // Clean up any existing listeners first
-  initializeSocket();
-}
-
 export function cleanup() {
   cleanupSocket();
   socketConnected.set(false);

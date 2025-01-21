@@ -1,8 +1,13 @@
 // roamManager.js
-import EventEmitter from "events";
+import { writable, derived } from "svelte/store";
+import { killmails } from "./settingsStore.js";
+import { EventEmitter } from "./browserEvents.js";
 
 export const ROAM_TIMEOUT = 30 * 60 * 1000; // 30 minutes
 export const CAPSULE_ID = 670;
+
+// Create store for active roams
+export const activeRoams = writable([]);
 
 class RoamManager extends EventEmitter {
   constructor() {
@@ -10,6 +15,11 @@ class RoamManager extends EventEmitter {
     this._roams = [];
     this.updateInterval = null;
     this.lastUpdate = Date.now();
+
+    // Subscribe to killmail store
+    killmails.subscribe((kills) => {
+      this.processKillmails(kills);
+    });
   }
 
   startUpdates(interval = 30000) {
@@ -27,6 +37,22 @@ class RoamManager extends EventEmitter {
       clearInterval(this.updateInterval);
       this.updateInterval = null;
     }
+  }
+
+  processKillmails(kills) {
+    // Process only recent kills (last 30 minutes)
+    const cutoffTime = Date.now() - ROAM_TIMEOUT;
+    const recentKills = kills.filter(
+      (kill) => new Date(kill.killmail.killmail_time).getTime() > cutoffTime
+    );
+
+    // Process each kill
+    recentKills.forEach((kill) => {
+      this.updateRoamingGangs(kill);
+    });
+
+    // Update store
+    activeRoams.set(this._roams);
   }
 
   updateRoamingGangs(killmail) {
@@ -76,10 +102,8 @@ class RoamManager extends EventEmitter {
     // Skip if insufficient unique attackers
     if (attackerIds.size < 2) {
       console.log("Skipping - insufficient unique attackers");
-      console.log("--- End roamManager.js: Roaming Gang Update ---");
-      const formattedRoams = this.formatRoams(this._roams);
-      this.emit("roamsUpdated", formattedRoams);
-      return formattedRoams;
+      activeRoams.set(this._roams);
+      return this._roams;
     }
 
     // Find existing roam with overlapping members
@@ -165,24 +189,16 @@ class RoamManager extends EventEmitter {
       });
     }
 
-    console.log(`Total active roams: ${this._roams.length}`);
-    console.log(
-      "Active roams summary:",
-      this._roams.map((roam) => ({
-        id: roam.id,
-        members: roam.members.length,
-        systems: roam.systems.length,
-        kills: roam.kills.length,
-        lastActivity: roam.lastActivity,
-      }))
-    );
-    console.log("--- End roamManager.js: Roaming Gang Update ---");
+    // Update store
+    activeRoams.set(this._roams);
 
-    const formattedRoams = this.formatRoams(this._roams);
-    this.emit("roamsUpdated", formattedRoams);
-    return formattedRoams;
+    // Emit for compatibility
+    this.emit("roamsUpdated", this._roams);
+
+    return this._roams;
   }
 
+  // Rest of the methods remain the same
   getRoams() {
     return this.formatRoams(this._roams);
   }
@@ -211,6 +227,7 @@ class RoamManager extends EventEmitter {
   clearExpiredRoams() {
     const now = Date.now();
     const beforeCleanCount = this._roams.length;
+
     this._roams = this._roams.filter((roam) => {
       const timeSinceLastActivity = now - new Date(roam.lastActivity).getTime();
       return timeSinceLastActivity <= ROAM_TIMEOUT;
@@ -220,22 +237,28 @@ class RoamManager extends EventEmitter {
       console.log(
         `Cleared ${beforeCleanCount - this._roams.length} expired roams`
       );
-      const formattedRoams = this.formatRoams(this._roams);
-      this.emit("roamsUpdated", formattedRoams);
+
+      // Update store
+      activeRoams.set(this._roams);
+
+      // Emit for compatibility
+      this.emit("roamsUpdated", this._roams);
     }
-    return this.formatRoams(this._roams);
+
+    return this._roams;
   }
 
   cleanup() {
     this.stopUpdates();
     this._roams = [];
+    activeRoams.set([]);
     this.removeAllListeners();
   }
 }
 
-// Export a singleton instance
+// Create singleton instance
 const roamManager = new RoamManager();
-export default roamManager;
 
-// Also export the class for testing
+// Export both singleton and store
+export default roamManager;
 export { RoamManager };

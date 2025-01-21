@@ -1,9 +1,10 @@
+<!-- CampCrusher.svelte -->
 <script>
   import { onMount, onDestroy } from "svelte";
   import { writable } from "svelte/store";
   import socket from "./socket.js";
+  import { activeCamps } from "./campManager.js";
 
-  const camps = writable([]);
   let showGame = false;
   let selectedCamp = null;
   let countdownInterval = null;
@@ -12,13 +13,10 @@
   let leaderboard = [];
   let characterName = null;
 
-  const unsubscribe = camps.subscribe(() => {});
+  // Subscribe to active camps
+  $: camps = $activeCamps;
 
   onMount(async () => {
-    socket.on("campUpdate", (updatedCamps) => {
-      camps.set(updatedCamps);
-    });
-
     socket.on("bashbucksAwarded", handleBashbucksAwarded);
 
     const response = await fetch("/api/session", {
@@ -28,14 +26,11 @@
     characterName = data.user?.character_name;
 
     await loadLeaderboard();
-    socket.emit("requestCamps");
   });
 
   onDestroy(() => {
     if (countdownInterval) clearInterval(countdownInterval);
-    socket.off("campUpdate");
     socket.off("bashbucksAwarded", handleBashbucksAwarded);
-    unsubscribe();
   });
 
   async function loadLeaderboard() {
@@ -136,7 +131,7 @@
             <div class="camp-selection">
               <h4 class="selection-header">SELECT TARGET:</h4>
               <div class="camp-list">
-                {#each $camps as camp}
+                {#each camps as camp}
                   <button
                     class="camp-option retro-button"
                     on:click={() => selectCamp(camp)}

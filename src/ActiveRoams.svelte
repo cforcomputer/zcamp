@@ -1,25 +1,17 @@
+<!-- ActiveRoams.svelte -->
 <script>
-  import { onMount } from "svelte";
-  import socket from "./socket.js";
+  import { onMount, onDestroy } from "svelte";
+  import roamManager, { activeRoams } from "./roamManager.js";
 
-  let roams = [];
+  // Subscribe to active roams store
+  $: roams = $activeRoams;
 
   onMount(() => {
-    // Request initial data
-    socket.emit("requestRoams");
+    roamManager.startUpdates();
+  });
 
-    socket.on("initialRoams", (initialRoams) => {
-      roams = initialRoams;
-    });
-
-    socket.on("roamUpdate", (updatedRoams) => {
-      roams = updatedRoams;
-    });
-
-    return () => {
-      socket.off("initialRoams");
-      socket.off("roamUpdate");
-    };
+  onDestroy(() => {
+    roamManager.cleanup();
   });
 
   function getRoamDuration(roam) {
@@ -32,9 +24,7 @@
     const minutes = Math.floor((Date.now() - firstKillTime) / (1000 * 60));
 
     if (minutes < 1) return "just started";
-
     if (minutes === 1) return "1 minute";
-
     return `${minutes} minutes`;
   }
 
@@ -80,15 +70,11 @@
 
   function getRoamColor(roam) {
     const systemCount = getSystemCount(roam);
-
     const memberCount = roam.members?.length || 0;
 
     if (systemCount > 10 || memberCount > 20) return "#ff4444";
-
     if (systemCount > 5 || memberCount > 10) return "#ff8c00";
-
     if (systemCount > 2 || memberCount > 5) return "#ffd700";
-
     return "#90ee90";
   }
 </script>
