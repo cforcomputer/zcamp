@@ -3,7 +3,7 @@ import { writable, get } from "svelte/store";
 import socket from "./socket.js";
 import { processNewSalvage } from "./salvage.js";
 import { addKillmailToBattles } from "./battles.js";
-import campManager, { activeCamps } from "./campManager.js";
+import { activeCamps } from "./campManager.js";
 import {
   killmails,
   settings,
@@ -16,124 +16,41 @@ import {
 export const socketConnected = writable(false);
 export const lastSocketError = writable(null);
 export const isInitialLoadComplete = writable(false);
+let processedKillIds = new Set(
+  JSON.parse(localStorage.getItem("processedKillIds") || "[]")
+);
+let lastAckedId = 0;
 
-// Audio setup for alerts
-const audio =
-  typeof Audio !== "undefined"
-    ? new Audio("/build/audio_files/alert.wav")
-    : null;
+async function handleKillmailBatch({ batch, latestId }) {
+  // Filter any already processed kills (just in case)
+  const newKills = batch.filter((k) => k.killID > lastAckedId);
 
-let processedKillIds = new Set();
-
-async function fetchCelestialData(systemId) {
-  try {
-    const response = await fetch(`/api/celestials/system/${systemId}`);
-    if (!response.ok) throw new Error("Failed to fetch celestial data");
-    return await response.json();
-  } catch (err) {
-    console.error("Error fetching celestial data:", err);
-    return null;
+  // Process new kills
+  for (const killmail of newKills) {
+    killmails.update((k) => [killmail, ...k]);
+    addKillmailToBattles(killmail);
+    lastAckedId = Math.max(lastAckedId, killmail.killID);
   }
-}
 
-async function handleKillmailBatch(killmails) {
-  console.log(`Processing batch of ${killmails.length} killmails`);
-
-  for (const killmail of killmails) {
-    if (!processedKillIds.has(killmail.killID)) {
-      await handleNewKillmail(killmail);
-      processedKillIds.add(killmail.killID);
-    }
+  // Acknowledge batch receipt
+  if (newKills.length > 0) {
+    socket.emit("batchAck", lastAckedId);
   }
 }
 
 async function handleNewKillmail(killmail) {
-  console.log("Processing new killmail:", {
-    id: killmail.killID,
-    system: killmail.killmail.solar_system_id,
-    time: killmail.killmail.killmail_time,
-  });
-
-  // Fetch celestial data and continue processing...
-  const systemId = killmail.killmail.solar_system_id;
-  const celestialData = await fetchCelestialData(systemId);
-
-  // More detailed logging to track celestial data
-  console.log("Celestial data response:", {
-    hasData: !!celestialData,
-    systemName: celestialData?.[0]?.solarsystemname,
-    regionName: celestialData?.[0]?.regionname,
-    dataLength: celestialData?.length,
-  });
-
-  if (celestialData?.length > 0) {
-    // Ensure we preserve any existing pinpoints data
-    killmail.pinpoints = {
-      ...killmail.pinpoints,
-      celestialData: {
-        regionid: celestialData[0].regionid,
-        regionname: celestialData[0].regionname,
-        solarsystemid: systemId,
-        solarsystemname:
-          celestialData[0].solarsystemname || `System ${systemId}`,
-        // Keep the full celestial data for triangulation
-        celestials: celestialData,
-      },
-    };
-  } else {
-    // Fallback if celestial data fetch fails
-    killmail.pinpoints = {
-      ...killmail.pinpoints,
-      celestialData: {
-        solarsystemid: systemId,
-        solarsystemname: `System ${systemId}`,
-        regionname: "Unknown Region",
-      },
-    };
+  try {
+    // Add to store directly since killmail is already enriched from server
+    killmails.update((kills) => [...kills, killmail]);
+    addKillmailToBattles(killmail);
+  } catch (error) {
+    console.error("Error processing killmail:", error);
   }
-
-  // Verify the data is properly attached
-  console.log("Processed killmail system info:", {
-    systemId: killmail.killmail.solar_system_id,
-    systemName: killmail.pinpoints?.celestialData?.solarsystemname,
-    region: killmail.pinpoints?.celestialData?.regionname,
-    hasData: !!killmail.pinpoints?.celestialData,
-  });
-
-  killmails.update((currentKillmails) => {
-    const existing = Array.isArray(currentKillmails) ? currentKillmails : [];
-
-    if (existing.some((km) => km.killID === killmail.killID)) {
-      return existing;
-    }
-
-    const prevFilteredLength = get(filteredKillmails).length;
-
-    try {
-      processNewSalvage(killmail);
-      addKillmailToBattles(killmail);
-      campManager.processCamp(killmail); // Use campManager directly instead of processCamp
-
-      // Handle audio alerts
-      if (
-        get(filteredKillmails).length > prevFilteredLength &&
-        get(settings).audio_alerts_enabled
-      ) {
-        audio?.play().catch((err) => console.error("Audio error:", err));
-      }
-    } catch (err) {
-      console.error("Error processing killmail:", err);
-    }
-
-    return [...existing, killmail].sort(
-      (a, b) =>
-        new Date(b.killmail.killmail_time) - new Date(a.killmail.killmail_time)
-    );
-  });
 }
 
 // Initialize socket connection and event handlers
 export function initializeSocketStore() {
+  socket.on("killmailBatch", handleKillmailBatch);
   // Connection events
   socket.on("connect", () => {
     console.log("Socket connected");
@@ -208,6 +125,10 @@ export function initializeSocketStore() {
     console.error("Socket error:", error);
     lastSocketError.set(error.message);
   });
+
+  socket.on("reconnect", async () => {
+    socket.emit("requestInitialKillmails", lastAckedId);
+  });
 }
 
 // Cleanup all socket listeners
@@ -235,6 +156,11 @@ export function cleanup() {
   cleanupSocket();
   socketConnected.set(false);
   lastSocketError.set(null);
+  // Save processed kills to localStorage
+  localStorage.setItem(
+    "processedKillIds",
+    JSON.stringify([...processedKillIds])
+  );
 }
 
 // Export socket instance for direct access if needed

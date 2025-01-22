@@ -2534,9 +2534,10 @@ async function pollRedisQ() {
       ) {
         try {
           const enrichedKillmail = await addShipCategoriesToKillmail(killmail);
+          const processedKillmail = await processKillmail(enrichedKillmail);
 
           // Add to server cache
-          killmails.push(enrichedKillmail);
+          killmails.push(processedKillmail);
 
           // Clean old killmails
           const beforeCleanCount = killmails.length;

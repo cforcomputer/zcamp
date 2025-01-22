@@ -57,51 +57,27 @@ class RoamManager extends EventEmitter {
 
   updateRoamingGangs(killmail) {
     console.log("--- roamManager.js: Roaming Gang Update Debug ---");
-    console.log("Processing killmail:", {
-      killID: killmail.killID,
-      systemId: killmail.killmail.solar_system_id,
-      time: killmail.killmail.killmail_time,
-      attackers: killmail.killmail.attackers.length,
-    });
-
     const now = Date.now();
 
-    // Clean expired roams
-    const beforeCleanCount = this._roams.length;
+    // Clean expired roams first
     this._roams = this._roams.filter((roam) => {
       const timeSinceLastActivity = now - new Date(roam.lastActivity).getTime();
-      const isActive = timeSinceLastActivity <= ROAM_TIMEOUT;
-      if (!isActive) {
-        console.log(
-          `Roam ${roam.id} expired after ${Math.floor(
-            timeSinceLastActivity / 1000 / 60
-          )}m of inactivity`
-        );
-      }
-      return isActive;
+      return timeSinceLastActivity <= ROAM_TIMEOUT;
     });
-    console.log(
-      `Cleaned expired roams: ${beforeCleanCount} -> ${this._roams.length}`
-    );
 
     const systemId = killmail.killmail.solar_system_id;
     const systemName =
       killmail.pinpoints?.celestialData?.solarsystemname || systemId.toString();
     const regionName = killmail.pinpoints?.celestialData?.regionname || null;
 
-    // Get unique attacker character IDs, excluding capsules
+    // Get unique attacker IDs
     const attackerIds = new Set(
       killmail.killmail.attackers
         .filter((a) => a.character_id && a.ship_type_id !== CAPSULE_ID)
         .map((a) => a.character_id)
     );
 
-    console.log(`Found ${attackerIds.size} unique attackers in killmail`);
-    console.log("Attacker IDs:", [...attackerIds]);
-
-    // Skip if insufficient unique attackers
     if (attackerIds.size < 2) {
-      console.log("Skipping - insufficient unique attackers");
       activeRoams.set(this._roams);
       return this._roams;
     }
@@ -109,28 +85,28 @@ class RoamManager extends EventEmitter {
     // Find existing roam with overlapping members
     let existingRoam = this._roams.find((roam) => {
       const members = new Set(roam.members);
-      const overlappingMembers = [...attackerIds].filter((id) =>
-        members.has(id)
-      );
-      const hasOverlap = overlappingMembers.length > 0;
-      if (hasOverlap) {
-        console.log(
-          `Found matching roam: ${roam.id} with overlapping members:`,
-          overlappingMembers
-        );
-      }
-      return hasOverlap;
+      return [...attackerIds].some((id) => members.has(id));
     });
 
     if (existingRoam) {
-      console.log("Updating existing roam:", {
-        id: existingRoam.id,
-        previousMembers: existingRoam.members.length,
-        previousSystems: existingRoam.systems.length,
-        previousKills: existingRoam.kills.length,
-      });
+      // Check if kill already exists in roam
+      const killExists = existingRoam.kills.some(
+        (k) => k.killID === killmail.killID
+      );
+      if (!killExists) {
+        existingRoam.kills.push(killmail);
+        existingRoam.totalValue += killmail.zkb.totalValue;
 
-      // Update existing roam
+        // Update systems list
+        existingRoam.systems.push({
+          id: systemId,
+          name: systemName,
+          region: regionName,
+          time: killmail.killmail.killmail_time,
+        });
+      }
+
+      // Always update members and timestamps
       existingRoam.members = Array.from(
         new Set([...existingRoam.members, ...attackerIds])
       );
@@ -140,23 +116,7 @@ class RoamManager extends EventEmitter {
         name: systemName,
         region: regionName,
       };
-      existingRoam.systems.push({
-        id: systemId,
-        name: systemName,
-        region: regionName,
-        time: killmail.killmail.killmail_time,
-      });
-      existingRoam.kills.push(killmail);
-      existingRoam.totalValue += killmail.zkb.totalValue;
-
-      console.log("Updated roam stats:", {
-        members: existingRoam.members.length,
-        systems: existingRoam.systems.length,
-        kills: existingRoam.kills.length,
-        totalValue: existingRoam.totalValue,
-      });
     } else {
-      console.log("Creating new roam");
       // Create new roam
       const newRoam = {
         id: `roam-${Date.now()}`,
@@ -169,32 +129,17 @@ class RoamManager extends EventEmitter {
             time: killmail.killmail.killmail_time,
           },
         ],
-        lastSystem: {
-          id: systemId,
-          name: systemName,
-          region: regionName,
-        },
+        lastSystem: { id: systemId, name: systemName, region: regionName },
         startTime: killmail.killmail.killmail_time,
         lastActivity: killmail.killmail.killmail_time,
         kills: [killmail],
         totalValue: killmail.zkb.totalValue,
       };
-
       this._roams.push(newRoam);
-      console.log("New roam created:", {
-        id: newRoam.id,
-        members: newRoam.members.length,
-        system: newRoam.lastSystem.name,
-        totalValue: newRoam.totalValue,
-      });
     }
 
-    // Update store
     activeRoams.set(this._roams);
-
-    // Emit for compatibility
     this.emit("roamsUpdated", this._roams);
-
     return this._roams;
   }
 

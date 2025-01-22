@@ -111,18 +111,25 @@ class CampManager extends EventEmitter {
     );
 
     if (existingCampIndex !== -1) {
-      // Update existing camp
       const camp = this._camps[existingCampIndex];
-      camp.kills.push(killmail);
-      camp.lastKill = killmail.killmail.killmail_time;
-      camp.totalValue += killmail.zkb.totalValue;
 
-      if (this.hasSmartbombs([killmail])) {
-        camp.type = "smartbomb";
+      // Check if kill already exists in camp
+      const killExists = camp.kills.some((k) => k.killID === killmail.killID);
+      if (!killExists) {
+        camp.kills.push(killmail);
+        camp.totalValue += killmail.zkb.totalValue;
+
+        if (this.hasSmartbombs([killmail])) {
+          camp.type = "smartbomb";
+        }
+
+        camp.composition = this.updateCampComposition(camp, killmail);
       }
 
+      // Always update timestamps and recalculate
+      camp.lastKill = killmail.killmail.killmail_time;
+      camp.latestKillTime = now;
       camp.probability = this.calculateCampProbability(camp);
-      camp.composition = this.updateCampComposition(camp, killmail);
       camp.metrics = this.getMetrics(camp.kills, now);
 
       this._camps[existingCampIndex] = camp;
@@ -152,9 +159,7 @@ class CampManager extends EventEmitter {
       this._camps.push(newCamp);
     }
 
-    // Update store
     activeCamps.set(this._camps);
-
     return this._camps;
   }
 

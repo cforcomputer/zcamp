@@ -33,6 +33,11 @@ async function refreshToken(refreshToken) {
 
 async function checkForGateCamps(systemId, celestialData) {
   try {
+    // Add error handling for celestial data
+    if (!celestialData || !Array.isArray(celestialData)) {
+      console.error("Invalid celestial data:", celestialData);
+      return { current: [], connected: [] };
+    }
     // Request active camps from the server
     const camps = await new Promise((resolve) => {
       socket.emit("requestCamps", (response) => {
