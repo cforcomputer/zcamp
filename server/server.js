@@ -152,7 +152,7 @@ const sessionMiddleware = session({
   name: "km_sid",
   cookie: {
     secure: true,
-    maxAge: 24 * 60 * 60 * 1000,
+    maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
     httpOnly: true,
     sameSite: "lax",
     domain:
@@ -161,7 +161,7 @@ const sessionMiddleware = session({
         : undefined,
     path: "/",
   },
-  proxy: true, // Add this for proper HTTPS handling behind proxy
+  proxy: true,
 });
 app.use(sessionMiddleware);
 app.set("trust proxy", 1);
@@ -316,6 +316,27 @@ app.get("/api/campcrushers/stats", async (req, res) => {
   } catch (error) {
     console.error("Error fetching camp crusher stats:", error);
     res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+app.post("/api/logout", async (req, res) => {
+  try {
+    await new Promise((resolve, reject) => {
+      req.session.destroy((err) => {
+        if (err) {
+          console.error("Error destroying session:", err);
+          reject(err);
+          return;
+        }
+        resolve();
+      });
+    });
+
+    res.clearCookie("km_sid");
+    res.json({ success: true });
+  } catch (error) {
+    console.error("Logout error:", error);
+    res.status(500).json({ success: false, message: "Error during logout" });
   }
 });
 

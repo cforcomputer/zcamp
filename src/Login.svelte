@@ -1,4 +1,3 @@
-<!-- Login.svelte -->
 <script>
   import { createEventDispatcher } from "svelte";
   import { onMount } from "svelte";
@@ -10,7 +9,7 @@
 
   // SSO Configuration
   const EVE_SSO_URL = "https://login.eveonline.com/v2/oauth/authorize/";
-  const CALLBACK_URL = "http://localhost:3000/callback/"; // Updated to match server port
+  const CALLBACK_URL = "http://localhost:3000/callback/";
   const SCOPES = [
     "publicData",
     "esi-location.read_location.v1",
@@ -25,7 +24,6 @@
     const params = new URLSearchParams(window.location.search);
 
     if (params.get("authenticated") === "true") {
-      // EVE SSO authentication successful
       dispatch("login", { type: "eve" });
       successMessage = "Successfully logged in with EVE Online!";
       window.history.replaceState({}, document.title, "/");
@@ -93,15 +91,14 @@
 
     if (data.success) {
       successMessage = "Registration successful! Logging in...";
-      error = ""; // Clear any previous errors
-      handleSubmit(); // Automatically log in after registration
+      error = "";
+      handleSubmit();
     } else {
       error = data.message;
-      successMessage = ""; // Clear any previous success messages
+      successMessage = "";
     }
   }
 
-  // Get client ID from server
   async function handleEveLogin() {
     try {
       const response = await fetch("/api/eve-sso-config");
@@ -132,144 +129,106 @@
   }
 </script>
 
-<div class="login-container">
-  <h2>Login</h2>
+<div class="login-modal">
+  <div class="login-content">
+    <h2 class="text-2xl font-bold text-eve-accent mb-6">Login to ZCamp</h2>
 
-  <!-- Regular login form -->
-  <form on:submit|preventDefault={handleSubmit}>
-    <div class="form-group">
-      <input
-        type="text"
-        bind:value={username}
-        placeholder="Username"
-        required
-      />
-    </div>
-    <div class="form-group">
-      <input
-        type="password"
-        bind:value={password}
-        placeholder="Password"
-        required
-      />
-    </div>
-    <div class="button-group">
-      <button type="submit">Login</button>
-      <button type="button" on:click={handleRegister}>Register</button>
-    </div>
-  </form>
+    <form on:submit|preventDefault={handleSubmit} class="space-y-4">
+      <div class="form-group">
+        <input
+          type="text"
+          bind:value={username}
+          placeholder="Username"
+          class="w-full px-4 py-2 bg-eve-secondary border border-eve-accent/20 rounded-md text-white placeholder-gray-400 focus:border-eve-accent focus:ring-1 focus:ring-eve-accent outline-none"
+          required
+        />
+      </div>
 
-  <div class="divider">
-    <span>or</span>
+      <div class="form-group">
+        <input
+          type="password"
+          bind:value={password}
+          placeholder="Password"
+          class="w-full px-4 py-2 bg-eve-secondary border border-eve-accent/20 rounded-md text-white placeholder-gray-400 focus:border-eve-accent focus:ring-1 focus:ring-eve-accent outline-none"
+          required
+        />
+      </div>
+
+      <div class="flex gap-4">
+        <button
+          type="submit"
+          class="flex-1 px-4 py-2 bg-eve-accent/20 hover:bg-eve-accent/30 text-eve-accent rounded-md transition-colors duration-200"
+        >
+          Login
+        </button>
+        <button
+          type="button"
+          on:click={handleRegister}
+          class="flex-1 px-4 py-2 bg-eve-accent/20 hover:bg-eve-accent/30 text-eve-accent rounded-md transition-colors duration-200"
+        >
+          Register
+        </button>
+      </div>
+    </form>
+
+    <div class="relative my-8">
+      <div class="absolute inset-0 flex items-center">
+        <div class="w-full border-t border-eve-accent/20"></div>
+      </div>
+      <div class="relative flex justify-center text-sm">
+        <span class="px-2 bg-eve-dark text-gray-400">or</span>
+      </div>
+    </div>
+
+    <button
+      class="w-full flex justify-center items-center hover:opacity-90 transition-opacity"
+      on:click={handleEveLogin}
+    >
+      <img
+        src="/eve-sso-login-b.png"
+        alt="Log in with EVE Online"
+        width="270"
+        height="45"
+        class="max-w-full"
+      />
+    </button>
+
+    {#if error}
+      <p class="mt-4 text-eve-danger text-center">{error}</p>
+    {/if}
+
+    {#if successMessage}
+      <p class="mt-4 text-green-400 text-center">{successMessage}</p>
+    {/if}
   </div>
-
-  <!-- EVE Online SSO Login -->
-  <button class="eve-login-btn" on:click={handleEveLogin}>
-    <img
-      src="/eve-sso-login-b.png"
-      alt="Log in with EVE Online"
-      width="270"
-      height="45"
-    />
-  </button>
-
-  {#if error}
-    <p class="error">{error}</p>
-  {/if}
-  {#if successMessage}
-    <p class="success">{successMessage}</p>
-  {/if}
 </div>
 
 <style>
-  .login-container {
-    max-width: 400px;
-    margin: 2rem auto;
-    padding: 2rem;
-    background: rgba(0, 0, 0, 0.8);
-    border-radius: 8px;
-    color: white;
+  .login-modal {
+    @apply w-full max-w-md mx-auto;
+  }
+
+  .login-content {
+    @apply bg-eve-dark border border-eve-accent/20 rounded-lg shadow-xl p-8;
+  }
+
+  :global(body) {
+    @apply antialiased;
   }
 
   .form-group {
-    margin-bottom: 1rem;
+    @apply relative;
   }
 
-  input {
-    width: 100%;
-    padding: 0.5rem;
-    border: 1px solid #444;
-    border-radius: 4px;
-    background: rgba(255, 255, 255, 0.1);
-    color: white;
+  input::placeholder {
+    @apply text-gray-500;
   }
 
-  input:focus {
-    outline: none;
-    border-color: #007bff;
+  button:disabled {
+    @apply opacity-50 cursor-not-allowed;
   }
 
-  .button-group {
-    display: flex;
-    gap: 1rem;
-    margin-top: 1rem;
-  }
-
-  button {
-    flex: 1;
-    padding: 0.5rem 1rem;
-    border: none;
-    border-radius: 4px;
-    cursor: pointer;
-    background: #007bff;
-    color: white;
-    transition: background-color 0.2s;
-  }
-
-  button:hover {
-    background: #0056b3;
-  }
-
-  .divider {
-    display: flex;
-    align-items: center;
-    text-align: center;
-    margin: 2rem 0;
-  }
-
-  .divider::before,
-  .divider::after {
-    content: "";
-    flex: 1;
-    border-bottom: 1px solid #444;
-  }
-
-  .divider span {
-    padding: 0 1rem;
-    color: #888;
-  }
-
-  .eve-login-btn {
-    width: 100%;
-    background: none;
-    padding: 0;
-    display: flex;
-    justify-content: center;
-  }
-
-  .eve-login-btn:hover {
-    opacity: 0.9;
-  }
-
-  .error {
-    color: #ff4444;
-    margin-top: 1rem;
-    text-align: center;
-  }
-
-  .success {
-    color: #00ff00;
-    margin-top: 1rem;
-    text-align: center;
+  button:focus {
+    @apply outline-none ring-2 ring-eve-accent ring-opacity-50;
   }
 </style>
