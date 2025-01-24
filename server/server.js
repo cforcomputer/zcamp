@@ -324,14 +324,16 @@ app.post("/api/campcrushers/target", async (req, res) => {
     return res.status(401).json({ error: "Not authenticated" });
   }
 
-  const { campId } = req.body;
+  const { campId, systemId, stargateName } = req.body;
   const startTime = new Date();
   const endTime = new Date(startTime.getTime() + 60 * 60 * 1000); // 1 hour
 
   try {
     // Check for existing active target
     const { rows } = await db.execute({
-      sql: "SELECT id FROM camp_crusher_targets WHERE character_id = ? AND completed = FALSE AND end_time > CURRENT_TIMESTAMP",
+      sql: `SELECT id FROM camp_crusher_targets 
+            WHERE character_id = ? AND completed = FALSE 
+            AND end_time > CURRENT_TIMESTAMP`,
       args: [req.session.user.character_id],
     });
 
@@ -339,10 +341,19 @@ app.post("/api/campcrushers/target", async (req, res) => {
       return res.status(400).json({ error: "Active target already exists" });
     }
 
-    // Create new target
+    // Create new target with more camp details
     await db.execute({
-      sql: "INSERT INTO camp_crusher_targets (character_id, camp_id, start_time, end_time) VALUES (?, ?, ?, ?)",
-      args: [req.session.user.character_id, campId, startTime, endTime],
+      sql: `INSERT INTO camp_crusher_targets 
+            (character_id, camp_id, system_id, stargate_name, start_time, end_time) 
+            VALUES (?, ?, ?, ?, ?, ?)`,
+      args: [
+        req.session.user.character_id,
+        campId,
+        systemId,
+        stargateName,
+        startTime,
+        endTime,
+      ],
     });
 
     res.json({ success: true, endTime });
