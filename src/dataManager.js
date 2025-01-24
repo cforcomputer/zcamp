@@ -4,6 +4,7 @@ import socket from "./socket.js";
 import { processNewSalvage } from "./salvage.js";
 import { addKillmailToBattles } from "./battles.js";
 import { activeCamps } from "./campManager.js";
+import { activeRoams } from "./roamManager.js"; // Add this import
 import {
   killmails,
   settings,
@@ -22,36 +23,30 @@ let processedKillIds = new Set(
 let lastAckedId = 0;
 
 async function handleKillmailBatch({ batch, latestId }) {
-  // Filter any already processed kills (just in case)
-  const newKills = batch.filter((k) => k.killID > lastAckedId);
+  // Filter any already processed kills
+  const newKills = batch.filter((k) => !processedKillIds.has(k.killID));
 
   // Process new kills
   for (const killmail of newKills) {
-    killmails.update((k) => [killmail, ...k]);
+    processedKillIds.add(killmail.killID);
+    killmails.update((k) => {
+      // Ensure no duplicates
+      if (!k.some((existing) => existing.killID === killmail.killID)) {
+        return [killmail, ...k];
+      }
+      return k;
+    });
     addKillmailToBattles(killmail);
-    lastAckedId = Math.max(lastAckedId, killmail.killID);
   }
 
-  // Acknowledge batch receipt
+  // Update last processed ID
   if (newKills.length > 0) {
-    socket.emit("batchAck", lastAckedId);
-  }
-}
-
-async function handleNewKillmail(killmail) {
-  try {
-    // Add to store directly since killmail is already enriched from server
-    killmails.update((kills) => [...kills, killmail]);
-    addKillmailToBattles(killmail);
-  } catch (error) {
-    console.error("Error processing killmail:", error);
+    lastAckedId = Math.max(lastAckedId, latestId);
   }
 }
 
 // Initialize socket connection and event handlers
 export function initializeSocketStore() {
-  socket.on("killmailBatch", handleKillmailBatch);
-  // Connection events
   socket.on("connect", () => {
     console.log("Socket connected");
     socketConnected.set(true);
@@ -74,15 +69,14 @@ export function initializeSocketStore() {
     lastSocketError.set(error.message);
   });
 
-  // Data events
+  // Only handle killmail batches
   socket.on("killmailBatch", handleKillmailBatch);
   socket.on("initialLoadComplete", () => {
     isInitialLoadComplete.set(true);
     console.log("Initial killmail load complete");
   });
 
-  socket.on("newKillmail", handleNewKillmail);
-
+  // Keep other event handlers
   socket.on("campUpdate", (camps) => {
     console.log(`Received camp update: ${camps.length} camps`);
     activeCamps.set(camps);
@@ -126,8 +120,8 @@ export function initializeSocketStore() {
     lastSocketError.set(error.message);
   });
 
-  socket.on("reconnect", async () => {
-    socket.emit("requestInitialKillmails", lastAckedId);
+  socket.on("reconnect", () => {
+    socket.emit("requestInitialKillmails");
   });
 }
 

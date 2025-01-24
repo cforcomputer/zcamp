@@ -1,16 +1,20 @@
 <script>
-  import { onMount } from "svelte";
-  import { salvageFields } from "./salvage.js";
+  import { onMount, onDestroy } from "svelte";
+  import {
+    filteredSalvageFields,
+    initializeSalvage,
+    cleanup,
+  } from "./salvage.js";
   import { killmails } from "./settingsStore.js";
-  import { initializeSalvage } from "./salvage.js";
   import WreckFieldDialog from "./WreckFieldDialog.svelte";
 
   let minValue = 0;
   let showTriangulatable = false;
   let selectedSystem = null;
+  let cleanupInterval;
 
   // Filter and sort systems
-  $: filteredSystems = Array.from($salvageFields.entries())
+  $: filteredSystems = $filteredSalvageFields
     .filter(([, system]) => {
       if (system.totalValue < minValue) return false;
       if (showTriangulatable && !system.isTriangulatable) return false;
@@ -41,7 +45,14 @@
   }
 
   onMount(() => {
-    initializeSalvage($killmails);
+    cleanupInterval = initializeSalvage($killmails);
+  });
+
+  onDestroy(() => {
+    if (cleanupInterval) {
+      clearInterval(cleanupInterval);
+    }
+    cleanup();
   });
 </script>
 

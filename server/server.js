@@ -1948,75 +1948,158 @@ redisClient.on("reconnecting", () => {
   console.log("Reconnecting to Redis...");
 });
 
+function isDuplicateKillmail(killmail, existingKillmails) {
+  return existingKillmails.some(
+    (existing) => existing.killID === killmail.killID
+  );
+}
+
+async function processKillmailData(killmail) {
+  console.log("Starting processKillmailData", {
+    killID: killmail.killID,
+    systemId: killmail.killmail.solar_system_id,
+    time: killmail.killmail.killmail_time,
+  });
+
+  try {
+    const systemId = killmail.killmail.solar_system_id;
+
+    console.log("Fetching celestial data...");
+    const celestialData = await fetchCelestialData(systemId);
+    console.log(
+      "Celestial data fetched:",
+      celestialData && celestialData.length
+    );
+
+    // Calculate pinpoint data including nearest celestial
+    console.log("Calculating pinpoints...");
+    const pinpointData = calculatePinpoints(
+      celestialData,
+      killmail.killmail.victim.position
+    );
+    console.log("Pinpoint data calculated:", pinpointData);
+
+    // Get the first celestial entry which contains system info
+    const systemInfo = celestialData?.[0];
+    const celestialInfo = systemInfo
+      ? {
+          regionid: systemInfo.regionid,
+          regionname: systemInfo.regionname,
+          solarsystemid: systemInfo.solarsystemid,
+          solarsystemname: systemInfo.solarsystemname,
+        }
+      : {
+          regionid: null,
+          regionname: null,
+          solarsystemid: systemId,
+          solarsystemname: null,
+        };
+
+    // Set celestial data for pinpoints
+    pinpointData.celestialData = celestialInfo;
+
+    // Check for camp crusher rewards
+    console.log("Checking camp crusher targets...");
+    try {
+      const { rows: targets } = await db.execute({
+        sql: `SELECT ct.*, cc.bashbucks 
+              FROM camp_crusher_targets ct 
+              JOIN camp_crushers cc ON ct.character_id = cc.character_id
+              WHERE ct.camp_id = ? AND ct.completed = FALSE AND ct.end_time > CURRENT_TIMESTAMP`,
+        args: [killmail.killmail.solar_system_id],
+      });
+      console.log(`Found ${targets.length} potential camp crusher targets`);
+
+      for (const target of targets) {
+        const isAttacker = killmail.killmail.attackers.some(
+          (a) => a.character_id === target.character_id
+        );
+
+        if (isAttacker) {
+          const bashbucksAwarded = Math.floor(
+            killmail.zkb.totalValue / 1000000
+          );
+          await db.execute({
+            sql: "UPDATE camp_crushers SET bashbucks = bashbucks + ? WHERE character_id = ?",
+            args: [bashbucksAwarded, target.character_id],
+          });
+
+          await db.execute({
+            sql: "UPDATE camp_crusher_targets SET completed = TRUE WHERE id = ?",
+            args: [target.id],
+          });
+
+          io.to(target.character_id).emit("bashbucksAwarded", {
+            amount: bashbucksAwarded,
+            newTotal: target.bashbucks + bashbucksAwarded,
+            killmail: {
+              id: killmail.killID,
+              value: killmail.zkb.totalValue,
+              system: celestialInfo.solarsystemname || systemId,
+            },
+          });
+        }
+      }
+    } catch (error) {
+      console.error("Error processing camp crusher rewards:", error);
+    }
+
+    // Add the celestial data to the killmail object
+    killmail.pinpoints = pinpointData;
+
+    return killmail;
+  } catch (error) {
+    console.error("Fatal error in processKillmailData:", error);
+    throw error;
+  }
+}
+
 io.on("connection", (socket) => {
   console.log("New client connected");
 
   socket.on("requestInitialKillmails", async () => {
-    await streamKillmailsToClient(socket);
-  });
-
-  async function streamKillmailsToClient(socket) {
     try {
-      // Sort killmails by time, newest first
-      const sortedKillmails = killmails.sort(
-        (a, b) =>
-          new Date(b.killmail.killmail_time) -
-          new Date(a.killmail.killmail_time)
+      // Get last 24 hours of killmails
+      const initialKillmails = killmails
+        .filter((km) => isWithinLast24Hours(km.killmail.killmail_time))
+        .sort((a, b) => b.killID - a.killID);
+
+      // Send recent kills (last 2 hours) first
+      const twoHoursAgo = Date.now() - 2 * 60 * 60 * 1000;
+      const recentKills = initialKillmails.filter(
+        (km) => new Date(km.killmail.killmail_time).getTime() > twoHoursAgo
       );
 
-      // Calculate cutoff time for 24 hours ago
-      const cutoffTime = new Date(Date.now() - 24 * 60 * 60 * 1000);
-
-      // Filter to last 24 hours and split into chunks
-      const recentKillmails = sortedKillmails.filter(
-        (km) => new Date(km.killmail.killmail_time) > cutoffTime
-      );
-
-      // First send the most recent 2 hours of kills (important for camps/roams)
-      const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
-      const recentChunk = recentKillmails.filter(
-        (km) => new Date(km.killmail.killmail_time) > twoHoursAgo
-      );
-
-      if (recentChunk.length > 0) {
-        socket.emit("killmailBatch", recentChunk);
-        await new Promise((resolve) => setTimeout(resolve, 100)); // Small delay
+      if (recentKills.length > 0) {
+        socket.emit("killmailBatch", {
+          batch: recentKills,
+          latestId: recentKills[recentKills.length - 1].killID,
+        });
+        await new Promise((resolve) => setTimeout(resolve, 100));
       }
 
-      // Then send the rest in batches
-      const olderKillmails = recentKillmails.filter(
-        (km) => new Date(km.killmail.killmail_time) <= twoHoursAgo
+      // Then send older kills in batches
+      const olderKills = initialKillmails.filter(
+        (km) => new Date(km.killmail.killmail_time).getTime() <= twoHoursAgo
       );
 
       const BATCH_SIZE = 100;
-      for (let i = 0; i < olderKillmails.length; i += BATCH_SIZE) {
-        const batch = olderKillmails.slice(i, i + BATCH_SIZE);
-        socket.emit("killmailBatch", batch);
-        await new Promise((resolve) => setTimeout(resolve, 100)); // Prevent overwhelming client
+      for (let i = 0; i < olderKills.length; i += BATCH_SIZE) {
+        const batch = olderKills.slice(i, i + BATCH_SIZE);
+        socket.emit("killmailBatch", {
+          batch,
+          latestId: batch[batch.length - 1].killID,
+        });
+        await new Promise((resolve) => setTimeout(resolve, 100));
       }
 
       socket.emit("initialLoadComplete");
     } catch (error) {
-      console.error("Error streaming killmails:", error);
-      socket.emit("error", { message: "Failed to load killmails" });
-    }
-  }
-
-  socket.on("requestSync", async () => {
-    if (!socket.username) {
-      socket.emit("syncError", { message: "Not authenticated" });
-      return;
-    }
-
-    try {
-      const userData = await getUserData(socket.username);
-      socket.emit("syncComplete", userData);
-    } catch (error) {
-      socket.emit("syncError", { message: error.message });
+      console.error("Error sending initial killmails:", error);
+      socket.emit("error", { message: "Failed to load initial killmails" });
     }
   });
 
-  // Login handling
   socket.on("login", async ({ username, password }) => {
     try {
       const { rows } = await db.execute({
@@ -2143,68 +2226,6 @@ io.on("connection", (socket) => {
     }
   });
 
-  socket.on(
-    "updateFilterList",
-    async ({ id, name, ids, enabled, is_exclude, filter_type }) => {
-      const processedIds = Array.isArray(ids) ? ids : JSON.parse(ids);
-
-      try {
-        const { rows } = await db.execute({
-          sql: "SELECT user_id FROM filter_lists WHERE id = ?",
-          args: [id],
-        });
-
-        if (rows.length === 0) {
-          socket.emit("error", { message: "Filter list not found" });
-          return;
-        }
-
-        await db.execute({
-          sql: "UPDATE filter_lists SET name = ?, ids = ?, enabled = ?, is_exclude = ?, filter_type = ? WHERE id = ?",
-          args: [
-            name,
-            JSON.stringify(processedIds),
-            enabled ? 1 : 0,
-            is_exclude ? 1 : 0,
-            filter_type,
-            id,
-          ],
-        });
-
-        const updatedList = {
-          id: id.toString(),
-          user_id: rows[0].user_id.toString(),
-          name,
-          ids: processedIds,
-          enabled: Boolean(enabled),
-          is_exclude: Boolean(is_exclude),
-          filter_type,
-        };
-
-        io.to(rows[0].user_id.toString()).emit(
-          "filterListUpdated",
-          updatedList
-        );
-      } catch (err) {
-        console.error("Error updating filter list:", err);
-        socket.emit("error", { message: "Failed to update filter list" });
-      }
-    }
-  );
-
-  socket.on("deleteFilterList", async ({ id }) => {
-    try {
-      await db.execute({
-        sql: "DELETE FROM filter_lists WHERE id = ?",
-        args: [id],
-      });
-      socket.emit("filterListDeleted", { id });
-    } catch (err) {
-      console.error("Error deleting filter list:", err);
-      socket.emit("error", { message: "Failed to delete filter list" });
-    }
-  });
-
   // Profile handling
   socket.on("saveProfile", async (data) => {
     if (!socket.request.session?.user?.id) {
@@ -2322,31 +2343,6 @@ io.on("connection", (socket) => {
     }
   });
 
-  socket.on("fetchProfiles", async () => {
-    if (!socket.request.session?.user?.id) {
-      socket.emit("error", { message: "Not authenticated" });
-      return;
-    }
-
-    try {
-      const { rows } = await db.execute({
-        sql: "SELECT id, name, settings FROM user_profiles WHERE user_id = ?",
-        args: [socket.request.session.user.id],
-      });
-
-      const profiles = rows.map((row) => ({
-        id: row.id,
-        name: row.name,
-        settings: JSON.parse(row.settings),
-      }));
-
-      socket.emit("profilesFetched", profiles);
-    } catch (error) {
-      console.error("Error fetching profiles:", error);
-      socket.emit("error", { message: "Error fetching profiles" });
-    }
-  });
-
   socket.on("clearKills", () => {
     killmails = [];
     socket.emit("killmailsCleared");
@@ -2356,157 +2352,6 @@ io.on("connection", (socket) => {
     console.log("Client disconnected");
   });
 });
-
-async function processKillmail(killmail) {
-  console.log("Starting processKillmail", {
-    killID: killmail.killID,
-    systemId: killmail.killmail.solar_system_id,
-    time: killmail.killmail.killmail_time,
-  });
-
-  try {
-    const systemId = killmail.killmail.solar_system_id;
-
-    console.log("Fetching celestial data...");
-    const celestialData = await fetchCelestialData(systemId);
-    console.log(
-      "Celestial data fetched:",
-      celestialData && celestialData.length
-    );
-
-    // Calculate pinpoint data including nearest celestial
-    console.log("Calculating pinpoints...");
-    const pinpointData = calculatePinpoints(
-      celestialData,
-      killmail.killmail.victim.position // Make sure this is the correct property for victim position
-    );
-    console.log("Pinpoint data calculated:", pinpointData);
-
-    // Get the first celestial entry which contains system info
-    const systemInfo = celestialData?.[0];
-    const celestialInfo = systemInfo
-      ? {
-          regionid: systemInfo.regionid,
-          regionname: systemInfo.regionname,
-          solarsystemid: systemInfo.solarsystemid,
-          solarsystemname: systemInfo.solarsystemname,
-        }
-      : {
-          regionid: null,
-          regionname: null,
-          solarsystemid: systemId,
-          solarsystemname: null,
-        };
-
-    // Set celestial data for pinpoints
-    pinpointData.celestialData = celestialInfo;
-
-    // Check for camp crusher rewards
-    console.log("Checking camp crusher targets...");
-    try {
-      const { rows: targets } = await db.execute({
-        sql: `SELECT ct.*, cc.bashbucks 
-              FROM camp_crusher_targets ct 
-              JOIN camp_crushers cc ON ct.character_id = cc.character_id
- 
-              WHERE ct.camp_id = ? AND ct.completed = FALSE AND ct.end_time > CURRENT_TIMESTAMP`,
-        args: [killmail.killmail.solar_system_id],
-      });
-      console.log(`Found ${targets.length} potential camp crusher targets`);
-
-      for (const target of targets) {
-        const isAttacker = killmail.killmail.attackers.some(
-          (a) => a.character_id === target.character_id
-        );
-
-        if (isAttacker) {
-          console.log(
-            `Processing camp crusher reward for character ${target.character_id}`
-          );
-          const bashbucksAwarded = Math.floor(
-            killmail.zkb.totalValue / 1000000
-          );
-
-          await db.execute({
-            sql: "UPDATE camp_crushers SET bashbucks = bashbucks + ? WHERE character_id = ?",
-            args: [bashbucksAwarded, target.character_id],
-          });
-
-          await db.execute({
-            sql: "UPDATE camp_crusher_targets SET completed = TRUE WHERE id = ?",
-            args: [target.id],
-          });
-
-          io.to(target.character_id).emit("bashbucksAwarded", {
-            amount: bashbucksAwarded,
-            newTotal: target.bashbucks + bashbucksAwarded,
-            killmail: {
-              id: killmail.killID,
-              value: killmail.zkb.totalValue,
-              system: celestialInfo.solarsystemname || systemId,
-            },
-          });
-        }
-      }
-    } catch (error) {
-      console.error("Error processing camp crusher rewards:", error);
-    }
-
-    // Add the celestial data to the killmail object
-    killmail.pinpoints = pinpointData;
-
-    return killmail;
-  } catch (error) {
-    console.error("Fatal error in processKillmail:", error);
-    throw error;
-  }
-}
-
-async function streamKillmailsToClient(socket) {
-  try {
-    // Sort killmails by time, newest first
-    const sortedKillmails = killmails.sort(
-      (a, b) =>
-        new Date(b.killmail.killmail_time) - new Date(a.killmail.killmail_time)
-    );
-
-    // Calculate cutoff time for 24 hours ago
-    const cutoffTime = new Date(Date.now() - 24 * 60 * 60 * 1000);
-
-    // Filter to last 24 hours and split into chunks
-    const recentKillmails = sortedKillmails.filter(
-      (km) => new Date(km.killmail.killmail_time) > cutoffTime
-    );
-
-    // First send the most recent 2 hours of kills (important for camps/roams)
-    const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
-    const recentChunk = recentKillmails.filter(
-      (km) => new Date(km.killmail.killmail_time) > twoHoursAgo
-    );
-
-    if (recentChunk.length > 0) {
-      socket.emit("killmailBatch", recentChunk);
-      await new Promise((resolve) => setTimeout(resolve, 100)); // Small delay
-    }
-
-    // Then send the rest in batches
-    const olderKillmails = recentKillmails.filter(
-      (km) => new Date(km.killmail.killmail_time) <= twoHoursAgo
-    );
-
-    const BATCH_SIZE = 100;
-    for (let i = 0; i < olderKillmails.length; i += BATCH_SIZE) {
-      const batch = olderKillmails.slice(i, i + BATCH_SIZE);
-      socket.emit("killmailBatch", batch);
-      await new Promise((resolve) => setTimeout(resolve, 100)); // Prevent overwhelming client
-    }
-
-    socket.emit("initialLoadComplete");
-  } catch (error) {
-    console.error("Error streaming killmails:", error);
-    socket.emit("error", { message: "Failed to load killmails" });
-  }
-}
 
 // Function to poll for new killmails from RedisQ
 // Modify the polling function to use processKillmail
@@ -2527,41 +2372,33 @@ async function pollRedisQ() {
     if (response.status === 200 && response.data.package) {
       const killmail = response.data.package;
 
-      // Process killmail
+      // Only process if it's a new kill within last 24 hours
       if (
-        !isDuplicate(killmail) &&
+        !killmails.some((km) => km.killID === killmail.killID) &&
         isWithinLast24Hours(killmail.killmail.killmail_time)
       ) {
         try {
           const enrichedKillmail = await addShipCategoriesToKillmail(killmail);
-          const processedKillmail = await processKillmail(enrichedKillmail);
+          const processedKillmail = await processKillmailData(enrichedKillmail);
 
           // Add to server cache
           killmails.push(processedKillmail);
 
-          // Clean old killmails
-          const beforeCleanCount = killmails.length;
+          // Clean up old killmails
           killmails = cleanKillmailsCache(killmails);
-          console.log(
-            `[${timestamp}] Cleaned killmail cache: ${beforeCleanCount} -> ${killmails.length}`
-          );
 
-          // Emit to all connected clients
-          io.emit("newKillmail", enrichedKillmail);
-        } catch (processError) {
-          console.error(
-            `[${timestamp}] Error processing killmail:`,
-            processError
-          );
+          // Emit batch update to all clients
+          io.emit("killmailBatch", {
+            batch: [processedKillmail],
+            latestId: processedKillmail.killID,
+          });
+        } catch (error) {
+          console.error(`[${timestamp}] Error processing killmail:`, error);
         }
       }
     }
   } catch (error) {
-    console.error(`[${timestamp}] Error polling RedisQ:`, {
-      message: error.message,
-      code: error.code,
-      response: error.response?.data,
-    });
+    console.error(`[${timestamp}] Error polling RedisQ:`, error);
   }
 
   // Queue next poll with a short delay
