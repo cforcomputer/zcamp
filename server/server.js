@@ -1252,14 +1252,6 @@ app.get("/api/eve-sso-config", (req, res) => {
 });
 
 app.get("/api/session", async (req, res) => {
-  console.log("Session check details:", {
-    hasSession: !!req.session,
-    hasUser: !!req.session?.user,
-    sessionID: req.sessionID,
-    sessionData: req.session,
-    cookies: req.headers.cookie,
-  });
-
   if (!req.session?.user) {
     return res.status(401).json({
       error: "No active session",
@@ -1271,20 +1263,31 @@ app.get("/api/session", async (req, res) => {
   }
 
   try {
-    // Add filter lists fetch
+    // Fetch filter lists
     const { rows: filterLists } = await db.execute({
       sql: "SELECT * FROM filter_lists WHERE user_id = ?",
       args: [req.session.user.id],
     });
 
+    // Add profile fetch
+    const { rows: profiles } = await db.execute({
+      sql: "SELECT id, name, settings FROM user_profiles WHERE user_id = ?",
+      args: [req.session.user.id],
+    });
+
     const processedFilterLists = filterLists.map((list) => ({
-      ...list,
-      id: list.id.toString(), // Convert ID to string
-      user_id: list.user_id.toString(), // Convert user_id to string
+      id: list.id.toString(),
+      user_id: list.user_id.toString(),
       ids: JSON.parse(list.ids || "[]"),
       enabled: Boolean(list.enabled),
       is_exclude: Boolean(list.is_exclude),
-      filter_type: list.filter_type || null, // Ensure filter_type is included
+      filter_type: list.filter_type || null,
+    }));
+
+    const processedProfiles = profiles.map((profile) => ({
+      id: profile.id.toString(),
+      name: profile.name,
+      settings: JSON.parse(profile.settings),
     }));
 
     res.json({
@@ -1296,6 +1299,7 @@ app.get("/api/session", async (req, res) => {
         refresh_token: req.session.user.refresh_token,
       },
       filterLists: processedFilterLists,
+      profiles: processedProfiles, // Add this line
     });
   } catch (err) {
     console.error("Error fetching session data:", err);
@@ -1506,6 +1510,12 @@ app.get("/callback", async (req, res) => {
         args: [userId],
       });
 
+      // Fetch profiles
+      const { rows: profiles } = await db.execute({
+        sql: "SELECT id, name, settings FROM user_profiles WHERE user_id = ?",
+        args: [userId],
+      });
+
       const processedFilterLists = filterLists.map((list) => ({
         id: list.id.toString(),
         user_id: list.user_id.toString(),
@@ -1516,14 +1526,16 @@ app.get("/callback", async (req, res) => {
         filter_type: list.filter_type || null,
       }));
 
+      const processedProfiles = profiles.map((profile) => ({
+        id: profile.id.toString(),
+        name: profile.name,
+        settings: JSON.parse(profile.settings),
+      }));
+
       console.log("Processed filter lists:", processedFilterLists);
+      console.log("Processed profiles:", processedProfiles);
 
       // Session setup
-      if (!req.session) {
-        console.log("Creating new session...");
-        req.session = {};
-      }
-
       const sessionUser = {
         id: userId,
         character_id: characterId,
@@ -1536,6 +1548,7 @@ app.get("/callback", async (req, res) => {
 
       req.session.user = sessionUser;
       req.session.filterLists = processedFilterLists;
+      req.session.profiles = processedProfiles;
 
       // Explicit session save
       await new Promise((resolve, reject) => {
@@ -1554,6 +1567,7 @@ app.get("/callback", async (req, res) => {
       io.to(userId.toString()).emit("loginSuccess", {
         settings: userSettings,
         filterLists: processedFilterLists,
+        profiles: processedProfiles,
       });
 
       return res.redirect("/?authenticated=true");
@@ -2146,8 +2160,15 @@ io.on("connection", (socket) => {
 
           socket.username = username;
 
+          // Fetch filter lists
           const { rows: filterLists } = await db.execute({
             sql: "SELECT * FROM filter_lists WHERE user_id = ?",
+            args: [sessionUser.id],
+          });
+
+          // Fetch profiles
+          const { rows: profiles } = await db.execute({
+            sql: "SELECT id, name, settings FROM user_profiles WHERE user_id = ?",
             args: [sessionUser.id],
           });
 
@@ -2161,9 +2182,16 @@ io.on("connection", (socket) => {
             filter_type: list.filter_type || null,
           }));
 
+          const processedProfiles = profiles.map((profile) => ({
+            id: profile.id.toString(),
+            name: profile.name,
+            settings: JSON.parse(profile.settings),
+          }));
+
           socket.emit("loginSuccess", {
             settings: user.settings ? JSON.parse(user.settings) : {},
             filterLists: processedFilterLists,
+            profiles: processedProfiles,
           });
         } else {
           socket.emit("loginError", { message: "Invalid credentials" });
@@ -2190,6 +2218,34 @@ io.on("connection", (socket) => {
         console.error("Error updating settings:", err);
         socket.emit("error", { message: "Failed to update settings" });
       }
+    }
+  });
+
+  socket.on("fetchProfiles", async () => {
+    try {
+      if (!socket.request.session?.user?.id) {
+        socket.emit("error", { message: "Not authenticated" });
+        return;
+      }
+
+      const userId = socket.request.session.user.id;
+
+      const { rows: profiles } = await db.execute({
+        sql: "SELECT id, name, settings FROM user_profiles WHERE user_id = ?",
+        args: [userId],
+      });
+
+      const processedProfiles = profiles.map((profile) => ({
+        id: profile.id.toString(),
+        name: profile.name,
+        settings: JSON.parse(profile.settings),
+      }));
+
+      console.log("Sending profiles to client:", processedProfiles);
+      socket.emit("profilesFetched", processedProfiles);
+    } catch (error) {
+      console.error("Error fetching profiles:", error);
+      socket.emit("error", { message: "Failed to fetch profiles" });
     }
   });
 

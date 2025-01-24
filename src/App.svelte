@@ -41,14 +41,37 @@
   $: isConnected = $socketConnected;
   $: socketError = $lastSocketError;
 
-  function handleLogin(event) {
+  async function handleLogin(event) {
     if (event.detail.type === "credentials") {
       username = event.detail.username;
       loggedIn = true;
     } else if (event.detail.type === "eve") {
       loggedIn = true;
     }
+
+    // Initialize socket first
     initializeSocketStore();
+
+    // Then fetch initial session data
+    try {
+      const response = await fetch("/api/session");
+      const data = await response.json();
+
+      if (data.user) {
+        if (data.filterLists) {
+          filterLists.set(data.filterLists);
+        }
+        if (data.profiles) {
+          console.log("Setting initial profiles:", data.profiles);
+          profiles.set(data.profiles);
+        }
+        if (data.user.settings) {
+          settings.set(initializeSettings(data.user.settings));
+        }
+      }
+    } catch (error) {
+      console.error("Error loading initial session data:", error);
+    }
   }
 
   function openMap(killmail) {
@@ -63,11 +86,31 @@
     selectedKillmail = null;
   }
 
-  onMount(() => {
-    if (loggedIn) {
-      initializeSocketStore();
+  onMount(async () => {
+    try {
+      const response = await fetch("/api/session");
+      const data = await response.json();
+
+      if (data.user) {
+        loggedIn = true;
+        if (data.filterLists) {
+          filterLists.set(data.filterLists);
+        }
+        if (data.profiles) {
+          console.log("Setting initial profiles:", data.profiles);
+          profiles.set(data.profiles);
+        }
+        if (data.user.settings) {
+          settings.set(initializeSettings(data.user.settings));
+        }
+        initializeSocketStore();
+      }
+    } catch (error) {
+      console.error("Error checking session:", error);
+      loggedIn = false;
     }
   });
+  [];
 
   onDestroy(() => {
     cleanup();
