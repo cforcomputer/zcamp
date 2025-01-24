@@ -41,6 +41,8 @@ app.set("trust proxy", true);
 app.enable("trust proxy");
 const PORT = process.env.PORT || 3000;
 const PUBLIC_URL = process.env.PUBLIC_URL || "http://localhost:3000";
+const TURNSTILE_SECRET_KEY = process.env.TURNSTILE_SECRET_KEY;
+const TURNSTILE_SITE_KEY = process.env.TURNSTILE_SITE_KEY;
 axios.defaults.baseURL = "http://localhost:" + process.env.PORT;
 
 const MIME_TYPES = {
@@ -290,6 +292,32 @@ async function initializeDatabase() {
     isDatabaseInitialized = false;
   }
 }
+
+// CLOUDFLARE
+app.get("/api/turnstile-config", (req, res) => {
+  res.json({ siteKey: process.env.TURNSTILE_SITE_KEY });
+});
+
+app.post("/api/verify-turnstile", async (req, res) => {
+  const { token } = req.body;
+
+  const response = await fetch(
+    "https://challenges.cloudflare.com/turnstile/v0/siteverify",
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        secret: TURNSTILE_SECRET_KEY,
+        response: token,
+      }),
+    }
+  );
+
+  const data = await response.json();
+  res.json(data);
+});
 
 // CAMPCRUSHERS API
 app.get("/api/campcrushers/stats", async (req, res) => {
