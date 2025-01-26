@@ -4,7 +4,7 @@ import socket from "./socket.js";
 import { processNewSalvage } from "./salvage.js";
 import { addKillmailToBattles } from "./battles.js";
 import { activeCamps } from "./campManager.js";
-import { activeRoams } from "./roamManager.js"; // Add this import
+import { activeRoams } from "./roamManager.js";
 import {
   killmails,
   settings,
@@ -17,42 +17,19 @@ import {
 export const socketConnected = writable(false);
 export const lastSocketError = writable(null);
 export const isInitialLoadComplete = writable(false);
-let processedKillIds = new Set(
-  JSON.parse(localStorage.getItem("processedKillIds") || "[]")
-);
-let lastAckedId = 0;
-
-async function handleKillmailBatch({ batch, latestId }) {
-  // Filter any already processed kills
-  const newKills = batch.filter((k) => !processedKillIds.has(k.killID));
-
-  // Process new kills
-  for (const killmail of newKills) {
-    processedKillIds.add(killmail.killID);
-    killmails.update((k) => {
-      // Ensure no duplicates
-      if (!k.some((existing) => existing.killID === killmail.killID)) {
-        return [killmail, ...k];
-      }
-      return k;
-    });
-    addKillmailToBattles(killmail);
-  }
-
-  // Update last processed ID
-  if (newKills.length > 0) {
-    lastAckedId = Math.max(lastAckedId, latestId);
-  }
-}
 
 // Initialize socket connection and event handlers
 export function initializeSocketStore() {
+  let receivedKillmails = [];
+  let expectedCacheSize = 0;
+
   socket.on("connect", () => {
-    console.log("Socket connected");
+    console.log("Socket connected, requesting initial data");
     socketConnected.set(true);
     lastSocketError.set(null);
 
-    // Request initial data
+    // Add debug log
+    console.log("Emitting requestInitialKillmails event");
     socket.emit("requestInitialKillmails");
     socket.emit("requestCamps");
     socket.emit("requestRoams");
@@ -61,7 +38,7 @@ export function initializeSocketStore() {
   socket.on("disconnect", (reason) => {
     console.log("Socket disconnected:", reason);
     socketConnected.set(false);
-    processedKillIds.clear();
+    isInitialLoadComplete.set(false);
   });
 
   socket.on("connect_error", (error) => {
@@ -69,14 +46,56 @@ export function initializeSocketStore() {
     lastSocketError.set(error.message);
   });
 
-  // Only handle killmail batches
-  socket.on("killmailBatch", handleKillmailBatch);
-  socket.on("initialLoadComplete", () => {
-    isInitialLoadComplete.set(true);
-    console.log("Initial killmail load complete");
+  // Cache initialization and synchronization
+  socket.on("cacheInitStart", ({ totalSize }) => {
+    console.log(`Starting cache initialization. Expected size: ${totalSize}`);
+    expectedCacheSize = totalSize;
+    receivedKillmails = [];
   });
 
-  // Keep other event handlers
+  socket.on("cacheChunk", ({ chunk, currentCount, totalSize }) => {
+    receivedKillmails.push(...chunk);
+    console.log(`Received chunk. Progress: ${currentCount}/${totalSize}`);
+
+    // Process the chunk
+    chunk.forEach((killmail) => {
+      processNewSalvage(killmail);
+      addKillmailToBattles(killmail);
+    });
+
+    if (currentCount === totalSize) {
+      console.log("Cache chunk reception complete");
+      killmails.set(receivedKillmails);
+      socket.emit("cacheSyncComplete", {
+        receivedSize: receivedKillmails.length,
+      });
+    }
+  });
+
+  socket.on("syncVerified", ({ success }) => {
+    if (success) {
+      console.log("Cache sync verified, enabling live updates");
+      isInitialLoadComplete.set(true);
+    }
+  });
+
+  socket.on("reinitializeCache", () => {
+    console.log("Cache mismatch detected, reinitializing");
+    receivedKillmails = [];
+    isInitialLoadComplete.set(false);
+    socket.emit("requestInitialKillmails");
+  });
+
+  // Live killmail updates
+  socket.on("newKillmail", (killmail) => {
+    if (get(isInitialLoadComplete)) {
+      killmails.update((km) => [killmail, ...km]);
+      processNewSalvage(killmail);
+      addKillmailToBattles(killmail);
+    }
+  });
+
+  // Camp and roam updates
   socket.on("campUpdate", (camps) => {
     console.log(`Received camp update: ${camps.length} camps`);
     activeCamps.set(camps);
@@ -121,6 +140,8 @@ export function initializeSocketStore() {
   });
 
   socket.on("reconnect", () => {
+    receivedKillmails = [];
+    isInitialLoadComplete.set(false);
     socket.emit("requestInitialKillmails");
   });
 }
@@ -131,9 +152,11 @@ function cleanupSocket() {
     "connect",
     "disconnect",
     "connect_error",
+    "cacheInitStart",
+    "cacheChunk",
+    "syncVerified",
+    "reinitializeCache",
     "newKillmail",
-    "killmailBatch",
-    "initialLoadComplete",
     "campUpdate",
     "roamUpdate",
     "filterListCreated",
@@ -144,17 +167,12 @@ function cleanupSocket() {
   ];
 
   events.forEach((event) => socket.off(event));
-  processedKillIds.clear();
 }
+
 export function cleanup() {
   cleanupSocket();
   socketConnected.set(false);
   lastSocketError.set(null);
-  // Save processed kills to localStorage
-  localStorage.setItem(
-    "processedKillIds",
-    JSON.stringify([...processedKillIds])
-  );
 }
 
 // Export socket instance for direct access if needed

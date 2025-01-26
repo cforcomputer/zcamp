@@ -316,6 +316,15 @@ app.post("/api/verify-turnstile", async (req, res) => {
   );
 
   const data = await response.json();
+
+  if (data.success) {
+    // If verification is successful, emit requestInitialKillmails to the client's socket
+    const clientSocket = io.sockets.sockets.get(req.headers["x-socket-id"]);
+    if (clientSocket) {
+      clientSocket.emit("turnstileVerified");
+    }
+  }
+
   res.json(data);
 });
 
@@ -2132,45 +2141,45 @@ io.on("connection", (socket) => {
   console.log("New client connected");
 
   socket.on("requestInitialKillmails", async () => {
+    console.log(
+      "Received request for initial killmails. Cache size:",
+      killmails.length
+    );
     try {
-      // Get last 24 hours of killmails
-      const initialKillmails = killmails
-        .filter((km) => isWithinLast24Hours(km.killmail.killmail_time))
-        .sort((a, b) => b.killID - a.killID);
+      const cacheSnapshot = [...killmails];
+      const cacheSize = cacheSnapshot.length;
 
-      // Send recent kills (last 2 hours) first
-      const twoHoursAgo = Date.now() - 2 * 60 * 60 * 1000;
-      const recentKills = initialKillmails.filter(
-        (km) => new Date(km.killmail.killmail_time).getTime() > twoHoursAgo
-      );
+      console.log(`Starting cache sync. Sending ${cacheSize} killmails`);
+      socket.emit("cacheInitStart", { totalSize: cacheSize });
 
-      if (recentKills.length > 0) {
-        socket.emit("killmailBatch", {
-          batch: recentKills,
-          latestId: recentKills[recentKills.length - 1].killID,
+      // Send cache in chunks of 500
+      const CHUNK_SIZE = 500;
+      for (let i = 0; i < cacheSnapshot.length; i += CHUNK_SIZE) {
+        const chunk = cacheSnapshot.slice(i, i + CHUNK_SIZE);
+        socket.emit("cacheChunk", {
+          chunk,
+          currentCount: i + chunk.length,
+          totalSize: cacheSize,
         });
-        await new Promise((resolve) => setTimeout(resolve, 100));
+
+        // Small delay to prevent overwhelming the client
+        await new Promise((resolve) => setTimeout(resolve, 50));
       }
-
-      // Then send older kills in batches
-      const olderKills = initialKillmails.filter(
-        (km) => new Date(km.killmail.killmail_time).getTime() <= twoHoursAgo
-      );
-
-      const BATCH_SIZE = 100;
-      for (let i = 0; i < olderKills.length; i += BATCH_SIZE) {
-        const batch = olderKills.slice(i, i + BATCH_SIZE);
-        socket.emit("killmailBatch", {
-          batch,
-          latestId: batch[batch.length - 1].killID,
-        });
-        await new Promise((resolve) => setTimeout(resolve, 100));
-      }
-
-      socket.emit("initialLoadComplete");
     } catch (error) {
-      console.error("Error sending initial killmails:", error);
-      socket.emit("error", { message: "Failed to load initial killmails" });
+      console.error("Error sending initial cache:", error);
+      socket.emit("error", { message: "Failed to initialize cache" });
+    }
+  });
+
+  socket.on("cacheSyncComplete", ({ receivedSize }) => {
+    const currentCacheSize = killmails.length;
+    if (receivedSize === currentCacheSize) {
+      socket.emit("syncVerified", { success: true });
+      // Start sending live updates
+      socket.join("live-updates");
+    } else {
+      // Request reinitialize if sizes don't match
+      socket.emit("reinitializeCache");
     }
   });
 
@@ -2473,51 +2482,30 @@ io.on("connection", (socket) => {
 // Modify the polling function to use processKillmail
 async function pollRedisQ() {
   try {
-    const timestamp = new Date().toISOString();
-    console.log(
-      `[${timestamp}] Polling RedisQ... Current killmails: ${killmails.length}`
-    );
-
-    const response = await axios.get(REDISQ_URL, {
-      timeout: 30000,
-      headers: {
-        "User-Agent": "Zcamp/1.0.0",
-      },
-    });
+    const response = await axios.get(REDISQ_URL, { timeout: 30000 });
 
     if (response.status === 200 && response.data.package) {
       const killmail = response.data.package;
 
-      // Only process if it's a new kill within last 24 hours
       if (
-        !killmails.some((km) => km.killID === killmail.killID) &&
+        !isDuplicate(killmail) &&
         isWithinLast24Hours(killmail.killmail.killmail_time)
       ) {
-        try {
-          const enrichedKillmail = await addShipCategoriesToKillmail(killmail);
-          const processedKillmail = await processKillmailData(enrichedKillmail);
+        const processedKillmail = await processKillmailData(
+          await addShipCategoriesToKillmail(killmail)
+        );
 
-          // Add to server cache
-          killmails.push(processedKillmail);
+        killmails.push(processedKillmail);
+        killmails = cleanKillmailsCache(killmails);
 
-          // Clean up old killmails
-          killmails = cleanKillmailsCache(killmails);
-
-          // Emit batch update to all clients
-          io.emit("killmailBatch", {
-            batch: [processedKillmail],
-            latestId: processedKillmail.killID,
-          });
-        } catch (error) {
-          console.error(`[${timestamp}] Error processing killmail:`, error);
-        }
+        // Emit only to synced clients
+        io.to("live-updates").emit("newKillmail", processedKillmail);
       }
     }
   } catch (error) {
-    console.error(`[${timestamp}] Error polling RedisQ:`, error);
+    console.error("Error polling RedisQ:", error);
   }
 
-  // Queue next poll with a short delay
   setTimeout(pollRedisQ, 20);
 }
 

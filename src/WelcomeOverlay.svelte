@@ -1,5 +1,7 @@
 <script>
   import { createEventDispatcher, onMount } from "svelte";
+  import socket from "./socket.js";
+
   const dispatch = createEventDispatcher();
   let turnstileWidget;
   let turnstileLoaded = false;
@@ -12,13 +14,13 @@
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          "X-Socket-ID": socket.id,
         },
         body: JSON.stringify({ token }),
       });
       const data = await response.json();
       if (data.success) {
         verified = true;
-        // No longer auto-dispatching verified event
       }
     } catch (error) {
       console.error("Turnstile verification failed:", error);
@@ -27,7 +29,15 @@
 
   function handleContinue() {
     if (verified) {
+      socket.emit("requestInitialKillmails");
       dispatch("verified");
+    }
+  }
+
+  function handleLogin() {
+    if (verified) {
+      socket.emit("requestInitialKillmails");
+      dispatch("login");
     }
   }
 
@@ -69,25 +79,24 @@
     <h1 class="text-3xl font-bold text-eve-accent mb-6">Welcome to ZCamp</h1>
     <div class="space-y-6 text-gray-300">
       <p class="leading-relaxed">
-        Welcome to ZCamp, your real-time EVE Online combat tracking system. As a
-        guest user, you can access:
+        Welcome to ZCamp. As a guest user, certain features will not work:
       </p>
       <ul class="list-disc list-inside space-y-2 ml-4">
-        <li>Gate camp monitoring</li>
-        <li>Kill tracking and filtering</li>
-        <li>Battle analytics</li>
+        <li>Profiles/Custom filters</li>
+        <li>Minigames</li>
+        <li>Right click to set destination</li>
       </ul>
       <div
         class="bg-eve-secondary/50 rounded-lg p-4 border border-eve-accent/10"
       >
-        <h3 class="text-eve-accent font-semibold mb-2">Features with Login:</h3>
+        <h3 class="text-eve-accent font-semibold mb-2">
+          Features with EVE Login:
+        </h3>
         <ul class="list-disc list-inside space-y-1 text-sm">
-          <li>Personal location tracking with gate camp alerts</li>
           <li>Custom kill filters and saved profiles</li>
-          <li>Roaming gang detection</li>
-          <li>Salvage opportunities tracking</li>
           <li>Future integration with bookmarks for triangulation</li>
-          <li>Play the campcrushers minigame</li>
+          <li>Minigame/leaderboard tracking</li>
+          <li>Right click to set destination</li>
         </ul>
       </div>
       <div class="flex justify-center" id="turnstile-container">
@@ -102,16 +111,25 @@
         >
           View Tutorial
         </button>
-        <button
-          class="px-6 py-2 {verified
-            ? 'bg-eve-accent/20 hover:bg-eve-accent/30'
-            : 'bg-gray-600/20'} 
-                   text-eve-accent rounded transition-colors"
-          on:click={handleContinue}
-          disabled={!verified}
-        >
-          {verified ? "Continue as Guest" : "Complete Verification to Continue"}
-        </button>
+        <div class="flex gap-4">
+          <button
+            class="px-6 py-2 bg-eve-accent hover:bg-eve-accent/80 text-black rounded transition-colors"
+            on:click={handleLogin}
+            disabled={!verified}
+          >
+            {verified ? "Log In" : "Complete Verification"}
+          </button>
+          <button
+            class="px-6 py-2 {verified
+              ? 'bg-eve-accent/20 hover:bg-eve-accent/30'
+              : 'bg-gray-600/20'} 
+            text-eve-accent rounded transition-colors"
+            on:click={handleContinue}
+            disabled={!verified}
+          >
+            {verified ? "Continue as Guest" : "Complete Verification"}
+          </button>
+        </div>
       </div>
     </div>
   </div>

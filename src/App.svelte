@@ -33,7 +33,7 @@
   let loggedIn = false;
   let username = "";
   let settingsManagerComponent;
-  let currentPage = "camps"; // Changed default page to camps
+  let currentPage = "camps";
   let showMapOverlay = false;
   let selectedKillmailId = null;
   let selectedKillmail = null;
@@ -44,10 +44,6 @@
   $: userProfiles = $profiles;
   $: isConnected = $socketConnected;
   $: socketError = $lastSocketError;
-  $: canUseFeatures = loggedIn;
-
-  // Array of features available to guest users
-  const guestFeatures = ["camps", "kills", "battles"];
 
   function handleVerified() {
     showWelcome = false;
@@ -100,10 +96,6 @@
         cleanup();
         loggedIn = false;
         username = "";
-        // Redirect to camps page if current page isn't accessible to guests
-        if (!guestFeatures.includes(currentPage)) {
-          currentPage = "camps";
-        }
       }
     } catch (error) {
       console.error("Error during logout:", error);
@@ -126,7 +118,6 @@
     try {
       const response = await fetch("/api/session");
       if (response.status === 401) {
-        // Not logged in - show welcome screen for new users
         showWelcome = true;
         checkingSession = false;
         return;
@@ -163,7 +154,14 @@
 
 {#if !checkingSession}
   {#if showWelcome}
-    <WelcomeOverlay on:verified={handleVerified} />
+    <WelcomeOverlay
+      on:verified={handleVerified}
+      on:login={() => {
+        showWelcome = false;
+        showLoginModal = true;
+        initializeSocketStore();
+      }}
+    />
   {/if}
 
   <div class="min-h-screen bg-gradient-to-b from-eve-primary to-eve-primary/95">
@@ -246,25 +244,7 @@
     </nav>
 
     <main class="pt-20 px-4 max-w-7xl mx-auto">
-      {#if !canUseFeatures && !guestFeatures.includes(currentPage)}
-        <div class="eve-card">
-          <div class="text-center p-8">
-            <h2 class="text-2xl font-bold text-eve-accent mb-4">
-              Feature Requires Login
-            </h2>
-            <p class="text-gray-300 mb-4">
-              This feature is only available to registered users. Please log in
-              or create an account to access it.
-            </p>
-            <button
-              class="eve-nav-item text-eve-accent hover:bg-eve-accent/20"
-              on:click={() => (showLoginModal = true)}
-            >
-              Login or Register
-            </button>
-          </div>
-        </div>
-      {:else if currentPage === "kills"}
+      {#if currentPage === "kills"}
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <div class="eve-card">
             <SettingsManager bind:this={settingsManagerComponent} {socket} />
