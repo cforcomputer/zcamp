@@ -126,16 +126,14 @@
       const data = await response.json();
       if (data.user) {
         loggedIn = true;
-        if (data.filterLists) {
-          filterLists.set(data.filterLists);
-        }
-        if (data.profiles) {
-          profiles.set(data.profiles);
-        }
-        if (data.user.settings) {
+        if (data.filterLists) filterLists.set(data.filterLists);
+        if (data.profiles) profiles.set(data.profiles);
+        if (data.user.settings)
           settings.set(initializeSettings(data.user.settings));
-        }
+
+        // Initialize socket and request data AFTER session verification
         initializeSocketStore();
+        socket.emit("requestInitialKillmails"); // Add this line
       } else {
         showWelcome = true;
       }

@@ -28,8 +28,10 @@ export function initializeSocketStore() {
     socketConnected.set(true);
     lastSocketError.set(null);
 
-    // Add debug log
-    console.log("Emitting requestInitialKillmails event");
+    // Always request initial data on connect/reconnect
+    // dirty fix, should be done in a more elegant way
+    // Preserve state in local storage so client doesn't need to reprocess
+    // and server isn't sending full cache on every reconnect
     socket.emit("requestInitialKillmails");
     socket.emit("requestCamps");
     socket.emit("requestRoams");
