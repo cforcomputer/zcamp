@@ -99,6 +99,10 @@
         cleanup();
         loggedIn = false;
         username = "";
+        showWelcome = true; // Show welcome screen after logout
+
+        // Force reload the page to clear any cached state
+        window.location.reload();
       }
     } catch (error) {
       console.error("Error during logout:", error);
@@ -297,7 +301,7 @@
                   clearKills();
                 }}
               >
-                Clear All Kills
+                ⚠️ Reset Kills (resets all pages) ⚠️
               </button>
             </div>
           </div>

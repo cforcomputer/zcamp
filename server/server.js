@@ -369,7 +369,19 @@ app.post("/api/logout", async (req, res) => {
       });
     });
 
-    res.clearCookie("km_sid");
+    // Clear the session cookie by setting it to expire in the past
+    res.clearCookie("km_sid", {
+      expires: new Date(0),
+      path: "/",
+      domain:
+        process.env.NODE_ENV === "production"
+          ? new URL(PUBLIC_URL).hostname
+          : undefined,
+      secure: true,
+      httpOnly: true,
+      sameSite: "lax",
+    });
+
     res.json({ success: true });
   } catch (error) {
     console.error("Logout error:", error);
