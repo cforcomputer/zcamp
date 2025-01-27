@@ -2,6 +2,7 @@
   import { filteredKillmails, settings } from "./settingsStore";
   import MapVisualization from "./MapVisualization.svelte";
   import { onMount } from "svelte";
+  import ContextMenu from "./ContextMenu.svelte";
 
   export let openMap; // Receive openMap function from App.svelte
 
@@ -9,6 +10,15 @@
   let scrollContainer;
   let isUserScrolling = false;
   let shouldAutoScroll = true;
+
+  // Context menu state
+  let contextMenu = {
+    show: false,
+    x: 0,
+    y: 0,
+    systemId: null,
+    options: [],
+  };
 
   $: killmailsToDisplay = $filteredKillmails;
 
@@ -50,6 +60,72 @@
     });
 
     previousKillmailIds = currentKillmailIds;
+  }
+
+  async function setDestination(systemId, clearOthers = true) {
+    try {
+      const response = await fetch("/api/session", {
+        credentials: "include",
+      });
+      const data = await response.json();
+
+      if (!data.user?.access_token) {
+        console.error("User not authenticated with EVE SSO");
+        return;
+      }
+
+      const result = await fetch(
+        `https://esi.evetech.net/latest/ui/autopilot/waypoint/?add_to_beginning=false&clear_other_waypoints=${clearOthers}&datasource=tranquility&destination_id=${systemId}`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${data.user.access_token}`,
+          },
+        }
+      );
+
+      if (!result.ok) {
+        throw new Error("Failed to set destination");
+      }
+    } catch (error) {
+      console.error("Error setting destination:", error);
+    }
+  }
+
+  function handleContextMenu(event, killmail) {
+    console.log("Context menu handler called", {
+      x: event.clientX,
+      y: event.clientY,
+    });
+
+    // Ensure these coordinates are within the viewport
+    const x = Math.min(event.clientX, window.innerWidth - 150); // 150 is approximate menu width
+    const y = Math.min(event.clientY, window.innerHeight - 100); // 100 is approximate menu height
+
+    contextMenu = {
+      show: true,
+      x,
+      y,
+      systemId: killmail.killmail.solar_system_id,
+      options: [
+        {
+          label: "Set Destination",
+          action: () => setDestination(killmail.killmail.solar_system_id, true),
+        },
+        {
+          label: "Add Waypoint",
+          action: () =>
+            setDestination(killmail.killmail.solar_system_id, false),
+        },
+      ],
+    };
+
+    console.log("Context menu state updated:", contextMenu);
+  }
+
+  function handleMenuSelect(event) {
+    const option = event.detail;
+    option.action();
   }
 
   function getTriangulationStatus(killmail) {
@@ -141,6 +217,10 @@
           {#each sortedKillmails as killmail (killmail.killID)}
             <tr
               class="border-b border-eve-secondary/30 hover:bg-eve-secondary/20 transition-colors"
+              on:contextmenu|preventDefault|stopPropagation={(e) => {
+                console.log("Right click detected"); // Debug log
+                handleContextMenu(e, killmail);
+              }}
             >
               <!-- Main row content (clickable) -->
               <td
@@ -192,6 +272,14 @@
     </div>
   </div>
 </div>
+
+<ContextMenu
+  show={contextMenu.show}
+  x={contextMenu.x}
+  y={contextMenu.y}
+  options={contextMenu.options}
+  on:select={handleMenuSelect}
+/>
 
 <style>
   :global(.killmail-section) {
