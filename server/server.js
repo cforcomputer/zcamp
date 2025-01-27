@@ -2183,6 +2183,35 @@ io.on("connection", (socket) => {
     }
   });
 
+  socket.on("fetchFilterLists", async () => {
+    if (!socket.request.session?.user?.id) {
+      socket.emit("error", { message: "Not authenticated" });
+      return;
+    }
+
+    try {
+      const { rows } = await db.execute({
+        sql: "SELECT * FROM filter_lists WHERE user_id = ?",
+        args: [socket.request.session.user.id],
+      });
+
+      const processedLists = rows.map((list) => ({
+        id: list.id.toString(),
+        user_id: list.user_id.toString(),
+        name: list.name,
+        ids: JSON.parse(list.ids || "[]"),
+        enabled: Boolean(list.enabled),
+        is_exclude: Boolean(list.is_exclude),
+        filter_type: list.filter_type || null,
+      }));
+
+      socket.emit("filterListsFetched", processedLists);
+    } catch (error) {
+      console.error("Error fetching filter lists:", error);
+      socket.emit("error", { message: "Failed to fetch filter lists" });
+    }
+  });
+
   socket.on("login", async ({ username, password }) => {
     try {
       const { rows } = await db.execute({
@@ -2281,12 +2310,17 @@ io.on("connection", (socket) => {
 
   socket.on("fetchProfiles", async () => {
     try {
-      if (!socket.request.session?.user?.id) {
+      if (
+        !socket.request.session?.user?.id &&
+        !socket.request.session?.user?.character_id
+      ) {
         socket.emit("error", { message: "Not authenticated" });
         return;
       }
 
-      const userId = socket.request.session.user.id;
+      const userId =
+        socket.request.session.user.id ||
+        socket.request.session.user.character_id;
 
       const { rows: profiles } = await db.execute({
         sql: "SELECT id, name, settings FROM user_profiles WHERE user_id = ?",
@@ -2434,27 +2468,54 @@ io.on("connection", (socket) => {
     }
   });
 
-  socket.on("deleteProfile", async ({ id }) => {
-    console.log("Server: Received deleteProfile request for id:", id);
-    if (!socket.username) {
-      socket.emit("error", { message: "Not logged in" });
+  socket.on("deleteFilterList", async ({ id }) => {
+    if (!socket.request.session?.user?.id) {
+      socket.emit("error", { message: "Not authenticated" });
       return;
     }
 
     try {
+      // First verify the filter list belongs to this user
       const { rows } = await db.execute({
-        sql: "SELECT id FROM users WHERE username = ?",
-        args: [socket.username],
+        sql: "SELECT user_id FROM filter_lists WHERE id = ?",
+        args: [id],
       });
 
-      if (!rows[0]) {
-        socket.emit("error", { message: "User not found" });
+      if (
+        rows.length === 0 ||
+        rows[0].user_id !== socket.request.session.user.id
+      ) {
+        socket.emit("error", {
+          message: "Filter list not found or unauthorized",
+        });
         return;
       }
 
+      // Delete the filter list
+      await db.execute({
+        sql: "DELETE FROM filter_lists WHERE id = ?",
+        args: [id],
+      });
+
+      // Emit the deletion event
+      socket.emit("filterListDeleted", { id });
+    } catch (error) {
+      console.error("Error deleting filter list:", error);
+      socket.emit("error", { message: "Failed to delete filter list" });
+    }
+  });
+
+  socket.on("deleteProfile", async ({ id }) => {
+    console.log("Server: Received deleteProfile request for id:", id);
+    if (!socket.request.session?.user?.id) {
+      socket.emit("error", { message: "Not authenticated" });
+      return;
+    }
+
+    try {
       const result = await db.execute({
         sql: "DELETE FROM user_profiles WHERE id = ? AND user_id = ?",
-        args: [id, rows[0].id],
+        args: [id, socket.request.session.user.id],
       });
 
       if (result.rowsAffected > 0) {

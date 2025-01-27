@@ -51,37 +51,40 @@
     socket.emit("deleteFilterList", { id });
   }
 
-  onMount(async () => {
-    try {
-      const response = await fetch("/api/session", {
-        credentials: "include",
-      });
-      const data = await response.json();
+  onMount(() => {
+    // Initial filter lists fetch
+    socket.emit("fetchFilterLists");
 
-      if (data.filterLists) {
-        filterLists.set(data.filterLists);
-      }
-    } catch (err) {
-      console.error("Error fetching session data:", err);
-    }
-
-    socket.on("filterListCreated", (filterList) => {
-      filterLists.update((lists) => {
-        const existingList = lists.find((l) => l.id === filterList.id);
-        if (existingList) {
-          return lists.map((l) => (l.id === filterList.id ? filterList : l));
-        }
-        return [...lists, filterList];
-      });
-      dispatch("updateFilterLists", { filterLists: $filterLists });
+    // Socket event listeners
+    socket.on("filterListsFetched", (fetchedLists) => {
+      console.log("Received filter lists:", fetchedLists);
+      filterLists.set(fetchedLists);
     });
 
     socket.on("filterListDeleted", ({ id }) => {
-      filterLists.update((lists) => lists.filter((l) => l.id !== id));
+      filterLists.update((lists) => lists.filter((list) => list.id !== id));
       dispatch("updateFilterLists", { filterLists: $filterLists });
     });
 
+    socket.on("filterListCreated", (filterList) => {
+      console.log("Filter list created:", filterList);
+      filterLists.update((currentLists) => {
+        const existingIndex = currentLists.findIndex(
+          (l) => l.id === filterList.id
+        );
+        if (existingIndex !== -1) {
+          // Update existing list
+          const updatedLists = [...currentLists];
+          updatedLists[existingIndex] = filterList;
+          return updatedLists;
+        }
+        // Add new list
+        return [...currentLists, filterList];
+      });
+    });
+
     return () => {
+      socket.off("filterListsFetched");
       socket.off("filterListCreated");
       socket.off("filterListDeleted");
     };
