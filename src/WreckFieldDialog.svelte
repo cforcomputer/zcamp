@@ -3,7 +3,6 @@
 
   export let wrecks = [];
   export let totalValue = 0;
-  // export let onClose;
   export let nearestCelestial = { type: "none", name: "" };
 
   let canvas;
@@ -14,105 +13,38 @@
   let debris = [];
   const CONTAINER_VALUE = 10000000; // 10M ISK per container
 
-  // Background patterns based on celestial type
-  const backgroundPatterns = {
-    stargate: () => {
-      const size = 100;
-      const pattern = document.createElement("canvas");
-      pattern.width = size;
-      pattern.height = size;
-      const pctx = pattern.getContext("2d");
+  class Spark {
+    constructor(x, y, angle, speed) {
+      this.x = x;
+      this.y = y;
+      this.angle = angle;
+      this.speed = speed;
+      this.life = 1.5;
+      this.decay = 0.05 + Math.random() * 0.03;
+    }
 
-      // Draw stargate-like pattern
-      pctx.strokeStyle = "#1a4a6e";
-      pctx.lineWidth = 2;
-      for (let i = 0; i < 4; i++) {
-        const offset = i * (size / 4);
-        pctx.beginPath();
-        pctx.arc(size / 2, size / 2, 10 + offset, 0, Math.PI * 2);
-        pctx.stroke();
-      }
+    update() {
+      this.x += Math.cos(this.angle) * this.speed;
+      this.y += Math.sin(this.angle) * this.speed;
+      this.life -= this.decay;
+      return this.life > 0;
+    }
 
-      return pattern;
-    },
-    station: () => {
-      const size = 100;
-      const pattern = document.createElement("canvas");
-      pattern.width = size;
-      pattern.height = size;
-      const pctx = pattern.getContext("2d");
-
-      // Draw station-like grid pattern
-      pctx.strokeStyle = "#4a1a6e";
-      pctx.lineWidth = 1;
-      const gridSize = 20;
-      for (let i = 0; i < size; i += gridSize) {
-        pctx.beginPath();
-        pctx.moveTo(i, 0);
-        pctx.lineTo(i, size);
-        pctx.moveTo(0, i);
-        pctx.lineTo(size, i);
-        pctx.stroke();
-      }
-
-      return pattern;
-    },
-    moon: () => {
-      const size = 100;
-      const pattern = document.createElement("canvas");
-      pattern.width = size;
-      pattern.height = size;
-      const pctx = pattern.getContext("2d");
-
-      // Draw crater-like pattern
-      pctx.fillStyle = "#2a2a2a";
-      for (let i = 0; i < 5; i++) {
-        const x = Math.random() * size;
-        const y = Math.random() * size;
-        const radius = 5 + Math.random() * 10;
-        pctx.beginPath();
-        pctx.arc(x, y, radius, 0, Math.PI * 2);
-        pctx.fill();
-      }
-
-      return pattern;
-    },
-    "asteroid belt": () => {
-      const size = 100;
-      const pattern = document.createElement("canvas");
-      pattern.width = size;
-      pattern.height = size;
-      const pctx = pattern.getContext("2d");
-
-      // Draw asteroid-like dots
-      pctx.fillStyle = "#3a3a3a";
-      for (let i = 0; i < 20; i++) {
-        const x = Math.random() * size;
-        const y = Math.random() * size;
-        const size = 1 + Math.random() * 2;
-        pctx.beginPath();
-        pctx.arc(x, y, size, 0, Math.PI * 2);
-        pctx.fill();
-      }
-
-      return pattern;
-    },
-  };
+    draw(ctx) {
+      const size = Math.ceil(this.life * 2);
+      const x = Math.round(this.x);
+      const y = Math.round(this.y);
+      ctx.fillStyle = `rgba(255, 200, 50, ${this.life})`;
+      ctx.fillRect(x, y, size, size);
+    }
+  }
 
   class Wreck {
-    constructor(wreckData) {
+    constructor(wreckData, existingWrecks = []) {
       this.data = wreckData;
       this.baseSize = 12 + Math.log10(wreckData.estimatedValue) * 4;
-      this.x = canvas.width / 2 + (Math.random() - 0.5) * 200;
-      this.y = canvas.height / 2 + (Math.random() - 0.5) * 200;
-      this.rotation = Math.random() * Math.PI * 2;
-      this.rotationSpeed = (Math.random() - 0.5) * 0.01;
-      this.color = this.generatePixelColor();
-      this.shapePoints = this.generateFractalShape();
-      this.debrisCloud = this.generateDebrisCloud();
-      this.details = this.generateStructuralDetails();
 
-      // Calculate label dimensions
+      // Calculate label dimensions first
       const TEXT_SIZE = 12;
       const PADDING = 6;
       const tempCanvas = document.createElement("canvas");
@@ -122,9 +54,47 @@
         tempCtx.measureText(wreckData.shipName).width + PADDING * 2;
       this.labelHeight = TEXT_SIZE + PADDING * 2;
 
+      // Set initial wreck position
+      this.x = canvas.width / 2 + (Math.random() - 0.5) * 200;
+      this.y = canvas.height / 2 + (Math.random() - 0.5) * 200;
+
+      // Find a non-overlapping vertical position for the label
+      const baseOffset = this.baseSize + 15;
+      let yOffset = baseOffset;
+
+      // Check for overlaps with existing wreck labels
+      const horizontalOverlap = (wreck) => {
+        const thisLeft = this.x - this.labelWidth / 2;
+        const thisRight = this.x + this.labelWidth / 2;
+        const otherLeft = wreck.x - wreck.labelWidth / 2;
+        const otherRight = wreck.x + wreck.labelWidth / 2;
+
+        return !(thisRight < otherLeft || thisLeft > otherRight);
+      };
+
+      // If there are any horizontal overlaps, adjust the vertical position
+      const overlappingWrecks = existingWrecks.filter(horizontalOverlap);
+      if (overlappingWrecks.length > 0) {
+        const maxY = Math.max(
+          ...overlappingWrecks.map(
+            (w) => w.y + w.label.offset.y + w.labelHeight
+          )
+        );
+        yOffset = maxY - this.y + 5;
+      }
+
+      this.rotation = Math.random() * Math.PI * 2;
+      this.rotationSpeed = (Math.random() - 0.5) * 0.01;
+      this.color = this.generatePixelColor();
+      this.shapePoints = this.generateFractalShape();
+      this.debrisCloud = this.generateDebrisCloud();
+      this.details = this.generateStructuralDetails();
+      this.sparks = [];
+      this.nextSparkTime = 0;
+
       this.label = {
         text: wreckData.shipName,
-        offset: { x: 0, y: this.baseSize + 15 }, // Initial offset
+        offset: { x: 0, y: yOffset },
         width: this.labelWidth,
         height: this.labelHeight,
       };
@@ -142,36 +112,33 @@
     }
 
     generateDebrisCloud() {
-      return Array(16) // Fewer, larger pieces
+      return Array(16)
         .fill()
         .map(() => ({
           x: (Math.random() - 0.5) * this.baseSize * 4,
           y: (Math.random() - 0.5) * this.baseSize * 4,
-          size: 3 + Math.floor(Math.random() * 4), // Larger debris
+          size: 3 + Math.floor(Math.random() * 4),
           angle: Math.random() * Math.PI * 2,
-          speed: 0.0005 + Math.random() * 0.001, // Much slower rotation
+          speed: 0.0005 + Math.random() * 0.001,
           distance: this.baseSize * (1.5 + Math.random()),
-          shape: Math.floor(Math.random() * 3), // Random shape type
+          shape: Math.floor(Math.random() * 3),
         }));
     }
 
     generateFractalShape() {
       const points = [];
       const basePoints = this.generateBaseShape();
-      const iterations = 3;
+      const iterations = 2;
 
       function subdivide(p1, p2, depth) {
         if (depth === 0) return [];
-
         const midX = (p1.x + p2.x) / 2;
         const midY = (p1.y + p2.y) / 2;
         const displacement = (Math.random() - 0.5) * (p1.x - p2.x) * 0.3;
-
         const midPoint = {
           x: midX + displacement,
           y: midY + displacement,
         };
-
         return [
           ...subdivide(p1, midPoint, depth - 1),
           midPoint,
@@ -219,19 +186,6 @@
           }
           return points;
         },
-        // Cruiser shape
-        () => {
-          const width = this.baseSize * 1.5;
-          const gap = this.baseSize * 0.3;
-          return [
-            { x: -width / 2, y: -gap },
-            { x: -width / 4, y: -gap * 2 },
-            { x: width / 2, y: -gap },
-            { x: width / 2, y: gap },
-            { x: -width / 4, y: gap * 2 },
-            { x: -width / 2, y: gap },
-          ];
-        },
       ];
 
       return variants[Math.floor(Math.random() * variants.length)]();
@@ -257,6 +211,16 @@
       return details;
     }
 
+    generateSpark() {
+      const angle = Math.random() * Math.PI * 2;
+      const distance = this.baseSize * (0.5 + Math.random() * 0.5);
+      const x = this.x + Math.cos(angle) * distance;
+      const y = this.y + Math.sin(angle) * distance;
+      const sparkAngle = Math.random() * Math.PI * 2;
+      const speed = 0.5 + Math.random() * 1.5;
+      return new Spark(x, y, sparkAngle, speed);
+    }
+
     update() {
       this.rotation += this.rotationSpeed;
 
@@ -266,11 +230,23 @@
         debris.x = Math.cos(debris.angle) * radius;
         debris.y = Math.sin(debris.angle) * radius;
       });
+
+      // Update sparks
+      this.sparks = this.sparks.filter((spark) => spark.update());
+
+      // Generate new sparks
+      if (Date.now() > this.nextSparkTime) {
+        const sparkCount = 1 + Math.floor(Math.random() * 3);
+        for (let i = 0; i < sparkCount; i++) {
+          this.sparks.push(this.generateSpark());
+        }
+        this.nextSparkTime = Date.now() + Math.random() * 500; // Random delay between 0-500ms
+      }
     }
 
     drawDebris(ctx, debris) {
       const { x, y, size, shape } = debris;
-      ctx.fillStyle = this.color; // Use wreck's color
+      ctx.fillStyle = this.color;
       ctx.strokeStyle = "#ffffff";
       ctx.lineWidth = 1;
 
@@ -352,6 +328,9 @@
       });
 
       ctx.restore();
+
+      // Draw sparks (in world space)
+      this.sparks.forEach((spark) => spark.draw(ctx));
     }
 
     drawLabel(ctx) {
@@ -362,9 +341,7 @@
       const labelCanvas = document.createElement("canvas");
       const labelCtx = labelCanvas.getContext("2d");
 
-      labelCtx.font = `${TEXT_SIZE}px 'Press Start 2P', monospace`;
       const width = this.labelWidth;
-
       labelCanvas.width = width;
       labelCanvas.height = HEIGHT;
 
@@ -382,7 +359,6 @@
       labelCtx.textBaseline = "middle";
       labelCtx.fillText(this.label.text, width / 2, HEIGHT / 2);
 
-      // Use the offset when drawing
       const screenX = Math.round(this.x + this.label.offset.x - width / 2);
       const screenY = Math.round(this.y + this.label.offset.y);
 
@@ -390,30 +366,88 @@
       ctx.drawImage(labelCanvas, screenX, screenY, width, HEIGHT);
       ctx.imageSmoothingEnabled = true;
     }
-
-    // Check if this label overlaps with another label
-    labelsOverlap(other) {
-      const b1 = this.getLabelBounds();
-      const b2 = other.getLabelBounds();
-
-      return !(
-        b1.right < b2.left ||
-        b1.left > b2.right ||
-        b1.bottom < b2.top ||
-        b1.top > b2.bottom
-      );
-    }
-
-    // Get label bounds based on current position and offset
-    getLabelBounds() {
-      return {
-        left: this.x + this.label.offset.x - this.labelWidth / 2,
-        right: this.x + this.label.offset.x + this.labelWidth / 2,
-        top: this.y + this.label.offset.y,
-        bottom: this.y + this.label.offset.y + this.labelHeight,
-      };
-    }
   }
+
+  // Background patterns based on celestial type
+  const backgroundPatterns = {
+    stargate: () => {
+      const size = 100;
+      const pattern = document.createElement("canvas");
+      pattern.width = size;
+      pattern.height = size;
+      const pctx = pattern.getContext("2d");
+
+      pctx.strokeStyle = "#1a4a6e";
+      pctx.lineWidth = 2;
+      for (let i = 0; i < 4; i++) {
+        const offset = i * (size / 4);
+        pctx.beginPath();
+        pctx.arc(size / 2, size / 2, 10 + offset, 0, Math.PI * 2);
+        pctx.stroke();
+      }
+
+      return pattern;
+    },
+    station: () => {
+      const size = 100;
+      const pattern = document.createElement("canvas");
+      pattern.width = size;
+      pattern.height = size;
+      const pctx = pattern.getContext("2d");
+
+      pctx.strokeStyle = "#4a1a6e";
+      pctx.lineWidth = 1;
+      const gridSize = 20;
+      for (let i = 0; i < size; i += gridSize) {
+        pctx.beginPath();
+        pctx.moveTo(i, 0);
+        pctx.lineTo(i, size);
+        pctx.moveTo(0, i);
+        pctx.lineTo(size, i);
+        pctx.stroke();
+      }
+
+      return pattern;
+    },
+    moon: () => {
+      const size = 100;
+      const pattern = document.createElement("canvas");
+      pattern.width = size;
+      pattern.height = size;
+      const pctx = pattern.getContext("2d");
+
+      pctx.fillStyle = "#2a2a2a";
+      for (let i = 0; i < 5; i++) {
+        const x = Math.random() * size;
+        const y = Math.random() * size;
+        const radius = 5 + Math.random() * 10;
+        pctx.beginPath();
+        pctx.arc(x, y, radius, 0, Math.PI * 2);
+        pctx.fill();
+      }
+
+      return pattern;
+    },
+    "asteroid belt": () => {
+      const size = 100;
+      const pattern = document.createElement("canvas");
+      pattern.width = size;
+      pattern.height = size;
+      const pctx = pattern.getContext("2d");
+
+      pctx.fillStyle = "#3a3a3a";
+      for (let i = 0; i < 20; i++) {
+        const x = Math.random() * size;
+        const y = Math.random() * size;
+        const size = 1 + Math.random() * 2;
+        pctx.beginPath();
+        pctx.arc(x, y, size, 0, Math.PI * 2);
+        pctx.fill();
+      }
+
+      return pattern;
+    },
+  };
 
   function createStars() {
     const starCount = 200;
@@ -432,16 +466,13 @@
     ctx.translate(x, y);
     ctx.rotate(rotation);
 
-    // Draw container background
     ctx.fillStyle = type === "cargo" ? "#4a4a4a" : "#6a4a2d";
     ctx.fillRect(-size / 2, -size / 2, size, size);
 
-    // Draw container details
     ctx.strokeStyle = "#ffffff";
     ctx.lineWidth = 1;
     ctx.strokeRect(-size / 2, -size / 2, size, size);
 
-    // Add container details
     const innerPadding = 2;
     ctx.strokeRect(
       -size / 2 + innerPadding,
@@ -461,9 +492,9 @@
         x: canvas.width / 2 + (Math.random() - 0.5) * 400,
         y: canvas.height / 2 + (Math.random() - 0.5) * 400,
         rotation: Math.random() * Math.PI * 2,
-        rotationSpeed: (Math.random() - 0.5) * 0.005, // Even slower rotation
-        size: 6 + Math.floor(Math.random() * 4), // Bigger containers
-        type: Math.random() > 0.5 ? "cargo" : "secure", // Random container type
+        rotationSpeed: (Math.random() - 0.5) * 0.005,
+        size: 6 + Math.floor(Math.random() * 4),
+        type: Math.random() > 0.5 ? "cargo" : "secure",
       }));
   }
 
@@ -471,7 +502,6 @@
     ctx.fillStyle = "rgba(0, 0, 0, 0.95)";
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    // Draw background pattern if applicable
     if (
       nearestCelestial?.type &&
       backgroundPatterns[nearestCelestial.type.toLowerCase()]
@@ -483,104 +513,26 @@
       ctx.globalAlpha = 1;
     }
 
-    // Draw stars
     stars.forEach((star) => {
       ctx.fillStyle = `rgba(255, 255, 255, ${star.brightness})`;
       ctx.fillRect(star.x, star.y, star.size, star.size);
     });
 
-    // Draw containers (debris field)
     debris.forEach((d) => {
       drawContainer(ctx, d.x, d.y, d.size, d.rotation, d.type);
       d.rotation += d.rotationSpeed;
     });
 
-    // Update and draw wrecks
     wreckObjects.forEach((wreck) => {
       wreck.update();
       wreck.draw(ctx);
     });
 
-    // Draw all labels last to ensure they're on top
     wreckObjects.forEach((wreck) => {
       wreck.drawLabel(ctx);
     });
 
     animationFrame = requestAnimationFrame(animate);
-  }
-
-  function adjustLabelPositions(wrecks, maxIterations = 50) {
-    const minDistance = 5; // Minimum space between labels
-    const dampening = 0.3; // Reduce force strength
-    const springStrength = 0.1; // Force pulling labels back to original positions
-    const bounds = {
-      left: 50,
-      right: canvas.width - 50,
-      top: 50,
-      bottom: canvas.height - 50,
-    };
-
-    for (let iteration = 0; iteration < maxIterations; iteration++) {
-      let moved = false;
-
-      for (let i = 0; i < wrecks.length; i++) {
-        const wreck = wrecks[i];
-        let dx = 0;
-        let dy = 0;
-
-        // Repulsion from other labels
-        for (let j = 0; j < wrecks.length; j++) {
-          if (i === j) continue;
-
-          const other = wrecks[j];
-          if (wreck.labelsOverlap(other)) {
-            const myBounds = wreck.getLabelBounds();
-            const otherBounds = other.getLabelBounds();
-
-            // Calculate center points of labels
-            const myCenter = {
-              x: (myBounds.left + myBounds.right) / 2,
-              y: (myBounds.top + myBounds.bottom) / 2,
-            };
-            const otherCenter = {
-              x: (otherBounds.left + otherBounds.right) / 2,
-              y: (otherBounds.top + otherBounds.bottom) / 2,
-            };
-
-            // Calculate repulsion
-            const deltaX = myCenter.x - otherCenter.x;
-            const deltaY = myCenter.y - otherCenter.y;
-            const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY) || 1;
-
-            // Stronger vertical force to encourage vertical stacking
-            dx += (deltaX / distance) * 2;
-            dy += (deltaY / distance) * 4;
-            moved = true;
-          }
-        }
-
-        // Spring force to pull label back to original position
-        dx += -wreck.label.offset.x * springStrength;
-        dy += -(wreck.label.offset.y - (wreck.baseSize + 15)) * springStrength;
-
-        // Apply forces with dampening
-        wreck.label.offset.x += dx * dampening;
-        wreck.label.offset.y += dy * dampening;
-
-        // Keep labels within bounds
-        const labelBounds = wreck.getLabelBounds();
-        if (labelBounds.left < bounds.left)
-          wreck.label.offset.x += bounds.left - labelBounds.left;
-        if (labelBounds.right > bounds.right)
-          wreck.label.offset.x += bounds.right - labelBounds.right;
-        if (labelBounds.top < bounds.top)
-          wreck.label.offset.y += bounds.top - labelBounds.top;
-        if (labelBounds.bottom > bounds.bottom)
-          wreck.label.offset.y += bounds.bottom - labelBounds.bottom;
-      }
-
-      if (!moved) break;
-    }
   }
 
   onMount(() => {
@@ -589,49 +541,13 @@
 
     createStars();
     createDebrisField();
-    wreckObjects = wrecks.map((wreck) => new Wreck(wreck));
 
-    // Add label position adjustment to the animation loop
-    function animate() {
-      ctx.fillStyle = "rgba(0, 0, 0, 0.95)";
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-      if (
-        nearestCelestial?.type &&
-        backgroundPatterns[nearestCelestial.type.toLowerCase()]
-      ) {
-        const pattern =
-          backgroundPatterns[nearestCelestial.type.toLowerCase()]();
-        ctx.globalAlpha = 0.1;
-        ctx.fillStyle = ctx.createPattern(pattern, "repeat");
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-        ctx.globalAlpha = 1;
-      }
-
-      stars.forEach((star) => {
-        ctx.fillStyle = `rgba(255, 255, 255, ${star.brightness})`;
-        ctx.fillRect(star.x, star.y, star.size, star.size);
-      });
-
-      debris.forEach((d) => {
-        drawContainer(ctx, d.x, d.y, d.size, d.rotation, d.type);
-        d.rotation += d.rotationSpeed;
-      });
-
-      // Update and draw wrecks
-      wreckObjects.forEach((wreck) => {
-        wreck.update();
-        wreck.draw(ctx);
-      });
-
-      // Adjust label positions and draw them
-      adjustLabelPositions(wreckObjects);
-      wreckObjects.forEach((wreck) => {
-        wreck.drawLabel(ctx);
-      });
-
-      animationFrame = requestAnimationFrame(animate);
-    }
+    // Create wrecks one by one, passing in the existing wrecks for label positioning
+    wreckObjects = [];
+    wrecks.forEach((wreckData) => {
+      const wreck = new Wreck(wreckData, wreckObjects);
+      wreckObjects.push(wreck);
+    });
 
     animate();
 
