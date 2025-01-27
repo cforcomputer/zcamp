@@ -26,6 +26,7 @@
   import Leaderboard from "./Leaderboard.svelte";
   import LocationTracker from "./LocationTracker.svelte";
   import MapVisualization from "./MapVisualization.svelte";
+  import WreckFieldDialog from "./WreckFieldDialog.svelte";
 
   let showWelcome = false;
   let checkingSession = true;
@@ -37,6 +38,8 @@
   let showMapOverlay = false;
   let selectedKillmailId = null;
   let selectedKillmail = null;
+  let showWreckFieldDialog = false;
+  let selectedWreckData = null;
 
   $: userSettings = $settings;
   $: kills = $killmails;
@@ -114,6 +117,20 @@
     selectedKillmail = null;
   }
 
+  function handleOpenWreckField(event) {
+    selectedWreckData = {
+      wrecks: event.detail.wrecks,
+      totalValue: event.detail.totalValue,
+      nearestCelestial: event.detail.nearestCelestial,
+    };
+    showWreckFieldDialog = true;
+  }
+
+  function closeWreckField() {
+    showWreckFieldDialog = false;
+    selectedWreckData = null;
+  }
+
   onMount(async () => {
     try {
       const response = await fetch("/api/session");
@@ -160,6 +177,29 @@
         initializeSocketStore();
       }}
     />
+  {/if}
+
+  {#if showWreckFieldDialog && selectedWreckData}
+    <!-- svelte-ignore a11y-no-static-element-interactions -->
+    <div
+      class="fixed inset-0 z-50 flex items-center justify-center"
+      on:click={closeWreckField}
+      on:keydown={(e) => {
+        if (e.key === "Escape") closeWreckField();
+      }}
+    >
+      <div class="fixed inset-0 bg-black/75 backdrop-blur-sm" />
+      <!-- svelte-ignore a11y-click-events-have-key-events -->
+      <!-- svelte-ignore a11y-no-static-element-interactions -->
+      <div class="relative z-50" on:click|stopPropagation>
+        <WreckFieldDialog
+          wrecks={selectedWreckData.wrecks}
+          totalValue={selectedWreckData.totalValue}
+          nearestCelestial={selectedWreckData.nearestCelestial}
+          onClose={closeWreckField}
+        />
+      </div>
+    </div>
   {/if}
 
   <div class="min-h-screen bg-gradient-to-b from-eve-primary to-eve-primary/95">
@@ -276,7 +316,7 @@
         </div>
       {:else if currentPage === "salvage"}
         <div class="eve-card">
-          <SalvageFields />
+          <SalvageFields on:openWreckField={handleOpenWreckField} />
         </div>
       {:else if currentPage === "bountyboard"}
         <div class="eve-card">

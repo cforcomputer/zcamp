@@ -1,6 +1,7 @@
 // salvage.js
 import { writable, derived } from "svelte/store";
 import { SALVAGE_VALUES } from "./constants.js";
+import { settings } from "./settingsStore.js";
 
 // Constants
 const WRECK_TIMEOUT = 2 * 60 * 60 * 1000; // 2 hours in milliseconds
@@ -34,39 +35,71 @@ export function processNewSalvage(killmail) {
       if (killTime < twoHoursAgo) return fields;
 
       const systemId = killmail.killmail.solar_system_id;
+
       const systemName =
-        killmail.pinpoints?.celestialData?.systemName || `System ${systemId}`;
+        killmail.pinpoints?.celestialData?.solarsystemname ||
+        killmail.system?.name ||
+        `System ${systemId}`;
+
       const regionName =
-        killmail.pinpoints?.celestialData?.regionName || "Unknown Region";
+        killmail.pinpoints?.celestialData?.regionname ||
+        killmail.system?.regionName ||
+        "Unknown Region";
+
       const category = killmail.shipCategories.victim.category.toLowerCase();
       const estimatedValue = SALVAGE_VALUES[category] || SALVAGE_VALUES.unknown;
       const expiryTime = killTime + WRECK_TIMEOUT;
       const isTriangulatable = killmail.pinpoints?.triangulationPossible;
       const nearestCelestial =
         killmail.pinpoints?.nearestCelestial?.name || "Unknown";
+      const securityType =
+        killmail.zkb.labels
+          .find((label) => label.startsWith("loc:"))
+          ?.replace("loc:", "") || "unknown";
 
-      if (!fields.has(systemId)) {
+      const existingSystem = fields.get(systemId);
+      if (existingSystem) {
+        // Update existing system data
+        existingSystem.systemName = systemName;
+        existingSystem.regionName = regionName;
+        existingSystem.securityType = securityType;
+        existingSystem.wrecks.push({
+          shipName: killmail.shipCategories.victim.name,
+          category,
+          estimatedValue,
+          expiryTime,
+          isTriangulatable,
+          killmailId: killmail.killmail_id || killmail.killID,
+          celestialData: killmail.pinpoints?.celestialData,
+          securityType,
+        });
+        existingSystem.totalValue += estimatedValue;
+        existingSystem.isTriangulatable =
+          existingSystem.isTriangulatable || isTriangulatable;
+        existingSystem.nearestCelestial = nearestCelestial;
+      } else {
+        // Create new system entry
         fields.set(systemId, {
           systemName,
           regionName,
-          wrecks: [],
-          totalValue: 0,
+          securityType,
+          wrecks: [
+            {
+              shipName: killmail.shipCategories.victim.name,
+              category,
+              estimatedValue,
+              expiryTime,
+              isTriangulatable,
+              killmailId: killmail.killmail_id || killmail.killID,
+              celestialData: killmail.pinpoints?.celestialData,
+              securityType,
+            },
+          ],
+          totalValue: estimatedValue,
           isTriangulatable,
           nearestCelestial,
         });
       }
-
-      const system = fields.get(systemId);
-      system.wrecks.push({
-        shipName: killmail.shipCategories.victim.name,
-        category,
-        estimatedValue,
-        expiryTime,
-        isTriangulatable,
-        killmailId: killmail.killID,
-        celestialData: killmail.pinpoints?.celestialData,
-      });
-      system.totalValue += estimatedValue;
     }
 
     return fields;
@@ -87,17 +120,30 @@ export function initializeSalvage(initialKillmails) {
       const systemId = killmail.killmail.solar_system_id;
       const systemName =
         killmail.pinpoints?.celestialData?.solarsystemname ||
+        killmail.system?.name ||
         `System ${systemId}`;
+
+      const regionName =
+        killmail.pinpoints?.celestialData?.regionname ||
+        killmail.system?.regionName ||
+        "Unknown Region";
+
       const category = killmail.shipCategories.victim.category.toLowerCase();
       const estimatedValue = SALVAGE_VALUES[category] || SALVAGE_VALUES.unknown;
       const expiryTime = killTime + WRECK_TIMEOUT;
       const isTriangulatable = killmail.pinpoints?.triangulationPossible;
       const nearestCelestial =
         killmail.pinpoints?.nearestCelestial?.name || "Unknown";
+      const securityType =
+        killmail.zkb.labels
+          .find((label) => label.startsWith("loc:"))
+          ?.replace("loc:", "") || "unknown";
 
       if (!fields.has(systemId)) {
         fields.set(systemId, {
           systemName,
+          regionName,
+          securityType,
           wrecks: [],
           totalValue: 0,
           isTriangulatable,
@@ -112,7 +158,9 @@ export function initializeSalvage(initialKillmails) {
         estimatedValue,
         expiryTime,
         isTriangulatable,
-        killmailId: killmail.killID,
+        killmailId: killmail.killmail_id || killmail.killID,
+        celestialData: killmail.pinpoints?.celestialData,
+        securityType,
       });
       system.totalValue += estimatedValue;
     }
@@ -144,11 +192,27 @@ export function initializeSalvage(initialKillmails) {
 
 // Derived store for filtered/sorted salvage fields
 export const filteredSalvageFields = derived(
-  salvageFields,
-  ($salvageFields) => {
-    return Array.from($salvageFields.entries()).sort(
-      ([, a], [, b]) => b.totalValue - a.totalValue
-    );
+  [salvageFields, settings],
+  ([$salvageFields, $settings]) => {
+    let fields = Array.from($salvageFields.entries());
+
+    const selectedTypes = Object.entries($settings.location_types)
+      .filter(([_, enabled]) => enabled)
+      .map(([type]) => type);
+
+    if (selectedTypes.length > 0) {
+      fields = fields.filter(([_, system]) => {
+        if (
+          system.securityType === "Unknown" &&
+          selectedTypes.includes("Nullsec")
+        ) {
+          return true;
+        }
+        return selectedTypes.includes(system.securityType);
+      });
+    }
+
+    return fields.sort(([, a], [, b]) => b.totalValue - a.totalValue);
   }
 );
 

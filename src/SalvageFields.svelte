@@ -5,13 +5,17 @@
     initializeSalvage,
     cleanup,
   } from "./salvage.js";
-  import { killmails } from "./settingsStore.js";
+  import { killmails, settings } from "./settingsStore.js";
   import WreckFieldDialog from "./WreckFieldDialog.svelte";
+  import { createEventDispatcher } from "svelte";
+
+  const dispatch = createEventDispatcher();
 
   let minValue = 0;
   let showTriangulatable = false;
   let selectedSystem = null;
   let cleanupInterval;
+  let showSecurityDropdown = false;
 
   // Filter and sort systems
   $: filteredSystems = $filteredSalvageFields
@@ -41,7 +45,14 @@
 
   function openWreckField(system, event) {
     event.stopPropagation();
-    selectedSystem = system;
+    dispatch("openWreckField", {
+      wrecks: system.wrecks,
+      totalValue: system.totalValue,
+      nearestCelestial: {
+        type: "station",
+        name: system.nearestCelestial,
+      },
+    });
   }
 
   onMount(() => {
@@ -60,6 +71,36 @@
   <div class="flex justify-between items-center mb-4">
     <h2 class="text-xl font-bold text-white">T2 Salvage Fields</h2>
     <div class="flex gap-4 items-center">
+      <div class="relative">
+        <button
+          class="px-3 py-1.5 bg-eve-dark border border-eve-secondary/30 text-white rounded flex items-center gap-2"
+          on:click={() => (showSecurityDropdown = !showSecurityDropdown)}
+        >
+          Security Status
+          <span class="text-xs opacity-50">▼</span>
+        </button>
+
+        {#if showSecurityDropdown}
+          <div
+            class="absolute right-0 top-full mt-1 bg-eve-dark border border-eve-secondary/30 rounded p-2 z-10 min-w-[150px] shadow-lg"
+            on:mouseleave={() => (showSecurityDropdown = false)}
+          >
+            {#each Object.entries($settings.location_types) as [type, enabled]}
+              <label
+                class="flex items-center px-2 py-1.5 hover:bg-eve-secondary/20"
+              >
+                <input
+                  type="checkbox"
+                  class="form-checkbox"
+                  bind:checked={$settings.location_types[type]}
+                />
+                <span class="ml-2 text-white capitalize">{type}</span>
+              </label>
+            {/each}
+          </div>
+        {/if}
+      </div>
+
       <div class="flex items-center gap-2">
         <label for="min-value" class="text-gray-300 whitespace-nowrap">
           Min Value:
@@ -94,6 +135,7 @@
             <th class="px-4 py-3 text-gray-300 font-medium"
               >Nearest Celestial</th
             >
+            <th class="px-4 py-3 text-gray-300 font-medium">Security</th>
             <th class="px-4 py-3 text-gray-300 font-medium">Wrecks</th>
             <th class="px-4 py-3 text-gray-300 font-medium">Value</th>
             <th class="px-4 py-3 text-gray-300 font-medium">Time Left</th>
@@ -119,6 +161,9 @@
             >
               <td class="px-4 py-3 text-white">{system.systemName}</td>
               <td class="px-4 py-3 text-gray-300">{system.nearestCelestial}</td>
+              <td class="px-4 py-3 text-gray-300 capitalize"
+                >{system.securityType || "unknown"}</td
+              >
               <td class="px-4 py-3 text-gray-300"
                 >{system.wrecks.length} wrecks</td
               >
@@ -158,3 +203,9 @@
     onClose={() => (selectedSystem = null)}
   />
 {/if}
+
+<style>
+  .form-checkbox {
+    @apply rounded border-eve-accent/50 text-eve-accent focus:ring-eve-accent;
+  }
+</style>
