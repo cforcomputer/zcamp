@@ -70,12 +70,18 @@
   }
 
   function formatDroppedValue(value) {
-    if (value === 0 || isNaN(value) || value === null || value === undefined) {
-      return "0 ISK";
+    if (!value || isNaN(value)) return "0 ISK";
+
+    if (value >= 1_000_000_000) {
+      return `${(value / 1_000_000_000).toFixed(2)} B`;
     }
-    const magnitude = Math.floor(Math.log10(value) / 3);
-    const scaled = value / Math.pow(1000, magnitude);
-    return scaled.toFixed(2) + " " + ["ISK", "K", "M", "B", "T"][magnitude];
+    if (value >= 1_000_000) {
+      return `${(value / 1_000_000).toFixed(2)} M`;
+    }
+    if (value >= 1_000) {
+      return `${Math.floor(value / 1_000)} K`;
+    }
+    return `${Math.floor(value)} ISK`;
   }
 
   function calculateTimeDifference(killmailTime) {
@@ -119,67 +125,71 @@
 
 <div class="flex flex-col bg-eve-dark/95 rounded-lg shadow-lg overflow-hidden">
   <div class="overflow-x-auto">
-    <table class="w-full">
-      <thead>
-        <tr class="text-left bg-eve-secondary/80">
-          <th class="px-4 py-3 text-sm font-medium text-gray-300">Value</th>
-          <th class="px-4 py-3 text-sm font-medium text-gray-300">Time</th>
-          <th class="px-4 py-3 text-sm font-medium text-gray-300">Link</th>
-          <th class="px-4 py-3 text-sm font-medium text-gray-300">Actions</th>
-        </tr>
-      </thead>
-    </table>
+    <table class="w-full"></table>
   </div>
 
   <div
-    class="overflow-y-auto max-h-[calc(100vh-16rem)]"
-    bind:this={scrollContainer}
-    on:scroll={handleScroll}
+    class="flex flex-col bg-eve-dark/95 rounded-lg shadow-lg overflow-hidden"
   >
-    <table class="w-full">
-      <tbody>
-        {#each sortedKillmails as killmail (killmail.killID)}
-          <tr
-            class="border-b border-eve-secondary/30 hover:bg-eve-secondary/20 transition-colors"
-          >
-            <td class="px-4 py-3 text-eve-accent">
-              {formatDroppedValue(killmail.zkb.droppedValue)}
-            </td>
-            <td class="px-4 py-3 text-gray-400">
-              {calculateTimeDifference(killmail.killmail.killmail_time)}
-            </td>
-            <td class="px-4 py-3">
-              <a
-                href={`https://zkillboard.com/kill/${killmail.killID}/`}
-                target="_blank"
-                class="text-eve-accent hover:text-eve-accent/80 transition-colors"
+    <div
+      class="overflow-y-auto max-h-[calc(100vh-16rem)]"
+      bind:this={scrollContainer}
+      on:scroll={handleScroll}
+    >
+      <table class="w-full">
+        <tbody>
+          {#each sortedKillmails as killmail (killmail.killID)}
+            <tr
+              class="border-b border-eve-secondary/30 hover:bg-eve-secondary/20 transition-colors"
+            >
+              <!-- Main row content (clickable) -->
+              <td
+                class="px-4 py-3 cursor-pointer"
+                on:click={() =>
+                  window.open(
+                    `https://zkillboard.com/kill/${killmail.killID}/`,
+                    "_blank"
+                  )}
+                style="width: 85%"
               >
-                View
-              </a>
-            </td>
-            <td class="px-4 py-3">
-              <div class="flex items-center gap-3">
-                <button
-                  on:click={() => openMap(killmail)}
-                  class="px-3 py-1 text-sm bg-eve-secondary hover:bg-eve-secondary/80 text-eve-accent rounded transition-colors"
-                >
-                  Map
-                </button>
-                <span
-                  class="flex items-center justify-center w-6 h-6 rounded-full {killmail
-                    ?.pinpoints?.triangulationPossible
-                    ? 'bg-green-500/20 text-green-400'
-                    : 'bg-red-500/20 text-red-400'}"
-                  title={getTriangulationStatus(killmail)}
-                >
-                  {killmail?.pinpoints?.triangulationPossible ? "✓" : "×"}
-                </span>
-              </div>
-            </td>
-          </tr>
-        {/each}
-      </tbody>
-    </table>
+                <div class="flex items-center">
+                  <span class="text-eve-accent w-24">
+                    {formatDroppedValue(killmail.zkb.droppedValue)}
+                  </span>
+                  <span class="text-gray-400 w-32">
+                    {calculateTimeDifference(killmail.killmail.killmail_time)}
+                  </span>
+                  <span class="text-white">
+                    {killmail.shipCategories?.victim?.name || "Unknown Ship"}
+                  </span>
+                </div>
+              </td>
+
+              <!-- Actions cell (separate, not clickable) -->
+              <td class="px-4 py-3" style="width: 15%">
+                <div class="flex items-center gap-3">
+                  <button
+                    on:click={() => openMap(killmail)}
+                    class="px-3 py-1 text-sm bg-eve-secondary hover:bg-eve-secondary/80 text-eve-accent rounded transition-colors"
+                  >
+                    Map
+                  </button>
+                  <span
+                    class="flex items-center justify-center w-6 h-6 rounded-full {killmail
+                      ?.pinpoints?.triangulationPossible
+                      ? 'bg-green-500/20 text-green-400'
+                      : 'bg-red-500/20 text-red-400'}"
+                    title={getTriangulationStatus(killmail)}
+                  >
+                    {killmail?.pinpoints?.triangulationPossible ? "✓" : "×"}
+                  </span>
+                </div>
+              </td>
+            </tr>
+          {/each}
+        </tbody>
+      </table>
+    </div>
   </div>
 </div>
 

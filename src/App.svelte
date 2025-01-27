@@ -223,7 +223,7 @@
                 : ''}"
               on:click={() => (currentPage = "kills")}
             >
-              Kills
+              KM Hunter
             </button>
             <button
               class="eve-nav-item {currentPage === 'battles'
