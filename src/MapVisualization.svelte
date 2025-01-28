@@ -493,33 +493,27 @@
     const infoPanel = document.querySelector(".info-panel");
     if (!infoPanel) return;
 
-    const killPos = kill.killmail.victim.position;
     let pinpointHtml = "";
-
-    if (kill.pinpoints?.atCelestial) {
-      pinpointHtml = "<p>Triangulation possible - At celestial</p>";
-    } else if (
-      kill.pinpoints?.nearestCelestial &&
-      kill.pinpoints?.triangulationPossible
-    ) {
-      pinpointHtml = `<p>Triangulation possible - Near celestial: ${kill.pinpoints.nearestCelestial.name} (${formatDistance(kill.pinpoints.nearestCelestial.distance)})</p>`;
-    } else if (
-      kill.pinpoints?.hasTetrahedron &&
-      kill.pinpoints.points.length >= 4
-    ) {
-      pinpointHtml = kill.pinpoints.points
-        .map(
-          (point, i) =>
-            `<p>Pinpoint ${i + 1}: ${point.name} (${formatDistance(point.distance)})</p>`
-        )
-        .join("");
-    } else {
-      pinpointHtml = "<p>Wreck triangulation not possible</p>";
+    if (kill?.pinpoints) {
+      if (kill.pinpoints.atCelestial) {
+        pinpointHtml = `<p>At celestial: ${kill.pinpoints.nearestCelestial.name}</p>`;
+      } else if (
+        kill.pinpoints.hasTetrahedron &&
+        kill.pinpoints.points.length >= 4
+      ) {
+        pinpointHtml = kill.pinpoints.points
+          .map((point, i) => `<p>Pinpoint ${i + 1}: ${point.name}</p>`)
+          .join("");
+      } else if (kill.pinpoints.nearestCelestial) {
+        pinpointHtml = `<p>Near celestial: ${kill.pinpoints.nearestCelestial.name}</p>`;
+      } else {
+        pinpointHtml = "<p>Wreck triangulation not possible</p>";
+      }
     }
 
     infoPanel.innerHTML = `
-    <p>System name: ${systemName || "Unknown"}</p>
-    <p>Closest Celestial: ${closestCelestial || "Unknown"}</p>
+    <p>System name: ${systemName}</p>
+    <p>Closest Celestial: ${closestCelestial}</p>
     ${pinpointHtml}
     ${objectData ? `<p>Selected: ${objectData.name} (${objectData.type})</p>` : ""}
   `;
@@ -982,13 +976,13 @@
     camera = new THREE.PerspectiveCamera(
       75,
       container.clientWidth / container.clientHeight,
-      0.000001, // Much smaller near plane
+      0.000001,
       1000000000
     );
 
     renderer = new THREE.WebGLRenderer({
       antialias: true,
-      logarithmicDepthBuffer: true, // Add this line
+      logarithmicDepthBuffer: true,
     });
     renderer.setSize(container.clientWidth, container.clientHeight);
     container.appendChild(renderer.domElement);
@@ -1020,7 +1014,6 @@
       }
     });
 
-    // Add pinpoint box if it exists
     // Add pinpoint box if it exists
     if (kill.pinpoints?.hasTetrahedron) {
       console.log("Adding pinpoint box for:", kill.pinpoints);
@@ -1054,18 +1047,6 @@
       celestialData,
       kill.killmail.victim.position
     );
-
-    // Update pinpoint information from server data
-    if (kill.pinpoints?.hasTetrahedron) {
-      pinpoints = kill.pinpoints.points.map(
-        (point) =>
-          `${point.name} (${(point.distance * SCALE_FACTOR).toFixed(2)} km)`
-      );
-    } else {
-      pinpoints = ["No valid pinpoint box found", "", "", ""];
-    }
-
-    updateInfoPanel();
 
     animate();
     loading = false;
@@ -1199,9 +1180,6 @@
   </div>
 
   <div class="info-panel">
-    {#if kill.pinpoints}
-      <pre style="display: none">{JSON.stringify(kill.pinpoints, null, 2)}</pre>
-    {/if}
     <p>System name: {systemName}</p>
     <p>Closest Celestial: {closestCelestial}</p>
     {#if kill.pinpoints?.atCelestial}
@@ -1212,20 +1190,22 @@
           kill.pinpoints.nearestCelestial.distance / 1000
         ).toFixed(2)} km)
       </p>
-    {:else if kill.pinpoints?.triangulationType === "via_bookspam"}
-      <p>Triangulation possible (requires bookspamming):</p>
-      {#each kill.pinpoints.points as point, i}
+    {:else if kill.pinpoints?.triangulationType === "via_bookspam" || kill.pinpoints?.triangulationType === "direct"}
+      {#if kill.pinpoints.points?.length > 0}
         <p>
-          Pinpoint {i + 1}: {point.name} ({(point.distance / 1000).toFixed(2)} km)
+          {kill.pinpoints.triangulationType === "via_bookspam"
+            ? "Triangulation possible (requires bookspamming):"
+            : "Direct triangulation possible:"}
         </p>
-      {/each}
-    {:else if kill.pinpoints?.triangulationType === "direct"}
-      <p>Direct triangulation possible:</p>
-      {#each kill.pinpoints.points as point, i}
-        <p>
-          Pinpoint {i + 1}: {point.name} ({(point.distance / 1000).toFixed(2)} km)
-        </p>
-      {/each}
+        {#each kill.pinpoints.points as point, i}
+          <p>
+            Pinpoint {i + 1}: {point.name} ({(point.distance / 1000).toFixed(2)}
+            km)
+          </p>
+        {/each}
+      {:else}
+        <p>Wreck triangulation not possible</p>
+      {/if}
     {:else}
       <p>Wreck triangulation not possible</p>
     {/if}
