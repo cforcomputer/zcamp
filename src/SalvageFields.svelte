@@ -6,17 +6,22 @@
     cleanup,
   } from "./salvage.js";
   import { killmails, settings } from "./settingsStore.js";
-  import WreckFieldDialog from "./WreckFieldDialog.svelte";
   import { createEventDispatcher } from "svelte";
   import ContextMenu from "./ContextMenu.svelte";
 
   const dispatch = createEventDispatcher();
 
   let minValue = 0;
-  let showTriangulatable = false;
-  let selectedSystem = null;
   let cleanupInterval;
   let showSecurityDropdown = false;
+  let showTriangulationDropdown = false;
+  let triangulationStates = {
+    at_celestial: false,
+    direct_warp: false,
+    near_celestial: false,
+    via_bookspam: false,
+    none: false,
+  };
 
   // Context menu state
   let contextMenu = {
@@ -27,11 +32,34 @@
   };
 
   // Filter and sort systems
+  $: enabledTriangulationTypes = Object.entries(triangulationStates)
+    .filter(([_, enabled]) => enabled)
+    .map(([type]) => type);
+
   $: filteredSystems = $filteredSalvageFields
     .filter(([, system]) => {
       if (system.totalValue < minValue) return false;
-      if (showTriangulatable && !system.isTriangulatable) return false;
-      return true;
+
+      // If no triangulation types are selected, show all
+      if (enabledTriangulationTypes.length === 0) return true;
+
+      // Check if any wreck in the system matches the selected triangulation types
+      return system.wrecks.some((wreck) => {
+        if (!wreck.isTriangulatable)
+          return enabledTriangulationTypes.includes("none");
+        const pinpoints = wreck.pinpoints;
+        if (!pinpoints) return enabledTriangulationTypes.includes("none");
+
+        if (pinpoints.atCelestial)
+          return enabledTriangulationTypes.includes("at_celestial");
+        if (pinpoints.triangulationType === "direct_warp")
+          return enabledTriangulationTypes.includes("direct_warp");
+        if (pinpoints.triangulationType === "near_celestial")
+          return enabledTriangulationTypes.includes("near_celestial");
+        if (pinpoints.triangulationType === "via_bookspam")
+          return enabledTriangulationTypes.includes("via_bookspam");
+        return enabledTriangulationTypes.includes("none");
+      });
     })
     .sort(([, a], [, b]) => b.totalValue - a.totalValue);
 
@@ -50,6 +78,79 @@
     if (minutes < 15) return "bg-red-500";
     if (minutes < 30) return "bg-orange-500";
     return "bg-green-500";
+  }
+
+  function getTriangulationIcon(wreck) {
+    if (!wreck?.isTriangulatable) return "×";
+    const pinpoints = wreck.pinpoints;
+    if (!pinpoints) return "○";
+
+    if (pinpoints.atCelestial) return "◉";
+    if (pinpoints.triangulationType === "direct_warp") return "◈";
+    if (pinpoints.triangulationType === "near_celestial") return "◎";
+    if (pinpoints.triangulationType === "via_bookspam") return "◇";
+    return "×";
+  }
+
+  function getTriangulationClass(wreck) {
+    if (!wreck?.isTriangulatable) return "bg-red-500/20 text-red-400";
+    const pinpoints = wreck.pinpoints;
+    if (!pinpoints) return "bg-red-500/20 text-red-400";
+
+    if (
+      pinpoints.atCelestial ||
+      pinpoints.triangulationType === "direct_warp"
+    ) {
+      return "bg-green-500/20 text-green-400";
+    }
+    if (pinpoints.triangulationType === "near_celestial") {
+      return "bg-yellow-500/20 text-yellow-400";
+    }
+    if (pinpoints.triangulationType === "via_bookspam") {
+      return "bg-pink-500/20 text-pink-400";
+    }
+    return "bg-red-500/20 text-red-400";
+  }
+
+  function getTriangulationStatus(wreck) {
+    if (!wreck?.isTriangulatable) return "Cannot triangulate";
+    const pinpoints = wreck.pinpoints;
+    if (!pinpoints) return "No triangulation data";
+
+    if (pinpoints.atCelestial) {
+      return `At celestial: ${pinpoints.nearestCelestial.name}`;
+    }
+    if (pinpoints.triangulationType === "direct_warp") {
+      return `Direct warp to ${pinpoints.nearestCelestial.name} (${(
+        pinpoints.nearestCelestial.distance / 1000
+      ).toFixed(2)} km)`;
+    }
+    if (pinpoints.triangulationType === "near_celestial") {
+      return `Near celestial: ${pinpoints.nearestCelestial.name} (${(
+        pinpoints.nearestCelestial.distance / 1000
+      ).toFixed(2)} km)`;
+    }
+    if (pinpoints.triangulationType === "via_bookspam") {
+      return "Triangulation possible (requires bookspamming)";
+    }
+    return "Cannot be triangulated";
+  }
+
+  function getTriangulationLabel(type) {
+    switch (type) {
+      case "at_celestial":
+        return "At Celestial";
+      case "direct_warp":
+        return "Direct Warp";
+      case "near_celestial":
+        return "Near Celestial";
+      case "via_bookspam":
+        return "Bookspam Required";
+      case "none":
+        return "Not Triangulatable";
+      default:
+        return "Unknown";
+    }
   }
 
   function openWreckField(system, event) {
@@ -184,15 +285,45 @@
           />
         </label>
       </div>
-      <label for="triangulatable" class="flex items-center gap-2 text-gray-300">
-        <input
-          id="triangulatable"
-          type="checkbox"
-          bind:checked={showTriangulatable}
-          class="form-checkbox text-eve-accent rounded bg-eve-dark border-eve-secondary/30"
-        />
-        Triangulatable Only
-      </label>
+
+      <div class="relative">
+        <button
+          class="px-3 py-1.5 bg-eve-dark border border-eve-secondary/30 text-white rounded flex items-center gap-2"
+          on:click={() =>
+            (showTriangulationDropdown = !showTriangulationDropdown)}
+        >
+          Triangulation Filter
+          <span class="text-xs opacity-50">▼</span>
+        </button>
+
+        {#if showTriangulationDropdown}
+          <div
+            class="absolute right-0 top-full mt-1 bg-eve-dark border border-eve-secondary/30 rounded p-2 z-10 min-w-[200px] shadow-lg"
+            on:mouseleave={() => (showTriangulationDropdown = false)}
+          >
+            {#each Object.entries(triangulationStates) as [type, enabled]}
+              <label
+                class="flex items-center px-2 py-1.5 hover:bg-eve-secondary/20"
+              >
+                <input
+                  type="checkbox"
+                  class="form-checkbox"
+                  bind:checked={triangulationStates[type]}
+                />
+                <span class="ml-2 flex items-center gap-2">
+                  <span class="w-4 text-center"
+                    >{getTriangulationIcon({
+                      pinpoints: { triangulationType: type },
+                      isTriangulatable: true,
+                    })}</span
+                  >
+                  <span class="text-white">{getTriangulationLabel(type)}</span>
+                </span>
+              </label>
+            {/each}
+          </div>
+        {/if}
+      </div>
     </div>
   </div>
 
@@ -253,13 +384,18 @@
                 />
               </td>
               <td class="px-4 py-3">
-                <span
-                  class="inline-flex items-center justify-center w-6 h-6 rounded-full {system.isTriangulatable
-                    ? 'bg-green-500/20 text-green-400'
-                    : 'bg-red-500/20 text-red-400'}"
-                >
-                  {system.isTriangulatable ? "✓" : "×"}
-                </span>
+                <div class="flex gap-1">
+                  {#each system.wrecks as wreck}
+                    <span
+                      class="inline-flex items-center justify-center w-6 h-6 rounded-full {getTriangulationClass(
+                        wreck
+                      )}"
+                      title={getTriangulationStatus(wreck)}
+                    >
+                      {getTriangulationIcon(wreck)}
+                    </span>
+                  {/each}
+                </div>
               </td>
             </tr>
           {/each}
@@ -268,14 +404,6 @@
     </div>
   {/if}
 </div>
-
-{#if selectedSystem}
-  <WreckFieldDialog
-    wrecks={selectedSystem.wrecks}
-    totalValue={selectedSystem.totalValue}
-    onClose={() => (selectedSystem = null)}
-  />
-{/if}
 
 <ContextMenu
   show={contextMenu.show}
