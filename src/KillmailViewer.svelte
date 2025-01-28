@@ -93,28 +93,21 @@
   }
 
   function handleContextMenu(event, killmail) {
-    console.log("Context menu handler called", {
-      x: event.clientX,
-      y: event.clientY,
-    });
-
-    // Get the row element's position
-    const row = event.currentTarget;
-    const rowBounds = row.getBoundingClientRect();
-
     // Get the container element's position
     const container = scrollContainer;
     const containerBounds = container.getBoundingClientRect();
 
-    // Calculate position relative to the container
+    // Calculate position relative to the container, accounting for scroll
     const x = event.clientX - containerBounds.left;
-    const y = event.clientY - containerBounds.top + container.scrollTop;
+
+    // Use pageY instead of clientY to get the absolute position
+    const y = event.pageY - containerBounds.top - window.scrollY;
 
     // Ensure menu doesn't go off-screen
     const menuWidth = 150; // Approximate menu width
     const menuHeight = 100; // Approximate menu height
     const maxX = containerBounds.width - menuWidth;
-    const maxY = containerBounds.height - menuHeight;
+    const maxY = container.scrollHeight - menuHeight;
 
     contextMenu = {
       show: true,
@@ -133,8 +126,6 @@
         },
       ],
     };
-
-    console.log("Context menu state updated:", contextMenu);
   }
 
   function handleMenuSelect(event) {
