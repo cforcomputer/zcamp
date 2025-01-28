@@ -1206,39 +1206,26 @@
     <p>Closest Celestial: {closestCelestial}</p>
     {#if kill.pinpoints?.atCelestial}
       <p>At celestial: {kill.pinpoints.nearestCelestial.name}</p>
-    {:else if kill.pinpoints?.nearestCelestial && kill.pinpoints?.triangulationPossible}
+    {:else if kill.pinpoints?.triangulationType === "near_celestial"}
       <p>
         Near celestial: {kill.pinpoints.nearestCelestial.name} ({(
           kill.pinpoints.nearestCelestial.distance / 1000
         ).toFixed(2)} km)
       </p>
-    {:else if kill.pinpoints?.hasTetrahedron && kill.pinpoints.points.length >= 4}
-      <p>
-        Pinpoint 1: {kill.pinpoints.points[0].name} ({(
-          kill.pinpoints.points[0].distance / 1000
-        ).toFixed(2)} km)
-      </p>
-      <p>
-        Pinpoint 2: {kill.pinpoints.points[1].name} ({(
-          kill.pinpoints.points[1].distance / 1000
-        ).toFixed(2)} km)
-      </p>
-      <p>
-        Pinpoint 3: {kill.pinpoints.points[2].name} ({(
-          kill.pinpoints.points[2].distance / 1000
-        ).toFixed(2)} km)
-      </p>
-      <p>
-        Pinpoint 4: {kill.pinpoints.points[3].name} ({(
-          kill.pinpoints.points[3].distance / 1000
-        ).toFixed(2)} km)
-      </p>
-    {:else if kill.pinpoints?.triangulationPossible && kill.pinpoints?.nearestCelestial}
-      <p>
-        Nearest celestial: {kill.pinpoints.nearestCelestial.name} ({(
-          kill.pinpoints.nearestCelestial.distance / 1000
-        ).toFixed(2)} km)
-      </p>
+    {:else if kill.pinpoints?.triangulationType === "via_bookspam"}
+      <p>Triangulation possible (requires bookspamming):</p>
+      {#each kill.pinpoints.points as point, i}
+        <p>
+          Pinpoint {i + 1}: {point.name} ({(point.distance / 1000).toFixed(2)} km)
+        </p>
+      {/each}
+    {:else if kill.pinpoints?.triangulationType === "direct"}
+      <p>Direct triangulation possible:</p>
+      {#each kill.pinpoints.points as point, i}
+        <p>
+          Pinpoint {i + 1}: {point.name} ({(point.distance / 1000).toFixed(2)} km)
+        </p>
+      {/each}
     {:else}
       <p>Wreck triangulation not possible</p>
     {/if}

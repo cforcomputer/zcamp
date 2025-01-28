@@ -144,7 +144,9 @@
     ) {
       return `Near celestial: ${killmail.pinpoints.nearestCelestial.name}`;
     } else if (killmail.pinpoints.hasTetrahedron) {
-      return "Triangulation possible";
+      return killmail.pinpoints.triangulationType === "via_bookspam"
+        ? "Triangulation possible (requires bookspamming)"
+        : "Triangulation possible (direct)";
     } else {
       return "Cannot be triangulated";
     }
@@ -191,6 +193,19 @@
     if (scrollContainer && shouldAutoScroll) {
       scrollContainer.scrollTop = scrollContainer.scrollHeight;
     }
+  }
+
+  function getTriangulationClass(killmail) {
+    if (!killmail?.pinpoints) return "bg-red-500/20 text-red-400";
+
+    if (killmail.pinpoints.triangulationPossible) {
+      if (killmail.pinpoints.triangulationType === "via_bookspam") {
+        return "bg-yellow-500/20 text-yellow-400";
+      }
+      return "bg-green-500/20 text-green-400";
+    }
+
+    return "bg-red-500/20 text-red-400";
   }
 
   onMount(() => {
@@ -260,10 +275,9 @@
                     Map
                   </button>
                   <span
-                    class="flex items-center justify-center w-6 h-6 rounded-full {killmail
-                      ?.pinpoints?.triangulationPossible
-                      ? 'bg-green-500/20 text-green-400'
-                      : 'bg-red-500/20 text-red-400'}"
+                    class="flex items-center justify-center w-6 h-6 rounded-full {getTriangulationClass(
+                      killmail
+                    )}"
                     title={getTriangulationStatus(killmail)}
                   >
                     {killmail?.pinpoints?.triangulationPossible ? "✓" : "×"}

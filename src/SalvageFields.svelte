@@ -14,6 +14,7 @@
 
   let minValue = 0;
   let showTriangulatable = false;
+  let triangulationFilter = "all"; // "all", "direct", "bookspam"
   let selectedSystem = null;
   let cleanupInterval;
   let showSecurityDropdown = false;
@@ -31,6 +32,19 @@
     .filter(([, system]) => {
       if (system.totalValue < minValue) return false;
       if (showTriangulatable && !system.isTriangulatable) return false;
+
+      // Filter by triangulation type
+      if (
+        triangulationFilter === "direct" &&
+        system.triangulationType === "via_bookspam"
+      )
+        return false;
+      if (
+        triangulationFilter === "bookspam" &&
+        system.triangulationType !== "via_bookspam"
+      )
+        return false;
+
       return true;
     })
     .sort(([, a], [, b]) => b.totalValue - a.totalValue);
@@ -52,15 +66,62 @@
     return "bg-green-500";
   }
 
+  function getTriangulationClass(system) {
+    if (!system.isTriangulatable) return "bg-red-500/20 text-red-400";
+
+    switch (system.triangulationType) {
+      case "at_celestial":
+      case "near_celestial":
+      case "direct":
+        return "bg-green-500/20 text-green-400";
+      case "via_bookspam":
+        return "bg-yellow-500/20 text-yellow-400";
+      default:
+        return "bg-red-500/20 text-red-400";
+    }
+  }
+
+  function getTriangulationIcon(system) {
+    if (!system.isTriangulatable) return "×";
+
+    switch (system.triangulationType) {
+      case "at_celestial":
+        return "◎"; // Circle with dot
+      case "near_celestial":
+        return "○"; // Circle
+      case "direct":
+      case "via_bookspam":
+        return "✓"; // Checkmark
+      default:
+        return "×";
+    }
+  }
+
+  function getTriangulationTitle(system) {
+    if (!system.isTriangulatable) return "Cannot be triangulated";
+
+    switch (system.triangulationType) {
+      case "at_celestial":
+        return "At celestial";
+      case "near_celestial":
+        return `Near celestial: ${system.nearestCelestial}`;
+      case "direct":
+        return "Direct triangulation possible";
+      case "via_bookspam":
+        return "Triangulation possible (requires bookspamming)";
+      default:
+        return "Cannot be triangulated";
+    }
+  }
+
   function openWreckField(system, event) {
     event.stopPropagation();
     dispatch("openWreckField", {
       wrecks: system.wrecks,
       totalValue: system.totalValue,
-      nearestCelestial: {
-        type: "station",
-        name: system.nearestCelestial,
-      },
+      nearestCelestial: system.nearestCelestial,
+      triangulationType: system.triangulationType,
+      triangulationPoints: system.triangulationPoints,
     });
   }
 
@@ -143,6 +204,7 @@
   <div class="flex justify-between items-center mb-4">
     <h2 class="text-xl font-bold text-white">T2 Salvage Fields</h2>
     <div class="flex gap-4 items-center">
+      <!-- Security Status Dropdown -->
       <div class="relative">
         <button
           class="px-3 py-1.5 bg-eve-dark border border-eve-secondary/30 text-white rounded flex items-center gap-2"
@@ -173,6 +235,19 @@
         {/if}
       </div>
 
+      <!-- Triangulation Filter -->
+      <div class="relative">
+        <select
+          class="px-3 py-1.5 bg-eve-dark border border-eve-secondary/30 text-white rounded"
+          bind:value={triangulationFilter}
+        >
+          <option value="all">All Triangulations</option>
+          <option value="direct">Direct Only</option>
+          <option value="bookspam">Bookspam Only</option>
+        </select>
+      </div>
+
+      <!-- Min Value Input -->
       <div class="flex items-center gap-2">
         <label for="min-value" class="text-gray-300 whitespace-nowrap">
           Min Value:
@@ -184,6 +259,8 @@
           />
         </label>
       </div>
+
+      <!-- Triangulatable Checkbox -->
       <label for="triangulatable" class="flex items-center gap-2 text-gray-300">
         <input
           id="triangulatable"
@@ -234,15 +311,15 @@
             >
               <td class="px-4 py-3 text-white">{system.systemName}</td>
               <td class="px-4 py-3 text-gray-300">{system.nearestCelestial}</td>
-              <td class="px-4 py-3 text-gray-300 capitalize"
-                >{system.securityType || "unknown"}</td
-              >
-              <td class="px-4 py-3 text-gray-300"
-                >{system.wrecks.length} wrecks</td
-              >
-              <td class="px-4 py-3 text-eve-accent"
-                >{formatValue(system.totalValue)}</td
-              >
+              <td class="px-4 py-3 text-gray-300 capitalize">
+                {system.securityType || "unknown"}
+              </td>
+              <td class="px-4 py-3 text-gray-300">
+                {system.wrecks.length} wrecks
+              </td>
+              <td class="px-4 py-3 text-eve-accent">
+                {formatValue(system.totalValue)}
+              </td>
               <td class="px-4 py-3 relative">
                 <div class="text-gray-300">{timeLeft}m</div>
                 <div
@@ -254,11 +331,12 @@
               </td>
               <td class="px-4 py-3">
                 <span
-                  class="inline-flex items-center justify-center w-6 h-6 rounded-full {system.isTriangulatable
-                    ? 'bg-green-500/20 text-green-400'
-                    : 'bg-red-500/20 text-red-400'}"
+                  class="inline-flex items-center justify-center w-6 h-6 rounded-full {getTriangulationClass(
+                    system
+                  )}"
+                  title={getTriangulationTitle(system)}
                 >
-                  {system.isTriangulatable ? "✓" : "×"}
+                  {getTriangulationIcon(system)}
                 </span>
               </td>
             </tr>

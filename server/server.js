@@ -1718,7 +1718,8 @@ function calculatePinpoints(celestials, killPosition) {
   const THRESHOLDS = {
     AT_CELESTIAL: 10000, // 10km
     NEAR_CELESTIAL: 10000000, // 10,000km
-    MAX_BOX_SIZE: KM_PER_AU * 100,
+    MAX_BOX_SIZE: KM_PER_AU * 1000, // Increased to 1000 AU for bookspamming
+    EPSILON: 0.01, // Increased epsilon for numerical stability
   };
 
   // Early validation
@@ -1730,6 +1731,7 @@ function calculatePinpoints(celestials, killPosition) {
       atCelestial: false,
       nearestCelestial: null,
       triangulationPossible: false,
+      triangulationType: null,
     };
   }
 
@@ -1738,6 +1740,7 @@ function calculatePinpoints(celestials, killPosition) {
   let minDistance = Infinity;
   let bestPoints = [];
   let minVolume = Infinity;
+  let triangulationType = null;
 
   celestials.forEach((celestial) => {
     if (celestial.id === "killmail" || !celestial.itemname) return;
@@ -1762,7 +1765,7 @@ function calculatePinpoints(celestials, killPosition) {
     }
   });
 
-  // If we're at or very near a celestial, no need for tetrahedron
+  // If we're at or very near a celestial
   if (nearest && minDistance <= THRESHOLDS.AT_CELESTIAL) {
     return {
       hasTetrahedron: false,
@@ -1770,6 +1773,7 @@ function calculatePinpoints(celestials, killPosition) {
       atCelestial: true,
       nearestCelestial: nearest,
       triangulationPossible: true,
+      triangulationType: "at_celestial",
     };
   }
 
@@ -1780,6 +1784,7 @@ function calculatePinpoints(celestials, killPosition) {
       atCelestial: false,
       nearestCelestial: nearest,
       triangulationPossible: true,
+      triangulationType: "near_celestial",
     };
   }
 
@@ -1794,11 +1799,11 @@ function calculatePinpoints(celestials, killPosition) {
 
   // Need at least 4 celestials for tetrahedron
   if (validCelestials.length >= 4) {
-    // Try to find tetrahedron containing kill point
-    for (let i = 0; i < Math.min(validCelestials.length - 3, 10); i++) {
-      for (let j = i + 1; j < Math.min(validCelestials.length - 2, 11); j++) {
-        for (let k = j + 1; k < Math.min(validCelestials.length - 1, 12); k++) {
-          for (let l = k + 1; l < Math.min(validCelestials.length, 13); l++) {
+    // Try all possible tetrahedrons (removed arbitrary limit)
+    for (let i = 0; i < validCelestials.length - 3; i++) {
+      for (let j = i + 1; j < validCelestials.length - 2; j++) {
+        for (let k = j + 1; k < validCelestials.length - 1; k++) {
+          for (let l = k + 1; l < validCelestials.length; l++) {
             const tetraPoints = [
               validCelestials[i],
               validCelestials[j],
@@ -1819,15 +1824,20 @@ function calculatePinpoints(celestials, killPosition) {
             if (
               isPointInTetrahedron(
                 killPosition,
-                tetraPoints.map((p) => ({ x: p.x, y: p.y, z: p.z }))
+                tetraPoints,
+                THRESHOLDS.EPSILON
               )
             ) {
               const volume = calculateTetrahedronVolume(
                 tetraPoints.map((p) => ({ x: p.x, y: p.y, z: p.z }))
               );
-              if (volume < minVolume && volume < THRESHOLDS.MAX_BOX_SIZE) {
+
+              // Accept larger volumes but track if it requires bookspamming
+              if (volume < minVolume) {
                 minVolume = volume;
                 bestPoints = tetraVectors;
+                triangulationType =
+                  volume < THRESHOLDS.MAX_BOX_SIZE ? "direct" : "via_bookspam";
               }
             }
           }
@@ -1850,6 +1860,7 @@ function calculatePinpoints(celestials, killPosition) {
         atCelestial: false,
         nearestCelestial: nearest,
         triangulationPossible: true,
+        triangulationType: triangulationType,
       };
     }
   }
@@ -1861,7 +1872,72 @@ function calculatePinpoints(celestials, killPosition) {
     atCelestial: false,
     nearestCelestial: nearest,
     triangulationPossible: nearest && minDistance <= THRESHOLDS.NEAR_CELESTIAL,
+    triangulationType: null,
   };
+}
+
+function calculateBarycentricCoordinates(p, a, b, c, d) {
+  // Convert vertices to vectors
+  const vap = subtractVectors(p, a);
+  const vbp = subtractVectors(p, b);
+  const vcp = subtractVectors(p, c);
+  const vdp = subtractVectors(p, d);
+
+  const vab = subtractVectors(b, a);
+  const vac = subtractVectors(c, a);
+  const vad = subtractVectors(d, a);
+
+  // Calculate volume of the entire tetrahedron
+  const totalVolume = Math.abs(dotProduct(crossProduct(vab, vac), vad) / 6.0);
+
+  if (totalVolume === 0) return null; // Degenerate tetrahedron
+
+  // Calculate volumes of sub-tetrahedra formed with the point
+  const v1 = Math.abs(dotProduct(crossProduct(vbp, vcp), vdp)) / 6.0;
+  const v2 = Math.abs(dotProduct(crossProduct(vap, vcp), vdp)) / 6.0;
+  const v3 = Math.abs(dotProduct(crossProduct(vap, vbp), vdp)) / 6.0;
+  const v4 = Math.abs(dotProduct(crossProduct(vap, vbp), vcp)) / 6.0;
+
+  // Calculate barycentric coordinates
+  return {
+    a: v1 / totalVolume,
+    b: v2 / totalVolume,
+    c: v3 / totalVolume,
+    d: v4 / totalVolume,
+    total: (v1 + v2 + v3 + v4) / totalVolume,
+  };
+}
+
+function isPointInTetrahedron(point, tetraPoints, epsilon = 0.01) {
+  const p = {
+    x: parseFloat(point.x),
+    y: parseFloat(point.y),
+    z: parseFloat(point.z),
+  };
+
+  const [a, b, c, d] = tetraPoints.map((vertex) => ({
+    x: parseFloat(vertex.x),
+    y: parseFloat(vertex.y),
+    z: parseFloat(vertex.z),
+  }));
+
+  const coords = calculateBarycentricCoordinates(p, a, b, c, d);
+  if (!coords) return false;
+
+  // Check if barycentric coordinates sum to approximately 1
+  // and each coordinate is between 0 and 1 (with epsilon tolerance)
+  const isValid =
+    Math.abs(coords.total - 1.0) < epsilon &&
+    coords.a >= -epsilon &&
+    coords.a <= 1 + epsilon &&
+    coords.b >= -epsilon &&
+    coords.b <= 1 + epsilon &&
+    coords.c >= -epsilon &&
+    coords.c <= 1 + epsilon &&
+    coords.d >= -epsilon &&
+    coords.d <= 1 + epsilon;
+
+  return isValid;
 }
 
 function calculateTetrahedronVolume(points) {
@@ -1883,45 +1959,6 @@ function calculateTetrahedronVolume(points) {
     ) / 6;
 
   return volume;
-}
-
-function isPointInTetrahedron(point, tetraPoints) {
-  const [a, b, c, d] = tetraPoints;
-
-  const p = {
-    x: parseFloat(point.x),
-    y: parseFloat(point.y),
-    z: parseFloat(point.z),
-  };
-
-  const vap = subtractVectors(p, a);
-  const vbp = subtractVectors(p, b);
-  const vcp = subtractVectors(p, c);
-  const vdp = subtractVectors(p, d);
-
-  const vab = subtractVectors(b, a);
-  const vac = subtractVectors(c, a);
-  const vad = subtractVectors(d, a);
-
-  const va6 = calculateTetrahedronVolume([a, b, c, d]);
-  const v1 = dotProduct(crossProduct(vab, vac), vad);
-
-  const v2 = dotProduct(crossProduct(vap, vcp), vdp) / v1;
-  const v3 = dotProduct(crossProduct(vab, vap), vdp) / v1;
-  const v4 = dotProduct(crossProduct(vap, vac), vbp) / v1;
-  const v5 = 1 - v2 - v3 - v4;
-
-  const epsilon = 0.0001;
-  return (
-    v2 >= -epsilon &&
-    v2 <= 1 + epsilon &&
-    v3 >= -epsilon &&
-    v3 <= 1 + epsilon &&
-    v4 >= -epsilon &&
-    v4 <= 1 + epsilon &&
-    v5 >= -epsilon &&
-    v5 <= 1 + epsilon
-  );
 }
 
 function subtractVectors(a, b) {
