@@ -8,6 +8,7 @@
   import { killmails, settings } from "./settingsStore.js";
   import WreckFieldDialog from "./WreckFieldDialog.svelte";
   import { createEventDispatcher } from "svelte";
+  import ContextMenu from "./ContextMenu.svelte";
 
   const dispatch = createEventDispatcher();
 
@@ -16,6 +17,14 @@
   let selectedSystem = null;
   let cleanupInterval;
   let showSecurityDropdown = false;
+
+  // Context menu state
+  let contextMenu = {
+    show: false,
+    x: 0,
+    y: 0,
+    options: [],
+  };
 
   // Filter and sort systems
   $: filteredSystems = $filteredSalvageFields
@@ -53,6 +62,69 @@
         name: system.nearestCelestial,
       },
     });
+  }
+
+  async function setDestination(systemId, clearOthers = true) {
+    try {
+      const response = await fetch("/api/session", {
+        credentials: "include",
+      });
+      const data = await response.json();
+
+      if (!data.user?.access_token) {
+        console.error("User not authenticated with EVE SSO");
+        return;
+      }
+
+      const result = await fetch(
+        `https://esi.evetech.net/latest/ui/autopilot/waypoint/?add_to_beginning=false&clear_other_waypoints=${clearOthers}&datasource=tranquility&destination_id=${systemId}`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${data.user.access_token}`,
+          },
+        }
+      );
+
+      if (!result.ok) {
+        throw new Error("Failed to set destination");
+      }
+    } catch (error) {
+      console.error("Error setting destination:", error);
+    }
+  }
+
+  function handleContextMenu(event, systemId) {
+    event.preventDefault();
+    event.stopPropagation();
+
+    const row = event.currentTarget;
+    const tableBounds = row.closest("table").getBoundingClientRect();
+
+    const x = event.clientX - tableBounds.left;
+    const y = event.clientY - tableBounds.top;
+
+    contextMenu = {
+      show: true,
+      x,
+      y,
+      options: [
+        {
+          label: "Set Destination",
+          action: () => setDestination(systemId, true),
+        },
+        {
+          label: "Add Waypoint",
+          action: () => setDestination(systemId, false),
+        },
+      ],
+    };
+  }
+
+  function handleMenuSelect(event) {
+    const option = event.detail;
+    option.action();
+    contextMenu.show = false;
   }
 
   onMount(() => {
@@ -151,6 +223,7 @@
             <tr
               class="border-t border-eve-secondary/10 bg-eve-dark/40 hover:bg-eve-dark/60 transition-colors cursor-pointer"
               on:click={(e) => openWreckField(system, e)}
+              on:contextmenu={(e) => handleContextMenu(e, systemId)}
               on:keydown={(e) => {
                 if (e.key === "Enter" || e.key === " ") {
                   openWreckField(system, e);
@@ -203,6 +276,14 @@
     onClose={() => (selectedSystem = null)}
   />
 {/if}
+
+<ContextMenu
+  show={contextMenu.show}
+  x={contextMenu.x}
+  y={contextMenu.y}
+  options={contextMenu.options}
+  on:select={handleMenuSelect}
+/>
 
 <style>
   .form-checkbox {

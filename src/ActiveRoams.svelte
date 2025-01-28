@@ -2,6 +2,7 @@
 <script>
   import { onMount, onDestroy } from "svelte";
   import roamManager, { activeRoams } from "./roamManager.js";
+  import ContextMenu from "./ContextMenu.svelte";
 
   // Subscribe to active roams store
   $: roams = $activeRoams;
@@ -77,6 +78,79 @@
     if (systemCount > 2 || memberCount > 5) return "#ffd700";
     return "#90ee90";
   }
+
+  let contextMenu = {
+    show: false,
+    x: 0,
+    y: 0,
+    options: [],
+  };
+
+  // Add setDestination function
+  async function setDestination(systemId, clearOthers = true) {
+    try {
+      const response = await fetch("/api/session", {
+        credentials: "include",
+      });
+      const data = await response.json();
+
+      if (!data.user?.access_token) {
+        console.error("User not authenticated with EVE SSO");
+        return;
+      }
+
+      const result = await fetch(
+        `https://esi.evetech.net/latest/ui/autopilot/waypoint/?add_to_beginning=false&clear_other_waypoints=${clearOthers}&datasource=tranquility&destination_id=${systemId}`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${data.user.access_token}`,
+          },
+        }
+      );
+
+      if (!result.ok) {
+        throw new Error("Failed to set destination");
+      }
+    } catch (error) {
+      console.error("Error setting destination:", error);
+    }
+  }
+
+  // Add context menu handlers
+  function handleContextMenu(event, roam) {
+    event.preventDefault();
+
+    // Get the container element's position
+    const container = event.currentTarget;
+    const containerBounds = container.getBoundingClientRect();
+
+    // Calculate position relative to the container
+    const x = event.clientX - containerBounds.left;
+    const y = event.clientY - containerBounds.top;
+
+    contextMenu = {
+      show: true,
+      x,
+      y,
+      options: [
+        {
+          label: "Set Destination",
+          action: () => setDestination(roam.lastSystem.id, true),
+        },
+        {
+          label: "Add Waypoint",
+          action: () => setDestination(roam.lastSystem.id, false),
+        },
+      ],
+    };
+  }
+
+  function handleMenuSelect(event) {
+    const option = event.detail;
+    option.action();
+    contextMenu.show = false;
+  }
 </script>
 
 <div class="active-roams">
@@ -104,6 +178,7 @@
             );
           }
         }}
+        on:contextmenu|preventDefault={(e) => handleContextMenu(e, roam)}
       >
         <div class="roam-header">
           <h3>{roam.lastSystem?.name || "Unknown System"}</h3>
@@ -154,6 +229,14 @@
     {/if}
   </div>
 </div>
+
+<ContextMenu
+  show={contextMenu.show}
+  x={contextMenu.x}
+  y={contextMenu.y}
+  options={contextMenu.options}
+  on:select={handleMenuSelect}
+/>
 
 <style>
   .active-roams {

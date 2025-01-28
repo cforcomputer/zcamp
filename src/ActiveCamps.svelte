@@ -3,6 +3,7 @@
   import CampCrusher from "./CampCrusher.svelte";
   import campManager, { activeCamps } from "./campManager.js";
   import { CAMP_PROBABILITY_FACTORS, CAPSULE_ID } from "./constants.js";
+  import ContextMenu from "./ContextMenu.svelte";
 
   const { THREAT_SHIPS } = CAMP_PROBABILITY_FACTORS;
 
@@ -42,6 +43,82 @@
     if (minutes < 1) return "just now";
     if (minutes === 1) return "1 minute ago";
     return `${minutes} minutes ago`;
+  }
+
+  // Add context menu state
+  let contextMenu = {
+    show: false,
+    x: 0,
+    y: 0,
+    options: [],
+  };
+
+  // Add setDestination function
+  async function setDestination(systemId, clearOthers = true) {
+    try {
+      const response = await fetch("/api/session", {
+        credentials: "include",
+      });
+      const data = await response.json();
+
+      if (!data.user?.access_token) {
+        console.error("User not authenticated with EVE SSO");
+        return;
+      }
+
+      const result = await fetch(
+        `https://esi.evetech.net/latest/ui/autopilot/waypoint/?add_to_beginning=false&clear_other_waypoints=${clearOthers}&datasource=tranquility&destination_id=${systemId}`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${data.user.access_token}`,
+          },
+        }
+      );
+
+      if (!result.ok) {
+        throw new Error("Failed to set destination");
+      }
+    } catch (error) {
+      console.error("Error setting destination:", error);
+    }
+  }
+
+  // Add context menu handler
+  function handleContextMenu(event, camp) {
+    event.preventDefault();
+
+    // Get the container element's position
+    const container =
+      event.currentTarget.closest(".eve-card") ||
+      event.currentTarget.closest("table");
+    const containerBounds = container.getBoundingClientRect();
+
+    // Calculate position relative to the container
+    const x = event.clientX - containerBounds.left;
+    const y = event.clientY - containerBounds.top;
+
+    contextMenu = {
+      show: true,
+      x,
+      y,
+      options: [
+        {
+          label: "Set Destination",
+          action: () => setDestination(camp.systemId, true),
+        },
+        {
+          label: "Add Waypoint",
+          action: () => setDestination(camp.systemId, false),
+        },
+      ],
+    };
+  }
+
+  function handleMenuSelect(event) {
+    const option = event.detail;
+    option.action();
+    contextMenu.show = false;
   }
 
   function getProbabilityColor(probability) {
@@ -163,10 +240,12 @@
     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
       {#each camps as camp}
         <div class="group relative">
+          <!-- svelte-ignore a11y-no-static-element-interactions -->
           <div
             class="overflow-hidden rounded-lg {camp.state === 'CRASHED'
               ? 'opacity-70 grayscale-[0.7]'
               : ''}"
+            on:contextmenu|preventDefault={(e) => handleContextMenu(e, camp)}
           >
             <!-- Title Bar -->
             <div
@@ -376,6 +455,7 @@
             <tr
               class="border-b border-eve-secondary/30 hover:bg-eve-secondary/20 cursor-pointer"
               on:click={() => openCampHistory(camp)}
+              on:contextmenu|preventDefault={(e) => handleContextMenu(e, camp)}
               on:keypress={(e) => {
                 if (e.key === "Enter" || e.key === " ") {
                   openCampHistory(camp);
@@ -398,7 +478,7 @@
               <td class="px-4 py-2">
                 {camp.kills.length} kills
                 {#if camp.metrics?.podKills > 0}
-                  {camp.metrics.podKills} pods
+                  ({camp.metrics.podKills} pods)
                 {/if}
               </td>
               <td class="px-4 py-2 text-eve-danger">
@@ -426,6 +506,14 @@
     </div>
   {/if}
 </div>
+
+<ContextMenu
+  show={contextMenu.show}
+  x={contextMenu.x}
+  y={contextMenu.y}
+  options={contextMenu.options}
+  on:select={handleMenuSelect}
+/>
 
 <style>
   :global(.killmail-section) {

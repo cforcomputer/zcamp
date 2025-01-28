@@ -98,14 +98,28 @@
       y: event.clientY,
     });
 
-    // Ensure these coordinates are within the viewport
-    const x = Math.min(event.clientX, window.innerWidth - 150); // 150 is approximate menu width
-    const y = Math.min(event.clientY, window.innerHeight - 100); // 100 is approximate menu height
+    // Get the row element's position
+    const row = event.currentTarget;
+    const rowBounds = row.getBoundingClientRect();
+
+    // Get the container element's position
+    const container = scrollContainer;
+    const containerBounds = container.getBoundingClientRect();
+
+    // Calculate position relative to the container
+    const x = event.clientX - containerBounds.left;
+    const y = event.clientY - containerBounds.top + container.scrollTop;
+
+    // Ensure menu doesn't go off-screen
+    const menuWidth = 150; // Approximate menu width
+    const menuHeight = 100; // Approximate menu height
+    const maxX = containerBounds.width - menuWidth;
+    const maxY = containerBounds.height - menuHeight;
 
     contextMenu = {
       show: true,
-      x,
-      y,
+      x: Math.min(x, maxX),
+      y: Math.min(y, maxY),
       systemId: killmail.killmail.solar_system_id,
       options: [
         {
@@ -199,7 +213,9 @@
   }
 </script>
 
-<div class="flex flex-col bg-eve-dark/95 rounded-lg shadow-lg overflow-hidden">
+<div
+  class="flex flex-col bg-eve-dark/95 rounded-lg shadow-lg overflow-hidden relative"
+>
   <div class="overflow-x-auto">
     <table class="w-full"></table>
   </div>
@@ -217,10 +233,8 @@
           {#each sortedKillmails as killmail (killmail.killID)}
             <tr
               class="border-b border-eve-secondary/30 hover:bg-eve-secondary/20 transition-colors"
-              on:contextmenu|preventDefault|stopPropagation={(e) => {
-                console.log("Right click detected"); // Debug log
-                handleContextMenu(e, killmail);
-              }}
+              on:contextmenu|preventDefault={(e) =>
+                handleContextMenu(e, killmail)}
             >
               <!-- Main row content (clickable) -->
               <td

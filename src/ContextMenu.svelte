@@ -8,17 +8,13 @@
   export let show = false;
   export let options = [];
 
-  $: console.log("ContextMenu props updated:", { show, x, y, options }); // Debug log
-
   function handleClick(option) {
-    console.log("Option clicked:", option); // Debug log
     dispatch("select", option);
     show = false;
   }
 
   function handleClickOutside(event) {
     if (show && !event.target.closest(".context-menu")) {
-      console.log("Click outside detected"); // Debug log
       show = false;
     }
   }
@@ -49,13 +45,13 @@
 
 <style>
   .context-menu {
-    position: fixed;
+    position: absolute; /* Changed from fixed to absolute */
     background: rgba(40, 40, 40, 0.95);
     border: 1px solid rgba(255, 255, 255, 0.1);
     border-radius: 4px;
     padding: 4px 0;
     min-width: 120px;
-    z-index: 9999; /* Ensure it's above other content */
+    z-index: 9999;
     box-shadow: 0 2px 10px rgba(0, 0, 0, 0.5);
   }
 
