@@ -4,6 +4,9 @@ export const CAMP_TIMEOUT = 40 * 60 * 1000; // 40 minutes
 export const DECAY_START = 20 * 60 * 1000; // 20 minutes
 export const CAPSULE_ID = 670;
 
+//server.js AU
+export const KM_PER_AU = 149597870.7;
+
 export const SALVAGE_VALUES = {
   frigate: 3_000_000,
   destroyer: 6_000_000,
@@ -16,6 +19,14 @@ export const SALVAGE_VALUES = {
   structure: 50_000_000,
   // Default to frigate value for unknown types
   unknown: 3_000_000,
+};
+
+export const THRESHOLDS = {
+  AT_CELESTIAL: 10000, // 10km
+  DIRECT_WARP: 1000000, // 1000km
+  NEAR_CELESTIAL: 10000000, // 10,000km
+  MAX_BOX_SIZE: KM_PER_AU * 1000,
+  EPSILON: 0.01,
 };
 
 export const CAMP_PROBABILITY_FACTORS = {

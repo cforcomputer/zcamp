@@ -12,6 +12,7 @@ import session from "express-session";
 import RedisStore from "connect-redis";
 import { createClient as createRedisClient } from "redis";
 import { compare } from "bcrypt";
+import { THRESHOLDS } from "../src/constants";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -1713,15 +1714,6 @@ app.get("/api/celestials/:killmailId", async (req, res) => {
 });
 
 function calculatePinpoints(celestials, killPosition) {
-  // Constants
-  const KM_PER_AU = 149597870.7;
-  const THRESHOLDS = {
-    AT_CELESTIAL: 10000, // 10km
-    NEAR_CELESTIAL: 10000000, // 10,000km
-    MAX_BOX_SIZE: KM_PER_AU * 1000, // Increased to 1000 AU for bookspamming
-    EPSILON: 0.01, // Increased epsilon for numerical stability
-  };
-
   // Early validation
   if (!killPosition?.x || !killPosition?.y || !killPosition?.z) {
     console.error("Invalid kill position:", killPosition);
@@ -1766,26 +1758,39 @@ function calculatePinpoints(celestials, killPosition) {
   });
 
   // If we're at or very near a celestial
-  if (nearest && minDistance <= THRESHOLDS.AT_CELESTIAL) {
-    return {
-      hasTetrahedron: false,
-      points: [],
-      atCelestial: true,
-      nearestCelestial: nearest,
-      triangulationPossible: true,
-      triangulationType: "at_celestial",
-    };
-  }
+  if (nearest) {
+    if (minDistance <= THRESHOLDS.AT_CELESTIAL) {
+      return {
+        hasTetrahedron: false,
+        points: [],
+        atCelestial: true,
+        nearestCelestial: nearest,
+        triangulationPossible: true,
+        triangulationType: "at_celestial",
+      };
+    }
 
-  if (nearest && minDistance <= THRESHOLDS.NEAR_CELESTIAL) {
-    return {
-      hasTetrahedron: false,
-      points: [],
-      atCelestial: false,
-      nearestCelestial: nearest,
-      triangulationPossible: true,
-      triangulationType: "near_celestial",
-    };
+    if (minDistance <= THRESHOLDS.DIRECT_WARP) {
+      return {
+        hasTetrahedron: false,
+        points: [],
+        atCelestial: false,
+        nearestCelestial: nearest,
+        triangulationPossible: true,
+        triangulationType: "direct_warp",
+      };
+    }
+
+    if (minDistance <= THRESHOLDS.NEAR_CELESTIAL) {
+      return {
+        hasTetrahedron: false,
+        points: [],
+        atCelestial: false,
+        nearestCelestial: nearest,
+        triangulationPossible: true,
+        triangulationType: "near_celestial",
+      };
+    }
   }
 
   // Process celestials for tetrahedron calculation

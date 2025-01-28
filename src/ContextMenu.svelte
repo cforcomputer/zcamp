@@ -27,6 +27,7 @@
 </script>
 
 {#if show}
+  <!-- svelte-ignore a11y-no-static-element-interactions -->
   <div
     class="context-menu"
     style="left: {x}px; top: {y}px;"
@@ -46,7 +47,7 @@
 <style>
   .context-menu {
     position: absolute; /* Changed from fixed to absolute */
-    background: rgba(40, 40, 40, 0.95);
+    background: rgba(40, 40, 40);
     border: 1px solid rgba(255, 255, 255, 0.1);
     border-radius: 4px;
     padding: 4px 0;

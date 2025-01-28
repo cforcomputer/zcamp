@@ -137,19 +137,22 @@
     if (!killmail?.pinpoints) return "No triangulation data";
 
     if (killmail.pinpoints.atCelestial) {
-      return "At celestial";
-    } else if (
-      killmail.pinpoints.triangulationPossible &&
-      killmail.pinpoints.nearestCelestial
-    ) {
-      return `Near celestial: ${killmail.pinpoints.nearestCelestial.name}`;
-    } else if (killmail.pinpoints.hasTetrahedron) {
-      return killmail.pinpoints.triangulationType === "via_bookspam"
-        ? "Triangulation possible (requires bookspamming)"
-        : "Triangulation possible (direct)";
-    } else {
-      return "Cannot be triangulated";
+      return `At celestial: ${killmail.pinpoints.nearestCelestial.name}`;
     }
+
+    if (killmail.pinpoints.triangulationType === "direct_warp") {
+      return `Direct warp to ${killmail.pinpoints.nearestCelestial.name} (${(killmail.pinpoints.nearestCelestial.distance / 1000).toFixed(2)} km)`;
+    }
+
+    if (killmail.pinpoints.triangulationType === "near_celestial") {
+      return `Near celestial: ${killmail.pinpoints.nearestCelestial.name} (${(killmail.pinpoints.nearestCelestial.distance / 1000).toFixed(2)} km)`;
+    }
+
+    if (killmail.pinpoints.triangulationType === "via_bookspam") {
+      return "Triangulation possible (requires bookspamming)";
+    }
+
+    return "Cannot be triangulated";
   }
 
   function formatDroppedValue(value) {
@@ -195,17 +198,37 @@
     }
   }
 
+  function getTriangulationIcon(killmail) {
+    if (!killmail?.pinpoints) return "○"; // Empty circle for unknown/error
+
+    switch (killmail.pinpoints.triangulationType) {
+      case "at_celestial":
+        return "◉"; // Filled circle for exact location
+      case "direct_warp":
+        return "◈"; // Diamond for direct warp
+      case "near_celestial":
+        return "◎"; // Double circle for nearby
+      case "via_bookspam":
+        return "◇"; // Empty diamond for bookmarks needed
+      default:
+        return "×"; // Cross for cannot triangulate
+    }
+  }
+
   function getTriangulationClass(killmail) {
     if (!killmail?.pinpoints) return "bg-red-500/20 text-red-400";
 
-    if (killmail.pinpoints.triangulationPossible) {
-      if (killmail.pinpoints.triangulationType === "via_bookspam") {
+    switch (killmail.pinpoints.triangulationType) {
+      case "at_celestial":
+      case "direct_warp":
+        return "bg-green-500/20 text-green-400";
+      case "near_celestial":
         return "bg-yellow-500/20 text-yellow-400";
-      }
-      return "bg-green-500/20 text-green-400";
+      case "via_bookspam":
+        return "bg-pink-500/20 text-pink-400";
+      default:
+        return "bg-red-500/20 text-red-400";
     }
-
-    return "bg-red-500/20 text-red-400";
   }
 
   onMount(() => {
@@ -280,7 +303,7 @@
                     )}"
                     title={getTriangulationStatus(killmail)}
                   >
-                    {killmail?.pinpoints?.triangulationPossible ? "✓" : "×"}
+                    {getTriangulationIcon(killmail)}
                   </span>
                 </div>
               </td>
