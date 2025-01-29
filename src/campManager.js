@@ -269,6 +269,25 @@ class CampManager extends EventEmitter {
       `Total threat ship bonus: +${(threatShipScore * 100).toFixed(1)}%`
     );
 
+    // General smartbomb activity check
+    if (camp.type === "smartbomb") {
+      probability += 0.4; // Add 40% probability for any smartbomb activity
+      log.push("Smartbomb activity detected: +40%");
+
+      // Additional bonus for specific smartbomb ships
+      const hasSmartbombShip = camp.kills.some((kill) =>
+        kill.killmail.attackers.some(
+          (attacker) =>
+            CAMP_PROBABILITY_FACTORS.SMARTBOMB_SHIPS[attacker.ship_type_id]
+        )
+      );
+
+      if (hasSmartbombShip) {
+        probability += 0.2; // Additional 20% for dedicated smartbomb ships
+        log.push("Dedicated smartbomb ship bonus: +20%");
+      }
+    }
+
     // Known camping location bonus
     const systemData = CAMP_PROBABILITY_FACTORS.PERMANENT_CAMPS[camp.systemId];
     if (

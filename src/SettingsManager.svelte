@@ -1,5 +1,5 @@
 <script>
-  import { createEventDispatcher, onMount, afterUpdate } from "svelte";
+  import { createEventDispatcher, onMount } from "svelte";
   import {
     settings,
     filterLists,
@@ -17,7 +17,7 @@
   let newListFilterType = "";
   let selectedProfile = null;
   let error = null;
-  let settingsManagerHeight = "calc(100vh - 120px)"; // Default height
+  let settingsManagerHeight = "calc(100vh - 120px)";
 
   $: localSettings = $settings;
   $: localProfiles = $profiles;
@@ -64,13 +64,10 @@
 
     socket.emit("fetchProfiles");
 
-    // Calculate height on mount and resize
     const handleResize = () => {
-      const headerHeight = document.querySelector(".header")?.offsetHeight || 0; // Replace '.header' with the actual selector for your header
-      const footerHeight = document.querySelector(".footer")?.offsetHeight || 0; // Replace '.footer' with the actual selector for your footer
-      settingsManagerHeight = `calc(100vh - ${
-        headerHeight + footerHeight + 40
-      }px)`; // 40px additional margin
+      const headerHeight = document.querySelector(".header")?.offsetHeight || 0;
+      const footerHeight = document.querySelector(".footer")?.offsetHeight || 0;
+      settingsManagerHeight = `calc(100vh - ${headerHeight + footerHeight + 40}px)`;
     };
 
     handleResize();
@@ -122,27 +119,6 @@
     }
   }
 
-  async function createFilterList() {
-    if (!newListName || !newListIds) return;
-
-    const ids = newListIds.split(",").map((id) => id.trim());
-    const newList = {
-      name: newListName,
-      ids,
-      enabled: false,
-      is_exclude: newListIsExclude,
-      filter_type: newListFilterType,
-    };
-
-    socket.emit("createFilterList", newList);
-
-    // Clear form
-    newListName = "";
-    newListIds = "";
-    newListIsExclude = false;
-    newListFilterType = "";
-  }
-
   function saveProfile(event) {
     const { name } = event.detail;
     if (name) {
@@ -179,7 +155,7 @@
   class="settings-manager overflow-auto"
   style="height: {settingsManagerHeight};"
 >
-  <div class="space-y-8">
+  <div class="space-y-4">
     {#if error}
       <div
         class="bg-eve-danger/20 border border-eve-danger text-eve-danger px-4 py-3 rounded-lg"
@@ -200,403 +176,14 @@
     </div>
 
     {#if localSettings}
-      <div class="bg-eve-card rounded-lg p-6 space-y-4">
+      <!-- Hunter Filters -->
+      <div class="bg-eve-card rounded-lg p-6">
         <h3 class="text-xl font-semibold text-eve-accent mb-4">
-          Basic Filters
+          Hunter Filters
         </h3>
-
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <label class="flex items-center space-x-2">
-            <input
-              type="checkbox"
-              class="form-checkbox text-eve-accent rounded bg-eve-secondary border-eve-accent/50"
-              bind:checked={localSettings.npc_only}
-              on:change={() =>
-                updateSetting("npc_only", localSettings.npc_only)}
-            />
-            <span>NPC Only</span>
-          </label>
-
-          <label class="flex items-center space-x-2">
-            <input
-              type="checkbox"
-              class="form-checkbox text-eve-accent rounded bg-eve-secondary border-eve-accent/50"
-              bind:checked={localSettings.solo}
-              on:change={() => updateSetting("solo", localSettings.solo)}
-            />
-            <span>Solo Only</span>
-          </label>
-
-          <label class="flex items-center space-x-2">
-            <input
-              type="checkbox"
-              class="form-checkbox text-eve-accent rounded bg-eve-secondary border-eve-accent/50"
-              bind:checked={localSettings.awox_only}
-              on:change={() =>
-                updateSetting("awox_only", localSettings.awox_only)}
-            />
-            <span>AWOX Only</span>
-          </label>
-
-          <label class="flex items-center space-x-2">
-            <input
-              type="checkbox"
-              class="form-checkbox text-eve-accent rounded bg-eve-secondary border-eve-accent/50"
-              bind:checked={localSettings.points_enabled}
-              on:change={() =>
-                updateSetting("points_enabled", localSettings.points_enabled)}
-            />
-            <span>Enable Points Filter</span>
-          </label>
-        </div>
-
-        {#if localSettings.points_enabled}
-          <div class="flex items-center space-x-4">
-            <input
-              type="number"
-              class="bg-black/20 text-gray-200 rounded px-3 py-2 w-32 border border-eve-accent/20 focus:border-eve-accent/50 focus:outline-none"
-              bind:value={localSettings.points}
-              on:input={() => updateSetting("points", localSettings.points)}
-              placeholder="Min Points"
-            />
-          </div>
-        {/if}
-      </div>
-
-      <div class="bg-eve-card rounded-lg p-6 space-y-4">
-        <h3 class="text-xl font-semibold text-eve-accent mb-4">
-          Value Filters
-        </h3>
-
-        <div class="space-y-3">
-          <div class="flex items-center space-x-4">
-            <label class="flex items-center space-x-2">
-              <input
-                type="checkbox"
-                class="form-checkbox text-eve-accent rounded bg-eve-secondary border-eve-accent/50"
-                bind:checked={localSettings.dropped_value_enabled}
-                on:change={() =>
-                  updateSetting(
-                    "dropped_value_enabled",
-                    localSettings.dropped_value_enabled
-                  )}
-              />
-              <span>Enable Dropped Value Filter</span>
-            </label>
-
-            <input
-              type="number"
-              class="bg-black/20 text-gray-200 rounded px-3 py-2 w-32 border border-eve-accent/20 focus:border-eve-accent/50 focus:outline-none"
-              bind:value={localSettings.dropped_value}
-              on:input={() =>
-                updateSetting("dropped_value", localSettings.dropped_value)}
-              placeholder="Min Value"
-            />
-          </div>
-
-          <div class="flex items-center space-x-4">
-            <label class="flex items-center space-x-2">
-              <input
-                type="checkbox"
-                class="form-checkbox text-eve-accent rounded bg-eve-secondary border-eve-accent/50"
-                bind:checked={localSettings.total_value_enabled}
-                on:change={() =>
-                  updateSetting(
-                    "total_value_enabled",
-                    localSettings.total_value_enabled
-                  )}
-              />
-              <span>Enable Total Value Filter</span>
-            </label>
-
-            <input
-              type="number"
-              class="bg-black/20 text-gray-200 rounded px-3 py-2 w-32 border border-eve-accent/20 focus:border-eve-accent/50 focus:outline-none"
-              bind:value={localSettings.total_value}
-              on:input={() =>
-                updateSetting("total_value", localSettings.total_value)}
-              placeholder="Min Value"
-            />
-          </div>
-        </div>
-      </div>
-
-      <div class="bg-eve-card rounded-lg p-6 space-y-4">
-        <h3 class="text-xl font-semibold text-eve-accent mb-4">Time Filter</h3>
-
-        <div class="flex items-center space-x-4">
-          <label class="flex items-center space-x-2">
-            <input
-              type="checkbox"
-              class="form-checkbox text-eve-accent rounded bg-eve-secondary border-eve-accent/50"
-              bind:checked={localSettings.time_threshold_enabled}
-              on:change={() =>
-                updateSetting(
-                  "time_threshold_enabled",
-                  localSettings.time_threshold_enabled
-                )}
-            />
-            <span>Enable Time Filter</span>
-          </label>
-
-          {#if localSettings.time_threshold_enabled}
-            <input
-              type="number"
-              class="bg-black/20 text-gray-200 rounded px-3 py-2 w-32 border border-eve-accent/20 focus:border-eve-accent/50 focus:outline-none"
-              bind:value={localSettings.time_threshold}
-              on:input={() =>
-                updateSetting("time_threshold", localSettings.time_threshold)}
-              placeholder="Seconds"
-            />
-          {/if}
-        </div>
-      </div>
-
-      <div class="bg-eve-card rounded-lg p-6 space-y-4">
-        <h3 class="text-xl font-semibold text-eve-accent mb-4">
-          Triangulation Settings
-        </h3>
-
-        <div class="space-y-3">
-          <label class="flex items-center space-x-2">
-            <input
-              type="checkbox"
-              class="form-checkbox text-eve-accent rounded bg-eve-secondary border-eve-accent/50"
-              bind:checked={localSettings.triangulation_filter_enabled}
-              on:change={() =>
-                updateSetting(
-                  "triangulation_filter_enabled",
-                  localSettings.triangulation_filter_enabled
-                )}
-            />
-            <span>Enable Triangulation Filter</span>
-          </label>
-
-          {#if localSettings.triangulation_filter_enabled}
-            <div class="ml-6 space-y-2">
-              <label class="flex items-center space-x-2">
-                <input
-                  type="checkbox"
-                  class="form-checkbox text-eve-accent rounded bg-eve-secondary border-eve-accent/50"
-                  bind:checked={localSettings.triangulation_filter_exclude}
-                  on:change={() =>
-                    updateSetting(
-                      "triangulation_filter_exclude",
-                      localSettings.triangulation_filter_exclude
-                    )}
-                />
-                <span>Exclude Triangulatable Kills</span>
-              </label>
-
-              <label class="flex items-center space-x-2">
-                <input
-                  type="checkbox"
-                  class="form-checkbox text-eve-accent rounded bg-eve-secondary border-eve-accent/50"
-                  bind:checked={localSettings.triangulation_filter_near_stargate}
-                  on:change={() =>
-                    updateSetting(
-                      "triangulation_filter_near_stargate",
-                      localSettings.triangulation_filter_near_stargate
-                    )}
-                />
-                <span>Exclude Near-Stargate Kills</span>
-              </label>
-
-              <label class="flex items-center space-x-2">
-                <input
-                  type="checkbox"
-                  class="form-checkbox text-eve-accent rounded bg-eve-secondary border-eve-accent/50"
-                  bind:checked={localSettings.triangulation_filter_near_celestial}
-                  on:change={() =>
-                    updateSetting(
-                      "triangulation_filter_near_celestial",
-                      localSettings.triangulation_filter_near_celestial
-                    )}
-                />
-                <span>Exclude Near-Celestial Kills</span>
-              </label>
-            </div>
-          {/if}
-        </div>
-      </div>
-
-      <div class="bg-eve-card rounded-lg p-6 space-y-6">
-        <div class="space-y-4">
-          <h3 class="text-xl font-semibold text-eve-accent">
-            Attacker Filters
-          </h3>
-
-          <div class="space-y-3">
-            <label class="flex items-center space-x-2">
-              <input
-                type="checkbox"
-                class="form-checkbox text-eve-accent rounded bg-eve-secondary border-eve-accent/50"
-                bind:checked={localSettings.attacker_alliance_filter_enabled}
-                on:change={() =>
-                  updateSetting(
-                    "attacker_alliance_filter_enabled",
-                    localSettings.attacker_alliance_filter_enabled
-                  )}
-              />
-              <span>Alliance Filter</span>
-            </label>
-
-            {#if localSettings.attacker_alliance_filter_enabled}
-              <input
-                type="text"
-                class="bg-black/20 text-gray-200 rounded px-3 py-2 w-full border border-eve-accent/20 focus:border-eve-accent/50 focus:outline-none"
-                bind:value={localSettings.attacker_alliance_filter}
-                on:input={() =>
-                  updateSetting(
-                    "attacker_alliance_filter",
-                    localSettings.attacker_alliance_filter
-                  )}
-                placeholder="Alliance ID"
-              />
-            {/if}
-
-            <label class="flex items-center space-x-2">
-              <input
-                type="checkbox"
-                class="form-checkbox text-eve-accent rounded bg-eve-secondary border-eve-accent/50"
-                bind:checked={localSettings.attacker_corporation_filter_enabled}
-                on:change={() =>
-                  updateSetting(
-                    "attacker_corporation_filter_enabled",
-                    localSettings.attacker_corporation_filter_enabled
-                  )}
-              />
-              <span>Corporation Filter</span>
-            </label>
-
-            {#if localSettings.attacker_corporation_filter_enabled}
-              <input
-                type="text"
-                class="bg-black/20 text-gray-200 rounded px-3 py-2 w-full border border-eve-accent/20 focus:border-eve-accent/50 focus:outline-none"
-                bind:value={localSettings.attacker_corporation_filter}
-                on:input={() =>
-                  updateSetting(
-                    "attacker_corporation_filter",
-                    localSettings.attacker_corporation_filter
-                  )}
-                placeholder="Corporation ID"
-              />
-            {/if}
-
-            <label class="flex items-center space-x-2">
-              <input
-                type="checkbox"
-                class="form-checkbox text-eve-accent rounded bg-eve-secondary border-eve-accent/50"
-                bind:checked={localSettings.attacker_ship_type_filter_enabled}
-                on:change={() =>
-                  updateSetting(
-                    "attacker_ship_type_filter_enabled",
-                    localSettings.attacker_ship_type_filter_enabled
-                  )}
-              />
-              <span>Ship Type Filter</span>
-            </label>
-
-            {#if localSettings.attacker_ship_type_filter_enabled}
-              <input
-                type="text"
-                class="bg-black/20 text-gray-200 rounded px-3 py-2 w-full border border-eve-accent/20 focus:border-eve-accent/50 focus:outline-none"
-                bind:value={localSettings.attacker_ship_type_filter}
-                on:input={() =>
-                  updateSetting(
-                    "attacker_ship_type_filter",
-                    localSettings.attacker_ship_type_filter
-                  )}
-                placeholder="Ship Type ID"
-              />
-            {/if}
-
-            <label class="flex items-center space-x-2">
-              <input
-                type="checkbox"
-                class="form-checkbox text-eve-accent rounded bg-eve-secondary border-eve-accent/50"
-                bind:checked={localSettings.attacker_capital_filter_enabled}
-                on:change={() =>
-                  updateSetting(
-                    "attacker_capital_filter_enabled",
-                    localSettings.attacker_capital_filter_enabled
-                  )}
-              />
-              <span>Show Only Kills with Capital Ship Attackers</span>
-            </label>
-          </div>
-        </div>
-
-        <div class="space-y-4">
-          <h3 class="text-xl font-semibold text-eve-accent">Victim Filters</h3>
-
-          <div class="space-y-3">
-            <label class="flex items-center space-x-2">
-              <input
-                type="checkbox"
-                class="form-checkbox text-eve-accent rounded bg-eve-secondary border-eve-accent/50"
-                bind:checked={localSettings.victim_alliance_filter_enabled}
-                on:change={() =>
-                  updateSetting(
-                    "victim_alliance_filter_enabled",
-                    localSettings.victim_alliance_filter_enabled
-                  )}
-              />
-              <span>Alliance Filter</span>
-            </label>
-
-            {#if localSettings.victim_alliance_filter_enabled}
-              <input
-                type="text"
-                class="bg-black/20 text-gray-200 rounded px-3 py-2 w-full border border-eve-accent/20 focus:border-eve-accent/50 focus:outline-none"
-                bind:value={localSettings.victim_alliance_filter}
-                on:input={() =>
-                  updateSetting(
-                    "victim_alliance_filter",
-                    localSettings.victim_alliance_filter
-                  )}
-                placeholder="Alliance ID"
-              />
-            {/if}
-
-            <label class="flex items-center space-x-2">
-              <input
-                type="checkbox"
-                class="form-checkbox text-eve-accent rounded bg-eve-secondary border-eve-accent/50"
-                bind:checked={localSettings.victim_corporation_filter_enabled}
-                on:change={() =>
-                  updateSetting(
-                    "victim_corporation_filter_enabled",
-                    localSettings.victim_corporation_filter_enabled
-                  )}
-              />
-              <span>Corporation Filter</span>
-            </label>
-
-            {#if localSettings.victim_corporation_filter_enabled}
-              <input
-                type="text"
-                class="bg-black/20 text-gray-200 rounded px-3 py-2 w-full border border-eve-accent/20 focus:border-eve-accent/50 focus:outline-none"
-                bind:value={localSettings.victim_corporation_filter}
-                on:input={() =>
-                  updateSetting(
-                    "victim_corporation_filter",
-                    localSettings.victim_corporation_filter
-                  )}
-                placeholder="Corporation ID"
-              />
-            {/if}
-          </div>
-        </div>
-      </div>
-
-      <div class="bg-eve-card rounded-lg p-6 space-y-6">
-        <div class="space-y-4">
-          <h3 class="text-xl font-semibold text-eve-accent">
-            Location Filters
-          </h3>
-
-          <div class="space-y-3">
+          <!-- Security Status -->
+          <div class="space-y-2">
             <label class="flex items-center space-x-2">
               <input
                 type="checkbox"
@@ -608,11 +195,10 @@
                     localSettings.location_type_filter_enabled
                   )}
               />
-              <span>Enable Location Type Filter</span>
+              <span>Security Status Filter</span>
             </label>
-
             {#if localSettings.location_type_filter_enabled}
-              <div class="ml-6 grid grid-cols-2 gap-3">
+              <div class="ml-6 grid grid-cols-2 gap-2">
                 {#each Object.entries(localSettings.location_types) as [type, enabled]}
                   <label class="flex items-center space-x-2">
                     <input
@@ -632,37 +218,184 @@
             {/if}
           </div>
 
-          <div class="space-y-3">
+          <!-- Triangulation -->
+          <div class="space-y-2">
             <label class="flex items-center space-x-2">
               <input
                 type="checkbox"
                 class="form-checkbox text-eve-accent rounded bg-eve-secondary border-eve-accent/50"
-                bind:checked={localSettings.solar_system_filter_enabled}
+                bind:checked={localSettings.triangulation_filter_enabled}
                 on:change={() =>
                   updateSetting(
-                    "solar_system_filter_enabled",
-                    localSettings.solar_system_filter_enabled
+                    "triangulation_filter_enabled",
+                    localSettings.triangulation_filter_enabled
                   )}
               />
-              <span>Solar System Filter</span>
+              <span>Triangulation Filter</span>
             </label>
+            {#if localSettings.triangulation_filter_enabled}
+              <div class="ml-6 space-y-2">
+                {#each ["at_celestial", "direct_warp", "near_celestial", "via_bookspam", "none"] as type}
+                  <label class="flex items-center space-x-2">
+                    <input
+                      type="checkbox"
+                      class="form-checkbox text-eve-accent rounded bg-eve-secondary border-eve-accent/50"
+                      bind:checked={localSettings[`triangulation_${type}`]}
+                      on:change={() =>
+                        updateSetting(
+                          `triangulation_${type}`,
+                          localSettings[`triangulation_${type}`]
+                        )}
+                    />
+                    <span class="capitalize">{type.replace(/_/g, " ")}</span>
+                  </label>
+                {/each}
+              </div>
+            {/if}
+          </div>
 
-            {#if localSettings.solar_system_filter_enabled}
+          <!-- Value Filters -->
+          <div class="space-y-2">
+            <div class="flex items-center space-x-4">
+              <label class="flex items-center space-x-2">
+                <input
+                  type="checkbox"
+                  class="form-checkbox text-eve-accent rounded bg-eve-secondary border-eve-accent/50"
+                  bind:checked={localSettings.dropped_value_enabled}
+                  on:change={() =>
+                    updateSetting(
+                      "dropped_value_enabled",
+                      localSettings.dropped_value_enabled
+                    )}
+                />
+                <span>Dropped Value</span>
+              </label>
+              {#if localSettings.dropped_value_enabled}
+                <input
+                  type="number"
+                  class="bg-black/20 text-gray-200 rounded px-3 py-2 w-32 border border-eve-accent/20 focus:border-eve-accent/50 focus:outline-none"
+                  bind:value={localSettings.dropped_value}
+                  on:input={() =>
+                    updateSetting("dropped_value", localSettings.dropped_value)}
+                  placeholder="Min Value"
+                />
+              {/if}
+            </div>
+
+            <div class="flex items-center space-x-4">
+              <label class="flex items-center space-x-2">
+                <input
+                  type="checkbox"
+                  class="form-checkbox text-eve-accent rounded bg-eve-secondary border-eve-accent/50"
+                  bind:checked={localSettings.total_value_enabled}
+                  on:change={() =>
+                    updateSetting(
+                      "total_value_enabled",
+                      localSettings.total_value_enabled
+                    )}
+                />
+                <span>Total Value</span>
+              </label>
+              {#if localSettings.total_value_enabled}
+                <input
+                  type="number"
+                  class="bg-black/20 text-gray-200 rounded px-3 py-2 w-32 border border-eve-accent/20 focus:border-eve-accent/50 focus:outline-none"
+                  bind:value={localSettings.total_value}
+                  on:input={() =>
+                    updateSetting("total_value", localSettings.total_value)}
+                  placeholder="Min Value"
+                />
+              {/if}
+            </div>
+          </div>
+
+          <!-- Time Filter -->
+          <div class="flex items-center space-x-4">
+            <label class="flex items-center space-x-2">
               <input
-                type="text"
-                class="bg-black/20 text-gray-200 rounded px-3 py-2 w-full border border-eve-accent/20 focus:border-eve-accent/50 focus:outline-none"
-                bind:value={localSettings.solar_system_filter}
-                on:input={() =>
+                type="checkbox"
+                class="form-checkbox text-eve-accent rounded bg-eve-secondary border-eve-accent/50"
+                bind:checked={localSettings.time_threshold_enabled}
+                on:change={() =>
                   updateSetting(
-                    "solar_system_filter",
-                    localSettings.solar_system_filter
+                    "time_threshold_enabled",
+                    localSettings.time_threshold_enabled
                   )}
-                placeholder="Solar System ID"
+              />
+              <span>Time Filter</span>
+            </label>
+            {#if localSettings.time_threshold_enabled}
+              <input
+                type="number"
+                class="bg-black/20 text-gray-200 rounded px-3 py-2 w-32 border border-eve-accent/20 focus:border-eve-accent/50 focus:outline-none"
+                bind:value={localSettings.time_threshold}
+                on:input={() =>
+                  updateSetting("time_threshold", localSettings.time_threshold)}
+                placeholder="Seconds"
               />
             {/if}
           </div>
 
-          <div class="space-y-3">
+          <!-- Points Filter -->
+          <div class="flex items-center space-x-4">
+            <label class="flex items-center space-x-2">
+              <input
+                type="checkbox"
+                class="form-checkbox text-eve-accent rounded bg-eve-secondary border-eve-accent/50"
+                bind:checked={localSettings.points_enabled}
+                on:change={() =>
+                  updateSetting("points_enabled", localSettings.points_enabled)}
+              />
+              <span>Points Filter</span>
+            </label>
+            {#if localSettings.points_enabled}
+              <input
+                type="number"
+                class="bg-black/20 text-gray-200 rounded px-3 py-2 w-32 border border-eve-accent/20 focus:border-eve-accent/50 focus:outline-none"
+                bind:value={localSettings.points}
+                on:input={() => updateSetting("points", localSettings.points)}
+                placeholder="Min Points"
+              />
+            {/if}
+          </div>
+
+          <!-- Basic Filters -->
+          <div class="space-y-2">
+            <label class="flex items-center space-x-2">
+              <input
+                type="checkbox"
+                class="form-checkbox text-eve-accent rounded bg-eve-secondary border-eve-accent/50"
+                bind:checked={localSettings.npc_only}
+                on:change={() =>
+                  updateSetting("npc_only", localSettings.npc_only)}
+              />
+              <span>NPC Only</span>
+            </label>
+
+            <label class="flex items-center space-x-2">
+              <input
+                type="checkbox"
+                class="form-checkbox text-eve-accent rounded bg-eve-secondary border-eve-accent/50"
+                bind:checked={localSettings.solo}
+                on:change={() => updateSetting("solo", localSettings.solo)}
+              />
+              <span>Solo Only</span>
+            </label>
+
+            <label class="flex items-center space-x-2">
+              <input
+                type="checkbox"
+                class="form-checkbox text-eve-accent rounded bg-eve-secondary border-eve-accent/50"
+                bind:checked={localSettings.awox_only}
+                on:change={() =>
+                  updateSetting("awox_only", localSettings.awox_only)}
+              />
+              <span>AWOX Only</span>
+            </label>
+          </div>
+
+          <!-- Location Filter -->
+          <div class="space-y-2">
             <label class="flex items-center space-x-2">
               <input
                 type="checkbox"
@@ -676,7 +409,6 @@
               />
               <span>Location ID Filter</span>
             </label>
-
             {#if localSettings.location_filter_enabled}
               <input
                 type="text"
@@ -691,12 +423,228 @@
               />
             {/if}
           </div>
+
+          <!-- Combat Labels -->
+          <div class="space-y-2">
+            <label class="flex items-center space-x-2">
+              <input
+                type="checkbox"
+                class="form-checkbox text-eve-accent rounded bg-eve-secondary border-eve-accent/50"
+                bind:checked={localSettings.combat_label_filter_enabled}
+                on:change={() =>
+                  updateSetting(
+                    "combat_label_filter_enabled",
+                    localSettings.combat_label_filter_enabled
+                  )}
+              />
+              <span>Combat Label Filter</span>
+            </label>
+            {#if localSettings.combat_label_filter_enabled}
+              <div class="ml-6 grid grid-cols-2 gap-2">
+                {#each Object.entries(localSettings.combat_labels) as [label, enabled]}
+                  <label class="flex items-center space-x-2">
+                    <input
+                      type="checkbox"
+                      class="form-checkbox text-eve-accent rounded bg-eve-secondary border-eve-accent/50"
+                      bind:checked={localSettings.combat_labels[label]}
+                      on:change={() =>
+                        updateSetting(
+                          "combat_labels",
+                          localSettings.combat_labels
+                        )}
+                    />
+                    <span class="capitalize">{label}</span>
+                  </label>
+                {/each}
+              </div>
+            {/if}
+          </div>
         </div>
+      </div>
 
-        <div class="space-y-4">
-          <h3 class="text-xl font-semibold text-eve-accent">Ship Filters</h3>
+      <!-- Attacker Filters -->
+      <div class="bg-eve-card rounded-lg p-6">
+        <h3 class="text-xl font-semibold text-eve-accent mb-4">
+          Attacker Filters
+        </h3>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <!-- Alliance Filter -->
+          <div class="space-y-2">
+            <label class="flex items-center space-x-2">
+              <input
+                type="checkbox"
+                class="form-checkbox text-eve-accent rounded bg-eve-secondary border-eve-accent/50"
+                bind:checked={localSettings.attacker_alliance_filter_enabled}
+                on:change={() =>
+                  updateSetting(
+                    "attacker_alliance_filter_enabled",
+                    localSettings.attacker_alliance_filter_enabled
+                  )}
+              />
+              <span>Alliance Filter</span>
+            </label>
+            {#if localSettings.attacker_alliance_filter_enabled}
+              <input
+                type="text"
+                class="bg-black/20 text-gray-200 rounded px-3 py-2 w-full border border-eve-accent/20 focus:border-eve-accent/50 focus:outline-none"
+                bind:value={localSettings.attacker_alliance_filter}
+                on:input={() =>
+                  updateSetting(
+                    "attacker_alliance_filter",
+                    localSettings.attacker_alliance_filter
+                  )}
+                placeholder="Alliance ID"
+              />
+            {/if}
+          </div>
 
-          <div class="space-y-3">
+          <!-- Corporation Filter -->
+          <div class="space-y-2">
+            <label class="flex items-center space-x-2">
+              <input
+                type="checkbox"
+                class="form-checkbox text-eve-accent rounded bg-eve-secondary border-eve-accent/50"
+                bind:checked={localSettings.attacker_corporation_filter_enabled}
+                on:change={() =>
+                  updateSetting(
+                    "attacker_corporation_filter_enabled",
+                    localSettings.attacker_corporation_filter_enabled
+                  )}
+              />
+              <span>Corporation Filter</span>
+            </label>
+            {#if localSettings.attacker_corporation_filter_enabled}
+              <input
+                type="text"
+                class="bg-black/20 text-gray-200 rounded px-3 py-2 w-full border border-eve-accent/20 focus:border-eve-accent/50 focus:outline-none"
+                bind:value={localSettings.attacker_corporation_filter}
+                on:input={() =>
+                  updateSetting(
+                    "attacker_corporation_filter",
+                    localSettings.attacker_corporation_filter
+                  )}
+                placeholder="Corporation ID"
+              />
+            {/if}
+          </div>
+
+          <!-- Ship Type Filter -->
+          <div class="space-y-2">
+            <label class="flex items-center space-x-2">
+              <input
+                type="checkbox"
+                class="form-checkbox text-eve-accent rounded bg-eve-secondary border-eve-accent/50"
+                bind:checked={localSettings.attacker_ship_type_filter_enabled}
+                on:change={() =>
+                  updateSetting(
+                    "attacker_ship_type_filter_enabled",
+                    localSettings.attacker_ship_type_filter_enabled
+                  )}
+              />
+              <span>Ship Type Filter</span>
+            </label>
+            {#if localSettings.attacker_ship_type_filter_enabled}
+              <input
+                type="text"
+                class="bg-black/20 text-gray-200 rounded px-3 py-2 w-full border border-eve-accent/20 focus:border-eve-accent/50 focus:outline-none"
+                bind:value={localSettings.attacker_ship_type_filter}
+                on:input={() =>
+                  updateSetting(
+                    "attacker_ship_type_filter",
+                    localSettings.attacker_ship_type_filter
+                  )}
+                placeholder="Ship Type ID"
+              />
+            {/if}
+          </div>
+
+          <!-- Capital Ship Filter -->
+          <div class="space-y-2">
+            <label class="flex items-center space-x-2">
+              <input
+                type="checkbox"
+                class="form-checkbox text-eve-accent rounded bg-eve-secondary border-eve-accent/50"
+                bind:checked={localSettings.attacker_capital_filter_enabled}
+                on:change={() =>
+                  updateSetting(
+                    "attacker_capital_filter_enabled",
+                    localSettings.attacker_capital_filter_enabled
+                  )}
+              />
+              <span>Show Only Kills with Capital Ship Attackers</span>
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <!-- Victim Filters -->
+      <div class="bg-eve-card rounded-lg p-6">
+        <h3 class="text-xl font-semibold text-eve-accent mb-4">
+          Victim Filters
+        </h3>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <!-- Alliance Filter -->
+          <div class="space-y-2">
+            <label class="flex items-center space-x-2">
+              <input
+                type="checkbox"
+                class="form-checkbox text-eve-accent rounded bg-eve-secondary border-eve-accent/50"
+                bind:checked={localSettings.victim_alliance_filter_enabled}
+                on:change={() =>
+                  updateSetting(
+                    "victim_alliance_filter_enabled",
+                    localSettings.victim_alliance_filter_enabled
+                  )}
+              />
+              <span>Alliance Filter</span>
+            </label>
+            {#if localSettings.victim_alliance_filter_enabled}
+              <input
+                type="text"
+                class="bg-black/20 text-gray-200 rounded px-3 py-2 w-full border border-eve-accent/20 focus:border-eve-accent/50 focus:outline-none"
+                bind:value={localSettings.victim_alliance_filter}
+                on:input={() =>
+                  updateSetting(
+                    "victim_alliance_filter",
+                    localSettings.victim_alliance_filter
+                  )}
+                placeholder="Alliance ID"
+              />
+            {/if}
+          </div>
+
+          <!-- Corporation Filter -->
+          <div class="space-y-2">
+            <label class="flex items-center space-x-2">
+              <input
+                type="checkbox"
+                class="form-checkbox text-eve-accent rounded bg-eve-secondary border-eve-accent/50"
+                bind:checked={localSettings.victim_corporation_filter_enabled}
+                on:change={() =>
+                  updateSetting(
+                    "victim_corporation_filter_enabled",
+                    localSettings.victim_corporation_filter_enabled
+                  )}
+              />
+              <span>Corporation Filter</span>
+            </label>
+            {#if localSettings.victim_corporation_filter_enabled}
+              <input
+                type="text"
+                class="bg-black/20 text-gray-200 rounded px-3 py-2 w-full border border-eve-accent/20 focus:border-eve-accent/50 focus:outline-none"
+                bind:value={localSettings.victim_corporation_filter}
+                on:input={() =>
+                  updateSetting(
+                    "victim_corporation_filter",
+                    localSettings.victim_corporation_filter
+                  )}
+                placeholder="Corporation ID"
+              />
+            {/if}
+          </div>
+
+          <!-- Ship Filters -->
+          <div class="space-y-2">
             <label class="flex items-center space-x-2">
               <input
                 type="checkbox"
@@ -721,7 +669,6 @@
               />
               <span>Ship Type Filter</span>
             </label>
-
             {#if localSettings.ship_type_filter_enabled}
               <input
                 type="text"
@@ -736,11 +683,9 @@
               />
             {/if}
           </div>
-        </div>
-        <div class="space-y-4">
-          <h3 class="text-xl font-semibold text-eve-accent">Item Filters</h3>
 
-          <div class="space-y-3">
+          <!-- Item Filter -->
+          <div class="space-y-2">
             <label class="flex items-center space-x-2">
               <input
                 type="checkbox"
@@ -752,9 +697,8 @@
                     localSettings.item_type_filter_enabled
                   )}
               />
-              <span>Enable Item Type Filter</span>
+              <span>Item Type Filter</span>
             </label>
-
             {#if localSettings.item_type_filter_enabled}
               <input
                 type="text"
@@ -769,89 +713,89 @@
               />
             {/if}
           </div>
+
+          <!-- Solar System Filter -->
+          <div class="space-y-2">
+            <label class="flex items-center space-x-2">
+              <input
+                type="checkbox"
+                class="form-checkbox text-eve-accent rounded bg-eve-secondary border-eve-accent/50"
+                bind:checked={localSettings.solar_system_filter_enabled}
+                on:change={() =>
+                  updateSetting(
+                    "solar_system_filter_enabled",
+                    localSettings.solar_system_filter_enabled
+                  )}
+              />
+              <span>Solar System Filter</span>
+            </label>
+            {#if localSettings.solar_system_filter_enabled}
+              <input
+                type="text"
+                class="bg-black/20 text-gray-200 rounded px-3 py-2 w-full border border-eve-accent/20 focus:border-eve-accent/50 focus:outline-none"
+                bind:value={localSettings.solar_system_filter}
+                on:input={() =>
+                  updateSetting(
+                    "solar_system_filter",
+                    localSettings.solar_system_filter
+                  )}
+                placeholder="Solar System ID"
+              />
+            {/if}
+          </div>
         </div>
       </div>
 
-      <div class="bg-eve-card rounded-lg p-6 space-y-4">
+      <!-- Notifications -->
+      <div class="bg-eve-card rounded-lg p-6">
         <h3 class="text-xl font-semibold text-eve-accent mb-4">
-          Combat Labels
+          Notifications
         </h3>
-
-        <label class="flex items-center space-x-2">
-          <input
-            type="checkbox"
-            class="form-checkbox text-eve-accent rounded bg-eve-secondary border-eve-accent/50"
-            bind:checked={localSettings.combat_label_filter_enabled}
-            on:change={() =>
-              updateSetting(
-                "combat_label_filter_enabled",
-                localSettings.combat_label_filter_enabled
-              )}
-          />
-          <span>Enable Combat Label Filter</span>
-        </label>
-
-        {#if localSettings.combat_label_filter_enabled}
-          <div class="ml-6 grid grid-cols-3 gap-3">
-            {#each Object.entries(localSettings.combat_labels) as [label, enabled]}
-              <label class="flex items-center space-x-2">
-                <input
-                  type="checkbox"
-                  class="form-checkbox text-eve-accent rounded bg-eve-secondary border-eve-accent/50"
-                  bind:checked={localSettings.combat_labels[label]}
-                  on:change={() =>
-                    updateSetting("combat_labels", localSettings.combat_labels)}
-                />
-                <span class="capitalize">{label}</span>
-              </label>
-            {/each}
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <!-- Discord Webhook -->
+          <div class="space-y-2">
+            <label class="flex items-center space-x-2">
+              <input
+                type="checkbox"
+                class="form-checkbox text-eve-accent rounded bg-eve-secondary border-eve-accent/50"
+                bind:checked={localSettings.webhook_enabled}
+                on:change={() =>
+                  updateSetting(
+                    "webhook_enabled",
+                    localSettings.webhook_enabled
+                  )}
+              />
+              <span>Discord Webhook Alerts</span>
+            </label>
+            {#if localSettings.webhook_enabled}
+              <input
+                type="text"
+                class="bg-black/20 text-gray-200 rounded px-3 py-2 w-full border border-eve-accent/20 focus:border-eve-accent/50 focus:outline-none"
+                bind:value={localSettings.webhook_url}
+                on:input={() =>
+                  updateSetting("webhook_url", localSettings.webhook_url)}
+                placeholder="https://discord.com/api/webhooks/..."
+              />
+            {/if}
           </div>
-        {/if}
-      </div>
 
-      <div class="bg-eve-card rounded-lg p-6 space-y-4">
-        <h3 class="text-xl font-semibold text-eve-accent mb-4">
-          Discord Webhook
-        </h3>
-
-        <label class="flex items-center space-x-2">
-          <input
-            type="checkbox"
-            class="form-checkbox text-eve-accent rounded bg-eve-secondary border-eve-accent/50"
-            bind:checked={localSettings.webhook_enabled}
-            on:change={() =>
-              updateSetting("webhook_enabled", localSettings.webhook_enabled)}
-          />
-          <span>Enable Discord Webhook Alerts</span>
-        </label>
-
-        {#if localSettings.webhook_enabled}
-          <input
-            type="text"
-            class="bg-black/20 text-gray-200 rounded px-3 py-2 w-full border border-eve-accent/20 focus:border-eve-accent/50 focus:outline-none"
-            bind:value={localSettings.webhook_url}
-            on:input={() =>
-              updateSetting("webhook_url", localSettings.webhook_url)}
-            placeholder="https://discord.com/api/webhooks/..."
-          />
-        {/if}
-      </div>
-      <div class="bg-eve-card rounded-lg p-6 space-y-4">
-        <h3 class="text-xl font-semibold text-eve-accent mb-4">Audio Alerts</h3>
-
-        <label class="flex items-center space-x-2">
-          <input
-            type="checkbox"
-            class="form-checkbox text-eve-accent rounded bg-eve-secondary border-eve-accent/50"
-            bind:checked={localSettings.audio_alerts_enabled}
-            on:change={() =>
-              updateSetting(
-                "audio_alerts_enabled",
-                localSettings.audio_alerts_enabled
-              )}
-          />
-          <span>Enable Audio Alerts</span>
-        </label>
+          <!-- Audio Alerts -->
+          <div class="space-y-2">
+            <label class="flex items-center space-x-2">
+              <input
+                type="checkbox"
+                class="form-checkbox text-eve-accent rounded bg-eve-secondary border-eve-accent/50"
+                bind:checked={localSettings.audio_alerts_enabled}
+                on:change={() =>
+                  updateSetting(
+                    "audio_alerts_enabled",
+                    localSettings.audio_alerts_enabled
+                  )}
+              />
+              <span>Audio Alerts</span>
+            </label>
+          </div>
+        </div>
       </div>
 
       <div class="bg-eve-card rounded-lg p-6">
@@ -865,5 +809,9 @@
   .settings-manager {
     margin-top: 20px;
     text-align: left;
+  }
+
+  .form-checkbox {
+    @apply rounded border-eve-accent/50 text-eve-accent focus:ring-eve-accent;
   }
 </style>

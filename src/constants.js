@@ -165,6 +165,12 @@ export const CAMP_PROBABILITY_FACTORS = {
     11387: { weight: 0.03 }, // Hyena
   },
 
+  SMARTBOMB_SHIPS: {
+    17738: "Machariel",
+    3756: "Gnosis",
+    29988: "Proteus",
+  },
+
   SHIP_CATEGORIES: {
     INDUSTRIAL: "industrial",
     MINING: "mining",
@@ -184,5 +190,56 @@ export const CAMP_PROBABILITY_FACTORS = {
     SAME_CHARS: 0.25,
     SAME_CORPS: 0.15,
     TIME_WINDOW: 1800000,
+  },
+};
+
+export const DEFAULT_SETTINGS = {
+  dropped_value_enabled: false,
+  total_value_enabled: false,
+  points_enabled: false,
+  npc_only: false,
+  solo: false,
+  awox_only: false,
+  location_filter_enabled: false,
+  ship_type_filter_enabled: false,
+  time_threshold_enabled: false,
+  audio_alerts_enabled: false,
+  attacker_alliance_filter_enabled: false,
+  attacker_corporation_filter_enabled: false,
+  attacker_capital_filter_enabled: false,
+  attacker_ship_type_filter_enabled: false,
+  victim_alliance_filter_enabled: false,
+  victim_corporation_filter_enabled: false,
+  solar_system_filter_enabled: false,
+  item_type_filter_enabled: false,
+
+  // Triangulation settings
+  triangulation_filter_enabled: false,
+  triangulation_filter_exclude: false,
+  triangulation_filter_near_stargate: false,
+  triangulation_filter_near_celestial: false,
+  triangulation_at_celestial: false,
+  triangulation_direct_warp: false,
+  triangulation_near_celestial: false,
+  triangulation_via_bookspam: false,
+  triangulation_none: false,
+
+  webhook_enabled: false,
+  webhook_url: "",
+
+  // location type/new filters
+  location_type_filter_enabled: false,
+  location_types: {
+    highsec: false,
+    lowsec: false,
+    nullsec: false,
+    wspace: false,
+    abyssal: false,
+  },
+  combat_label_filter_enabled: false,
+  combat_labels: {
+    ganked: false,
+    pvp: false,
+    padding: false,
   },
 };

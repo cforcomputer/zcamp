@@ -1,66 +1,76 @@
 import { writable, derived } from "svelte/store";
+import { DEFAULT_SETTINGS } from "./constants.js";
 
 export const killmails = writable([]);
 export const filterLists = writable([]);
 export const profiles = writable([]);
+export { DEFAULT_SETTINGS } from "./constants.js";
 
 const currentTime = writable(Date.now());
 setInterval(() => {
   currentTime.set(Date.now());
 }, 1000);
 
-export const DEFAULT_SETTINGS = {
-  dropped_value_enabled: false,
-  total_value_enabled: false,
-  points_enabled: false,
-  npc_only: false,
-  solo: false,
-  awox_only: false,
-  location_filter_enabled: false,
-  ship_type_filter_enabled: false,
-  time_threshold_enabled: false,
-  audio_alerts_enabled: false,
-  attacker_alliance_filter_enabled: false,
-  attacker_corporation_filter_enabled: false,
-  attacker_capital_filter_enabled: false,
-  attacker_ship_type_filter_enabled: false,
-  victim_alliance_filter_enabled: false,
-  victim_corporation_filter_enabled: false,
-  solar_system_filter_enabled: false,
-  item_type_filter_enabled: false,
-  triangulation_filter_enabled: false,
-  triangulation_filter_exclude: false,
-  triangulation_filter_near_stargate: false,
-  triangulation_filter_near_celestial: false,
-  webhook_enabled: false,
-  webhook_url: "",
+export const settings = writable({ ...DEFAULT_SETTINGS });
 
-  // location type/new filters
-  location_type_filter_enabled: false,
-  location_types: {
-    highsec: false,
-    lowsec: false,
-    nullsec: false,
-    wspace: false,
-    abyssal: false,
-  },
-  combat_label_filter_enabled: false,
-  combat_labels: {
-    ganked: false,
-    pvp: false,
-    padding: false,
-  },
-};
-export const settings = writable({ ...DEFAULT_SETTINGS }); // Initialize with defaults immediately
 export const filteredKillmails = derived(
   [killmails, settings, filterLists],
   ([$killmails, $settings, $filterLists]) => {
     const filtered = $killmails.filter((killmail) => {
-      // Triangulation Filter check
+      // Triangulation Filter checks
       if ($settings.triangulation_filter_enabled) {
         const pinpoints = killmail?.pinpoints;
 
-        // Filter out "near stargate" kills
+        // Skip if no pinpoint data
+        if (!pinpoints) return false;
+
+        // Check specific triangulation types if any are enabled
+        const enabledTypes = [
+          {
+            setting: $settings.triangulation_at_celestial,
+            type: "at_celestial",
+          },
+          { setting: $settings.triangulation_direct_warp, type: "direct_warp" },
+          {
+            setting: $settings.triangulation_near_celestial,
+            type: "near_celestial",
+          },
+          {
+            setting: $settings.triangulation_via_bookspam,
+            type: "via_bookspam",
+          },
+          { setting: $settings.triangulation_none, type: "none" },
+        ].filter((t) => t.setting);
+
+        if (enabledTypes.length > 0) {
+          // If none is selected, check for non-triangulatable kills
+          if (
+            $settings.triangulation_none &&
+            !pinpoints.triangulationPossible
+          ) {
+            return true;
+          }
+
+          // Check for specific triangulation types
+          const matchesType = enabledTypes.some(({ type }) => {
+            switch (type) {
+              case "at_celestial":
+                return pinpoints.atCelestial;
+              case "direct_warp":
+                return pinpoints.triangulationType === "direct_warp";
+              case "near_celestial":
+                return pinpoints.triangulationType === "near_celestial";
+              case "via_bookspam":
+                return pinpoints.triangulationType === "via_bookspam";
+              default:
+                return false;
+            }
+          });
+
+          if (!matchesType) return false;
+        }
+
+        // Additional triangulation filters
         if (
           $settings.triangulation_filter_near_stargate &&
           pinpoints?.nearestCelestial?.name?.toLowerCase().includes("stargate")
@@ -68,7 +78,6 @@ export const filteredKillmails = derived(
           return false;
         }
 
-        // Filter out "near celestial" AND "at celestial" kills
         if (
           $settings.triangulation_filter_near_celestial &&
           (pinpoints?.atCelestial || pinpoints?.nearestCelestial)
@@ -76,11 +85,11 @@ export const filteredKillmails = derived(
           return false;
         }
 
-        // Existing triangulation exclude logic
-        if ($settings.triangulation_filter_exclude) {
-          if (pinpoints?.triangulationPossible) return false;
-        } else {
-          if (!pinpoints?.triangulationPossible) return false;
+        if (
+          $settings.triangulation_filter_exclude &&
+          pinpoints?.triangulationPossible
+        ) {
+          return false;
         }
       }
 
@@ -88,12 +97,20 @@ export const filteredKillmails = derived(
       if ($settings.attacker_capital_filter_enabled) {
         const hasCapitalAttacker = killmail.killmail.attackers.some(
           (attacker) => {
-            // Check if this attacker's ship is in the capital category
+            // First check killmail categories
             const attackerShipCategory =
               killmail.shipCategories?.attackers?.find(
                 (ship) => ship.shipTypeId === attacker.ship_type_id
               )?.category;
-            return attackerShipCategory === "capital";
+            if (attackerShipCategory === "capital") return true;
+
+            // Then check labels
+            const shipType = killmail.zkb.labels.find((label) =>
+              label.startsWith(`shipType:${attacker.ship_type_id}:`)
+            );
+            if (shipType?.includes(":capital")) return true;
+
+            return false;
           }
         );
 
@@ -149,15 +166,15 @@ export const filteredKillmails = derived(
             match = ids.includes(killmail.killmail.solar_system_id?.toString());
             break;
           case "region": {
-            const celestialData = killmail.pinpoints.celestialData;
+            const celestialData = killmail.pinpoints?.celestialData;
 
             // Check if this is an Abyssal killmail
             const isAbyssal = killmail.zkb.labels.includes("loc:abyssal");
 
             // If region is null and it's an Abyssal location
             if (
-              !celestialData.regionid &&
-              !celestialData.regionname &&
+              !celestialData?.regionid &&
+              !celestialData?.regionname &&
               isAbyssal
             ) {
               // Special handling for Abyssal regions
@@ -169,15 +186,25 @@ export const filteredKillmails = derived(
               break;
             }
 
+            // Handle unknown regions with direct ID match
+            if (!celestialData?.regionid && !celestialData?.regionname) {
+              match = ids.includes(killmail.system?.regionID?.toString());
+              break;
+            }
+
             // Rest of existing region filter logic
             const idList = Array.isArray(ids) ? ids : [ids];
             match = idList.some((id) => {
+              const targetId = id.toString().toLowerCase();
               return (
                 (celestialData.regionid &&
-                  celestialData.regionid.toString() === id.toString()) ||
+                  celestialData.regionid.toString() === targetId) ||
                 (celestialData.regionname &&
-                  celestialData.regionname.toLowerCase() ===
-                    id.toString().toLowerCase())
+                  celestialData.regionname.toLowerCase() === targetId) ||
+                (killmail.system?.regionID &&
+                  killmail.system.regionID.toString() === targetId) ||
+                (killmail.system?.regionName &&
+                  killmail.system.regionName.toLowerCase() === targetId)
               );
             });
             break;
@@ -186,28 +213,49 @@ export const filteredKillmails = derived(
             match = killmail.zkb.labels.some((label) =>
               ids.includes(label.replace("loc:", ""))
             );
+            if (!match && ids.includes("unknown")) {
+              match = !killmail.zkb.labels.some((label) =>
+                label.startsWith("loc:")
+              );
+            }
             break;
-          case "ship_category":
+          case "ship_category": {
+            // First check direct labels
             match = killmail.zkb.labels.some(
               (label) =>
                 (label.startsWith("cat:") || label === "capital") &&
                 ids.includes(label.replace("cat:", ""))
             );
+
+            // If no match and we have ship categories data, check that
+            if (!match && killmail.shipCategories) {
+              const victimCat =
+                killmail.shipCategories.victim?.category?.toLowerCase();
+              match = victimCat && ids.includes(victimCat);
+            }
             break;
-          case "combat_type":
+          }
+          case "combat_type": {
+            // Direct label match first
             match = killmail.zkb.labels.some(
               (label) =>
                 ids.includes(label) &&
                 ["atShip", "ganked", "pvp", "padding"].includes(label)
             );
+
+            // Special handling for AT ships
+            if (!match && ids.includes("atShip")) {
+              match = killmail.shipCategories?.victim?.category === "at";
+            }
             break;
+          }
         }
 
         if (list.is_exclude && match) return false;
         if (!list.is_exclude && !match) return false;
       }
 
-      // Dropped Value Filter
+      // Basic filters
       if (
         $settings.dropped_value_enabled &&
         killmail.zkb.droppedValue < $settings.dropped_value
@@ -215,7 +263,6 @@ export const filteredKillmails = derived(
         return false;
       }
 
-      // Total Value Filter
       if (
         $settings.total_value_enabled &&
         killmail.zkb.totalValue < $settings.total_value
@@ -223,29 +270,23 @@ export const filteredKillmails = derived(
         return false;
       }
 
-      // Points Filter
       if ($settings.points_enabled && killmail.zkb.points < $settings.points) {
         return false;
       }
 
-      // NPC Only Filter
       if ($settings.npc_only && !killmail.zkb.npc) {
         return false;
       }
 
-      // Solo Only Filter
       if ($settings.solo && !killmail.zkb.solo) {
         return false;
       }
 
-      // AWOX Only Filter
       if ($settings.awox_only && !killmail.zkb.awox) {
         return false;
       }
 
-      // Location Filter
-      // Location Type Filter
-      // Location Type Filter
+      // Location type filters
       if ($settings.location_type_filter_enabled) {
         const locationTypes = $settings.location_types || {
           highsec: false,
@@ -255,19 +296,26 @@ export const filteredKillmails = derived(
           abyssal: false,
         };
 
-        // Check if any location types are enabled
         const hasEnabledTypes = Object.values(locationTypes).some(
           (enabled) => enabled
         );
 
-        // Only apply filter if at least one type is enabled
         if (hasEnabledTypes) {
-          const selectedTypes = Object.entries($settings.location_types || {})
+          const selectedTypes = Object.entries(locationTypes)
             .filter(([_, enabled]) => enabled)
             .map(([type, _]) => `loc:${type}`);
 
+          // Handle unknown locations
+          const hasUnknownEnabled = locationTypes.unknown;
+          const hasLocationLabel = killmail.zkb.labels.some((label) =>
+            label.startsWith("loc:")
+          );
+
           if (
-            !killmail.zkb.labels.some((label) => selectedTypes.includes(label))
+            !killmail.zkb.labels.some((label) =>
+              selectedTypes.includes(label)
+            ) &&
+            !(hasUnknownEnabled && !hasLocationLabel)
           ) {
             return false;
           }
@@ -275,24 +323,33 @@ export const filteredKillmails = derived(
       }
 
       // Ship Type Filter
-      if (
-        $settings.ship_type_filter_enabled &&
-        killmail.killmail.victim.ship_type_id !== $settings.ship_type_filter
-      ) {
-        return false;
+      if ($settings.ship_type_filter_enabled) {
+        const targetShipId = parseInt($settings.ship_type_filter);
+        if (isNaN(targetShipId)) return false;
+
+        const victimShipId = killmail.killmail.victim.ship_type_id;
+        if (victimShipId !== targetShipId) {
+          // Check alternative ship type references
+          const hasMatchingLabel = killmail.zkb.labels.some(
+            (label) =>
+              label === `shipType:${targetShipId}` ||
+              label.startsWith(`shipType:${targetShipId}:`)
+          );
+          if (!hasMatchingLabel) return false;
+        }
       }
 
       // Time Threshold Filter
       if ($settings.time_threshold_enabled) {
         const killTime = new Date(killmail.killmail.killmail_time).getTime();
         const currentTime = new Date().getTime();
-        const timeDiff = (currentTime - killTime) / 1000; // Convert to seconds
+        const timeDiff = (currentTime - killTime) / 1000;
         if (timeDiff > $settings.time_threshold) {
           return false;
         }
       }
 
-      // Attacker Alliance Filter
+      // Attacker Filters
       if (
         $settings.attacker_alliance_filter_enabled &&
         $settings.attacker_alliance_filter &&
@@ -305,7 +362,6 @@ export const filteredKillmails = derived(
         return false;
       }
 
-      // Attacker Corporation Filter
       if (
         $settings.attacker_corporation_filter_enabled &&
         $settings.attacker_corporation_filter &&
@@ -318,7 +374,6 @@ export const filteredKillmails = derived(
         return false;
       }
 
-      // Attacker Ship Type Filter
       if (
         $settings.attacker_ship_type_filter_enabled &&
         $settings.attacker_ship_type_filter &&
@@ -331,7 +386,7 @@ export const filteredKillmails = derived(
         return false;
       }
 
-      // Victim Alliance Filter
+      // Victim Filters
       if (
         $settings.victim_alliance_filter_enabled &&
         $settings.victim_alliance_filter &&
@@ -341,7 +396,6 @@ export const filteredKillmails = derived(
         return false;
       }
 
-      // Victim Corporation Filter
       if (
         $settings.victim_corporation_filter_enabled &&
         $settings.victim_corporation_filter &&
@@ -351,7 +405,6 @@ export const filteredKillmails = derived(
         return false;
       }
 
-      // Item Type Filter
       if (
         $settings.item_type_filter_enabled &&
         $settings.item_type_filter &&
@@ -362,7 +415,6 @@ export const filteredKillmails = derived(
         return false;
       }
 
-      // Solar System Filter
       if (
         $settings.solar_system_filter_enabled &&
         $settings.solar_system_filter &&
@@ -372,48 +424,60 @@ export const filteredKillmails = derived(
         return false;
       }
 
-      // Location Type Filter
-      if ($settings.location_type_filter_enabled) {
-        const selectedTypes = Object.entries($settings.location_types || {})
-          .filter(([_, enabled]) => enabled)
-          .map(([type, _]) => `loc:${type}`);
-        if (
-          selectedTypes.length > 0 &&
-          !killmail.zkb.labels.some((label) => selectedTypes.includes(label))
-        ) {
+      // Location Filter
+      if ($settings.location_filter_enabled && $settings.location_filter) {
+        const locationLabel = `loc:${$settings.location_filter}`;
+        const hasLocationLabel = killmail.zkb.labels.includes(locationLabel);
+        if (!hasLocationLabel) {
           return false;
         }
       }
 
-      // Ship Category Filter
-      // When capitals only is enabled
-      if ($settings.capitals_only && !killmail.zkb.labels.includes("capital")) {
-        return false;
-      }
-
-      // Combat Type Filter
+      // Combat Label Filters
       if ($settings.combat_label_filter_enabled && $settings.combat_labels) {
-        const selectedLabels = Object.entries(
-          $settings.combat_labels || {
-            ganked: false,
-            pvp: false,
-            padding: false,
-          }
-        )
+        const selectedLabels = Object.entries($settings.combat_labels)
           .filter(([_, enabled]) => enabled)
           .map(([label, _]) => label);
-        if (
-          selectedLabels.length > 0 &&
-          !killmail.zkb.labels.some((label) => selectedLabels.includes(label))
-        ) {
-          return false;
+
+        if (selectedLabels.length > 0) {
+          const hasMatchingLabel = selectedLabels.some((selectedLabel) => {
+            // Direct label match
+            if (killmail.zkb.labels.includes(selectedLabel)) return true;
+
+            // Special case for AT ships
+            if (
+              selectedLabel === "atShip" &&
+              killmail.shipCategories?.victim?.category === "at"
+            )
+              return true;
+
+            // Check derived combat labels
+            if (
+              selectedLabel === "ganked" &&
+              killmail.zkb.labels.includes("ganked")
+            )
+              return true;
+            if (selectedLabel === "pvp" && !killmail.zkb.npc) return true;
+            if (
+              selectedLabel === "padding" &&
+              killmail.zkb.labels.includes("padding")
+            )
+              return true;
+
+            return false;
+          });
+
+          if (!hasMatchingLabel) return false;
         }
+      }
+
+      if ($settings.capitals_only && !killmail.zkb.labels.includes("capital")) {
+        return false;
       }
 
       return true;
     });
 
-    // Sort the filtered results by killmail_time in descending order
     return filtered.sort((a, b) => {
       const timeA = new Date(a.killmail.killmail_time).getTime();
       const timeB = new Date(b.killmail.killmail_time).getTime();
