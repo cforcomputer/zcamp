@@ -3,6 +3,7 @@
   import MapVisualization from "./MapVisualization.svelte";
   import { onMount } from "svelte";
   import ContextMenu from "./ContextMenu.svelte";
+  import audioManager from "./audioUtils";
 
   export let openMap; // Receive openMap function from App.svelte
 
@@ -31,6 +32,30 @@
         );
       })
     : [];
+
+  // alert sounds for new killmails
+  $: if ($settings.audio_alerts_enabled && $filteredKillmails?.length > 0) {
+    const currentKillmailIds = new Set(
+      $filteredKillmails.map((km) => km.killID)
+    );
+
+    $filteredKillmails.forEach((killmail) => {
+      if (!previousKillmailIds.has(killmail.killID)) {
+        // Different alerts based on value
+        if (killmail.zkb.totalValue >= 1000000000) {
+          // 1B+
+          audioManager.playAlert("orange");
+        } else if (killmail.zkb.totalValue >= 100000000) {
+          // 100M+
+          audioManager.playAlert("blue");
+        } else {
+          audioManager.playAlert("default");
+        }
+      }
+    });
+
+    previousKillmailIds = currentKillmailIds;
+  }
 
   // Subscribe to filtered killmails
   $: if (
@@ -233,6 +258,7 @@
 
   onMount(() => {
     scrollToBottom();
+    audioManager.init();
   });
 
   $: {
