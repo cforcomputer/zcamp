@@ -3,6 +3,7 @@
   import { onMount, onDestroy } from "svelte";
   import roamManager, { activeRoams } from "./roamManager.js";
   import ContextMenu from "./ContextMenu.svelte";
+  import socket from "./socket.js";
 
   let viewMode = "cards"; // "cards" or "chart"
 
@@ -122,21 +123,59 @@
     }
   }
 
+  // Component: ActiveRoams.svelte
+
   function handleContextMenu(event, roam) {
     event.preventDefault();
 
-    // Get the container element's position
-    const container = event.currentTarget.closest(".eve-card");
-    const containerBounds = container.getBoundingClientRect();
+    // Get the container element based on view mode
+    const container =
+      viewMode === "cards"
+        ? event.currentTarget.closest(".eve-card")
+        : event.currentTarget.closest("tr");
 
-    // Calculate position relative to the container
-    const x = event.clientX - containerBounds.left;
-    const y = event.clientY - containerBounds.top;
+    if (!container) return;
+
+    // Get the parent container - either the grid or table container
+    const parentContainer =
+      viewMode === "cards"
+        ? container.closest(".grid")
+        : container.closest(".overflow-x-auto");
+
+    if (!parentContainer) return;
+
+    // Calculate scroll offsets
+    const scrollLeft =
+      window.pageXOffset || document.documentElement.scrollLeft;
+    const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
+
+    // Account for table's scroll position if in chart view
+    const tableScrollLeft =
+      viewMode === "chart" ? parentContainer.scrollLeft : 0;
+
+    // Calculate position relative to the viewport
+    const x = event.clientX + scrollLeft - tableScrollLeft;
+    const y = event.clientY + scrollTop;
+
+    // Get the main container bounds (the .p-4 div)
+    const mainContainer = container.closest(".p-4");
+    const mainContainerBounds = mainContainer.getBoundingClientRect();
+
+    // Calculate position relative to the main container
+    const relativeX = x - mainContainerBounds.left - scrollLeft;
+    const relativeY = y - mainContainerBounds.top - scrollTop;
+
+    // Check if menu would go off the right edge of the container
+    const menuWidth = 200; // Approximate width of your context menu
+    const adjustedX = Math.min(
+      relativeX,
+      mainContainerBounds.width - menuWidth
+    );
 
     contextMenu = {
       show: true,
-      x,
-      y,
+      x: adjustedX,
+      y: relativeY,
       options: [
         {
           label: "Set Destination",
@@ -148,8 +187,20 @@
         },
       ],
     };
-  }
 
+    // Add click outside listener to close menu
+    const handleClickOutside = (e) => {
+      if (!e.target.closest(".context-menu")) {
+        contextMenu.show = false;
+        document.removeEventListener("click", handleClickOutside);
+      }
+    };
+
+    // Small timeout to prevent immediate closure
+    setTimeout(() => {
+      document.addEventListener("click", handleClickOutside);
+    }, 0);
+  }
   function handleMenuSelect(event) {
     const option = event.detail;
     option.action();
@@ -164,7 +215,7 @@
     </div>
   {:else if mounted}
     <div class="flex justify-between items-center mb-4">
-      <h2 class="text-2xl font-bold text-eve-accent">Active Roams</h2>
+      <h2 class="text-2xl font-bold text-eve-accent">Active Gangs</h2>
       <div class="flex gap-2">
         <button
           class="px-4 py-2 bg-eve-secondary rounded {viewMode === 'cards'
@@ -342,12 +393,11 @@
   {/if}
 </div>
 
-<div class="fixed inset-0 pointer-events-none z-50">
-  <ContextMenu
-    show={contextMenu.show}
-    x={contextMenu.x}
-    y={contextMenu.y}
-    options={contextMenu.options}
-    on:select={handleMenuSelect}
-  />
-</div>
+<!-- Context Menu Container -->
+<ContextMenu
+  show={contextMenu.show}
+  x={contextMenu.x}
+  y={contextMenu.y}
+  options={contextMenu.options}
+  on:select={handleMenuSelect}
+/>
