@@ -2677,10 +2677,10 @@ io.on("connection", (socket) => {
     }
   });
 
-  socket.on("clearKills", () => {
-    killmails = [];
-    socket.emit("killmailsCleared");
-  });
+  // socket.on("clearKills", () => {
+  //   killmails = [];
+  //   socket.emit("killmailsCleared");
+  // });
 
   socket.on("disconnect", () => {
     console.log("Client disconnected");

@@ -27,6 +27,7 @@
   import LocationTracker from "./LocationTracker.svelte";
   import MapVisualization from "./MapVisualization.svelte";
   import WreckFieldDialog from "./WreckFieldDialog.svelte";
+  import { slide } from "svelte/transition";
 
   let showWelcome = false;
   let checkingSession = true;
@@ -40,6 +41,7 @@
   let selectedKillmail = null;
   let showWreckFieldDialog = false;
   let selectedWreckData = null;
+  let isTracking = false;
 
   $: userSettings = $settings;
   $: kills = $killmails;
@@ -51,6 +53,10 @@
   function handleVerified() {
     showWelcome = false;
     initializeSocketStore();
+  }
+
+  function toggleTracking() {
+    isTracking = !isTracking;
   }
 
   async function handleLogin(event) {
@@ -292,10 +298,9 @@
     </div>
   {/if}
 
-  <div class="min-h-screen bg-gradient-to-b from-eve-primary to-eve-primary/95">
-    <nav
-      class="fixed top-0 left-0 right-0 bg-eve-dark/90 backdrop-blur-md border-b border-eve-accent/20 z-40"
-    >
+  <div class="fixed top-0 left-0 right-0 z-40">
+    <!-- Main Navigation -->
+    <nav class="bg-eve-dark/90 backdrop-blur-md border-b border-eve-accent/20">
       <div class="max-w-7xl mx-auto px-4">
         <div class="flex items-center justify-between h-16">
           <div class="flex space-x-1">
@@ -351,7 +356,34 @@
 
           <div class="flex items-center">
             {#if loggedIn}
-              <LocationTracker />
+              <!-- Tracking toggle in top bar -->
+              <div class="flex items-center gap-2">
+                <label class="relative inline-flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    bind:checked={isTracking}
+                    on:change={toggleTracking}
+                    class="sr-only peer"
+                  />
+                  <div
+                    class="w-9 h-5 bg-gray-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-eve-accent"
+                  ></div>
+                  <span class="ml-2 text-sm font-medium text-white">Track</span>
+                </label>
+              </div>
+
+              <!-- Tracking info panel -->
+              {#if isTracking}
+                <div
+                  transition:slide
+                  class="absolute top-full left-0 right-0 bg-eve-dark/80 backdrop-blur-sm border-b border-eve-accent/10"
+                >
+                  <div class="max-w-7xl mx-auto px-4 h-12">
+                    <LocationTracker {isTracking} />
+                  </div>
+                </div>
+              {/if}
+
               <button
                 class="eve-nav-item ml-4 text-eve-danger hover:bg-eve-danger/20"
                 on:click={handleLogout}
@@ -371,6 +403,17 @@
       </div>
     </nav>
 
+    <!-- Location Tracker Bar -->
+    {#if loggedIn}
+      <div
+        class="bg-eve-dark/80 backdrop-blur-sm border-b border-eve-accent/10 h-12"
+      >
+        <div class="max-w-7xl mx-auto px-4 h-full">
+          <LocationTracker />
+        </div>
+      </div>
+    {/if}
+
     <main class="pt-20 px-4 max-w-7xl mx-auto">
       {#if currentPage === "kills"}
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -379,17 +422,6 @@
           </div>
           <div class="eve-card">
             <KillmailViewer {openMap} />
-            <div class="mt-4">
-              <button
-                class="eve-button w-full"
-                on:click={() => {
-                  socket.emit("clearKills");
-                  clearKills();
-                }}
-              >
-                ⚠️ Reset Kills (resets all pages) ⚠️
-              </button>
-            </div>
           </div>
         </div>
       {:else if currentPage === "camps"}

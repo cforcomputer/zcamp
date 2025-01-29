@@ -1,16 +1,11 @@
 <script>
-  import {
-    startLocationPolling,
-    stopLocationPolling,
-    currentLocation,
-    locationError,
-  } from "./locationStore";
+  import { currentLocation, locationError } from "./locationStore";
   import { activeCamps } from "./campManager.js";
   import { onMount, onDestroy } from "svelte";
-  import { get } from "svelte/store";
+
+  export let isTracking;
 
   let selectedVoice = null;
-  let isTracking = false;
   let trackedCharacter = null;
   let lastSystemId = null;
   let lastCampWarning = {};
@@ -75,24 +70,20 @@
   function getCampSummary(camps) {
     if (!$currentLocation) return "No location data available";
 
+    const warnings = [];
+
+    // Check current system camps
     const currentSystemCamps = camps.filter(
       (camp) => camp.systemId === $currentLocation.solar_system_id
     );
 
-    const connectedSystemCamps = camps.filter((camp) =>
-      $currentLocation.connected_systems.some((sys) => sys.id === camp.systemId)
-    );
-
-    const warnings = [];
-
-    // Check current system camps
     if (currentSystemCamps.length > 0) {
       const highProbCamps = currentSystemCamps.filter(
         (camp) => camp.probability >= 50
       );
       if (highProbCamps.length > 0) {
         warnings.push(
-          `⚠️ Active camps at: ${highProbCamps
+          `⚠️ Active camps in current system at: ${highProbCamps
             .map(
               (camp) =>
                 `${camp.stargateName} (${Math.round(camp.probability)}% confidence)`
@@ -102,25 +93,78 @@
       }
     }
 
-    // Check connected system camps
-    if (connectedSystemCamps.length > 0) {
-      const highProbConnected = connectedSystemCamps.filter(
-        (camp) => camp.probability >= 50
+    // Check camps in connected systems and their neighbors
+    const connectedSystemWarnings = [];
+
+    $currentLocation.connected_systems.forEach((connectedSystem) => {
+      const warnings = [];
+
+      // Find the gate in current system that leads to this connected system
+      const gateToSystem = $currentLocation.celestialData.find(
+        (cel) =>
+          cel.typename?.toLowerCase().includes("stargate") &&
+          cel.itemname
+            .toLowerCase()
+            .includes(connectedSystem.name.toLowerCase())
       );
-      if (highProbConnected.length > 0) {
+      const gateName =
+        gateToSystem?.itemname || `Gate to ${connectedSystem.name}`;
+
+      // Check camps in the directly connected system
+      const directCamps = camps
+        .filter((camp) => camp.systemId === connectedSystem.id)
+        .filter((camp) => camp.probability >= 50);
+
+      if (directCamps.length > 0) {
         warnings.push(
-          `⚠️ Camps in connected systems: ${highProbConnected
+          `${directCamps.length} camp${directCamps.length > 1 ? "s" : ""} at ${directCamps
             .map(
               (camp) =>
-                `${$currentLocation.connected_systems.find((sys) => sys.id === camp.systemId)?.name || "Unknown"} system at ${camp.stargateName} (${Math.round(camp.probability)}% confidence)`
+                `${camp.stargateName} (${Math.round(camp.probability)}% confidence)`
             )
             .join(", ")}`
         );
       }
+
+      // Check for camps in systems that are one jump further
+      const neighboringCamps = camps.filter(
+        (camp) =>
+          // Get camps that aren't in our current system or the connected system
+          camp.systemId !== $currentLocation.solar_system_id &&
+          camp.systemId !== connectedSystem.id &&
+          camp.probability >= 50 &&
+          // Only include camps where the gate name mentions either our connected system
+          // or the current system (indicating it's one jump away)
+          (camp.stargateName
+            .toLowerCase()
+            .includes(connectedSystem.name.toLowerCase()) ||
+            camp.stargateName
+              .toLowerCase()
+              .includes($currentLocation.systemName.toLowerCase()))
+      );
+
+      if (neighboringCamps.length > 0) {
+        warnings.push(
+          `${neighboringCamps.length} camp${neighboringCamps.length > 1 ? "s" : ""} in neighboring systems: ${neighboringCamps
+            .map(
+              (camp) =>
+                `${camp.stargateName} in ${camp.kills[0]?.pinpoints?.celestialData?.solarsystemname || "Unknown"} (${Math.round(camp.probability)}% confidence)`
+            )
+            .join(", ")}`
+        );
+      }
+
+      if (warnings.length > 0) {
+        connectedSystemWarnings.push(`⚠️ ${gateName}: ${warnings.join("; ")}`);
+      }
+    });
+
+    if (connectedSystemWarnings.length > 0) {
+      warnings.push(...connectedSystemWarnings);
     }
 
     return warnings.length > 0
-      ? warnings.join(". ")
+      ? warnings.join("\n")
       : "✓ No active camps detected";
   }
 
@@ -166,40 +210,6 @@
     }
   }
 
-  async function toggleTracking() {
-    try {
-      if (!isTracking) {
-        const started = await startLocationPolling();
-        if (started) {
-          isTracking = true;
-          const sessionResponse = await fetch("/api/session", {
-            credentials: "include",
-          });
-          const sessionData = await sessionResponse.json();
-          trackedCharacter = sessionData.user?.character_name;
-
-          // Only announce once when tracking starts
-          if ($currentLocation) {
-            const campSummary = getCampSummary(camps);
-            queueSpeech(
-              `Tracking enabled for ${trackedCharacter}. Your current system is ${$currentLocation.systemName}. ${stripSymbols(campSummary)}`
-            );
-          }
-        }
-      } else {
-        stopLocationPolling();
-        isTracking = false;
-        trackedCharacter = null;
-        lastSystemId = null;
-        lastCampWarning = {};
-        speechQueue = [];
-        window.speechSynthesis.cancel();
-      }
-    } catch (err) {
-      console.error("Error toggling tracking:", err);
-    }
-  }
-
   onMount(async () => {
     try {
       const response = await fetch("/api/session", {
@@ -215,97 +225,38 @@
   });
 
   onDestroy(() => {
-    if (isTracking) {
-      stopLocationPolling();
-    }
     window.speechSynthesis.cancel();
   });
 </script>
 
-<div class="location-tracker">
-  <div class="tracker-content">
-    <label class="toggle">
-      <input type="checkbox" checked={isTracking} on:change={toggleTracking} />
-      <span class="slider" />
-      <span class="label-text">Track</span>
-    </label>
-
-    {#if $currentLocation}
+<div class="tracking-info" class:error={$locationError}>
+  {#if $currentLocation}
+    <div class="flex items-center gap-4">
       <div class="system-info">
         <span class="system-name">{$currentLocation.systemName}</span>
         <span class="region-name">({$currentLocation.regionName})</span>
-        <span class="camp-status">{getCampSummary(camps)}</span>
       </div>
-    {/if}
+      <div class="camp-status">
+        {getCampSummary(camps)}
+      </div>
+    </div>
+  {/if}
 
-    {#if $locationError}
-      <span class="error">{$locationError}</span>
-    {/if}
-  </div>
+  {#if $locationError}
+    <span class="error-message">{$locationError}</span>
+  {/if}
 </div>
 
 <style>
-  .location-tracker {
-    display: flex;
-    align-items: center;
-    padding: 0 1rem;
-    height: 100%;
-    background: transparent;
-  }
-
-  .tracker-content {
-    display: flex;
-    align-items: center;
-    gap: 1rem;
-  }
-
-  .toggle {
-    position: relative;
-    display: inline-flex;
-    align-items: center;
-    cursor: pointer;
-    gap: 0.5rem;
-  }
-
-  .toggle input {
-    display: none;
-  }
-
-  .slider {
-    position: relative;
-    width: 32px;
-    height: 16px;
-    background: #444;
-    border-radius: 20px;
-    transition: 0.3s;
-  }
-
-  .slider:before {
-    content: "";
-    position: absolute;
-    width: 12px;
-    height: 12px;
-    border-radius: 50%;
-    left: 2px;
-    top: 2px;
-    background: white;
-    transition: 0.3s;
-  }
-
-  input:checked + .slider {
-    background: #007bff;
-  }
-
-  input:checked + .slider:before {
-    transform: translateX(16px);
+  .tracking-info {
+    width: 100%;
+    color: white;
   }
 
   .system-info {
     display: flex;
-    align-items: center;
     gap: 1rem;
-    color: white;
-    font-size: 0.9em;
+    align-items: center;
   }
 
   .system-name {
@@ -315,21 +266,17 @@
 
   .region-name {
     color: #aaa;
-    font-size: 0.9em;
   }
 
   .camp-status {
-    color: #fff;
+    flex: 1;
   }
 
-  .error {
+  .error-message {
     color: #ff4444;
-    font-size: 0.8em;
   }
 
-  .label-text {
-    color: white;
-    user-select: none;
-    font-size: 0.9em;
+  .tracking-info.error {
+    color: #ff4444;
   }
 </style>
