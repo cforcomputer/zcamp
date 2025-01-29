@@ -33,6 +33,8 @@
     startLocationPolling,
     stopLocationPolling,
   } from "./locationStore.js";
+  import campManager from "./campManager.js";
+  import roamManager from "./roamManager.js";
 
   // Create a store for tracking state
   const trackingStore = writable(false);
@@ -73,6 +75,14 @@
       startPolling();
     } else {
       stopLocationPolling();
+    }
+  }
+
+  $: {
+    if (currentPage === "camps") {
+      campManager.forceUpdate();
+    } else if (currentPage === "gangs") {
+      roamManager.forceUpdate();
     }
   }
 
@@ -304,6 +314,7 @@
     {/if}
 
     {#if showWreckFieldDialog && selectedWreckData}
+      <!-- svelte-ignore a11y-no-static-element-interactions -->
       <div
         class="fixed inset-0 z-50 flex items-center justify-center"
         on:click={closeWreckField}
@@ -312,6 +323,8 @@
         }}
       >
         <div class="fixed inset-0 bg-black/75 backdrop-blur-sm" />
+        <!-- svelte-ignore a11y-click-events-have-key-events -->
+        <!-- svelte-ignore a11y-no-static-element-interactions -->
         <div class="relative z-50" on:click|stopPropagation>
           <WreckFieldDialog
             wrecks={selectedWreckData.wrecks}

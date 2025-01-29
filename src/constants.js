@@ -149,7 +149,7 @@ export const CAMP_PROBABILITY_FACTORS = {
     11961: { weight: 0.3 }, // Huginn
     11957: { weight: 0.04 }, // Falcon
     29986: { weight: 0.09 }, // Legion
-    47466: { weight: 0.06 }, // Praxis
+    47466: { weight: 0.1 }, // Praxis
     12038: { weight: 0.05 }, // Purifier
     12034: { weight: 0.05 }, // hound
     17720: { weight: 0.12 }, // Cynabal
@@ -169,6 +169,7 @@ export const CAMP_PROBABILITY_FACTORS = {
     17738: "Machariel",
     3756: "Gnosis",
     29988: "Proteus",
+    47466: "Praxis",
   },
 
   SHIP_CATEGORIES: {

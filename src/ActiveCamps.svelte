@@ -9,14 +9,23 @@
 
   let viewMode = "cards"; // "cards" or "chart"
   let isLoading = true;
+  let mounted = false;
 
   // Reactive statement to sort camps whenever the array is updated
   // Reactive subscription to activeCamps store
   $: camps = $activeCamps.sort((a, b) => b.probability - a.probability);
 
-  onMount(() => {
-    campManager.startUpdates();
+  $: if (mounted && $activeCamps) {
     isLoading = false;
+  }
+
+  onMount(() => {
+    mounted = true;
+    campManager.startUpdates();
+    return () => {
+      mounted = false;
+      campManager.cleanup();
+    };
   });
 
   onDestroy(() => {
@@ -174,15 +183,6 @@
       .join("\n");
   }
 
-  function getComposition(camp) {
-    if (camp.metrics?.partyMetrics) {
-      return camp.metrics.partyMetrics.characters;
-    } else if (camp.composition) {
-      return camp.composition.activeCount;
-    }
-    return 0;
-  }
-
   function openCampHistory(camp) {
     const latestKill = camp.kills[camp.kills.length - 1];
     if (latestKill) {
@@ -204,306 +204,319 @@
 </script>
 
 <div class="p-4">
-  <div class="flex justify-center mb-8">
-    <CampCrusher />
-  </div>
-
-  <div class="flex justify-between items-center mb-4">
-    <h2 class="text-white text-2xl font-bold">Active Gate Camps</h2>
-    <div class="flex gap-2">
-      <button
-        class="px-4 py-2 bg-eve-secondary rounded {viewMode === 'cards'
-          ? 'text-eve-accent'
-          : 'text-gray-400'}"
-        on:click={() => (viewMode = "cards")}
-      >
-        Card View
-      </button>
-      <button
-        class="px-4 py-2 bg-eve-secondary rounded {viewMode === 'chart'
-          ? 'text-eve-accent'
-          : 'text-gray-400'}"
-        on:click={() => (viewMode = "chart")}
-      >
-        Chart View
-      </button>
-    </div>
-  </div>
-
   {#if isLoading}
-    <p class="text-center py-8 text-gray-400 italic">Syncing active camps...</p>
-  {:else if camps.length === 0}
-    <p class="text-center py-8 text-gray-400 italic">
-      No active gate camps detected
-    </p>
-  {:else if viewMode === "cards"}
-    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-      {#each camps as camp}
-        <div class="group relative">
-          <!-- svelte-ignore a11y-no-static-element-interactions -->
-          <div
-            class="overflow-hidden rounded-lg {camp.state === 'CRASHED'
-              ? 'opacity-70 grayscale-[0.7]'
-              : ''}"
-            on:contextmenu|preventDefault={(e) => handleContextMenu(e, camp)}
-          >
-            <!-- Title Bar -->
+    <div class="text-center py-8">
+      <p class="text-gray-400">Loading camps...</p>
+    </div>
+  {:else if mounted}
+    <div class="flex justify-center mb-8">
+      <CampCrusher />
+    </div>
+
+    <div class="flex justify-between items-center mb-4">
+      <h2 class="text-white text-2xl font-bold">Active Gate Camps</h2>
+      <div class="flex gap-2">
+        <button
+          class="px-4 py-2 bg-eve-secondary rounded {viewMode === 'cards'
+            ? 'text-eve-accent'
+            : 'text-gray-400'}"
+          on:click={() => (viewMode = "cards")}
+        >
+          Card View
+        </button>
+        <button
+          class="px-4 py-2 bg-eve-secondary rounded {viewMode === 'chart'
+            ? 'text-eve-accent'
+            : 'text-gray-400'}"
+          on:click={() => (viewMode = "chart")}
+        >
+          Chart View
+        </button>
+      </div>
+    </div>
+
+    {#if camps.length === 0}
+      <p class="text-center py-8 text-gray-400 italic">Syncing camps...</p>
+    {:else if viewMode === "cards"}
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        {#each camps as camp}
+          <div class="group relative">
+            <!-- svelte-ignore a11y-no-static-element-interactions -->
             <div
-              class="bg-eve-secondary p-3 border-t-2"
-              style="border-color: {getProbabilityColor(camp.probability)}"
+              class="overflow-hidden rounded-lg {camp.state === 'CRASHED'
+                ? 'opacity-70 grayscale-[0.7]'
+                : ''}"
+              on:contextmenu|preventDefault={(e) => handleContextMenu(e, camp)}
             >
-              <h3 class="text-white text-base font-bold truncate">
-                {camp.stargateName}
-              </h3>
+              <!-- Title Bar -->
+              <div
+                class="bg-eve-secondary p-3 border-t-2"
+                style="border-color: {getProbabilityColor(camp.probability)}"
+              >
+                <h3 class="text-white text-base font-bold truncate">
+                  {camp.stargateName}
+                </h3>
+              </div>
+
+              <!-- Card Content -->
+              <button
+                type="button"
+                class="w-full text-left bg-eve-primary p-3"
+                on:click={() => openCampHistory(camp)}
+                on:keypress={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    openCampHistory(camp);
+                  }
+                }}
+              >
+                <!-- Probability and Actions Row -->
+                <div class="flex justify-between items-center mb-3">
+                  <div class="flex items-center gap-2">
+                    {#if camp.type === "smartbomb"}
+                      <span
+                        class="px-2 py-1 bg-blue-600 rounded text-xl"
+                        title="Smartbomb Camp">⚡</span
+                      >
+                    {/if}
+                    <span
+                      class="px-2 py-1 rounded text-black font-bold text-sm"
+                      style="background-color: {getProbabilityColor(
+                        camp.probability
+                      )}"
+                    >
+                      {Math.round(camp.probability)}% Confidence
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    class="px-3 py-1 bg-eve-accent text-black font-medium rounded hover:bg-eve-accent/80 transition-colors"
+                    title="View Latest Kill"
+                    on:click|stopPropagation={(e) => {
+                      e.preventDefault();
+                      const latestKill = camp.kills[camp.kills.length - 1];
+                      if (latestKill) {
+                        window.open(
+                          `https://zkillboard.com/kill/${latestKill.killID}/`,
+                          "_blank"
+                        );
+                      }
+                    }}
+                  >
+                    Last Kill
+                  </button>
+                </div>
+
+                <!-- Camp Details -->
+                <div class="space-y-1">
+                  <div
+                    class="flex justify-between py-0.5 border-b border-white/10"
+                  >
+                    <span class="text-gray-400">System:</span>
+                    <span class="text-white">
+                      {camp.kills[0]?.pinpoints?.celestialData
+                        ?.solarsystemname || camp.systemId}
+                    </span>
+                  </div>
+
+                  <div
+                    class="flex justify-between py-0.5 border-b border-white/10"
+                  >
+                    <span class="text-gray-400">Duration:</span>
+                    <span class="text-white">
+                      {#if camp.kills && camp.kills.length > 0}
+                        {(() => {
+                          const firstKillTime = Math.min(
+                            ...camp.kills.map((k) =>
+                              new Date(k.killmail.killmail_time).getTime()
+                            )
+                          );
+                          const duration = Math.floor(
+                            (Date.now() - firstKillTime) / (1000 * 60)
+                          );
+                          return `${duration}m active`;
+                        })()}
+                      {:else}
+                        0m active
+                      {/if}
+                    </span>
+                  </div>
+
+                  <div
+                    class="flex justify-between py-0.5 border-b border-white/10"
+                  >
+                    <span class="text-gray-400">Activity:</span>
+                    <span class="text-white flex items-center">
+                      {camp.kills.filter(
+                        (k) => k.killmail.victim.ship_type_id !== CAPSULE_ID
+                      ).length} kills
+                      {#if camp.metrics?.podKills > 0}
+                        ({camp.metrics.podKills} pods)
+                      {/if}
+                      {#if hasInterdictor(camp.kills)}
+                        <span
+                          class="ml-2 cursor-help"
+                          title="Interdictor/HICTOR present">⚠️</span
+                        >
+                      {/if}
+                    </span>
+                  </div>
+
+                  <div
+                    class="flex justify-between py-0.5 border-b border-white/10"
+                  >
+                    <span class="text-gray-400">Value:</span>
+                    <span class="text-eve-danger font-bold"
+                      >{formatValue(camp.totalValue)} ISK</span
+                    >
+                  </div>
+
+                  <div
+                    class="flex justify-between py-0.5 border-b border-white/10"
+                  >
+                    <span class="text-gray-400">Composition:</span>
+                    <span class="text-white">
+                      {#if camp.metrics?.partyMetrics}
+                        {camp.metrics.partyMetrics.characters} pilots
+                        {#if camp.metrics.partyMetrics.corporations > 0}
+                          from {camp.metrics.partyMetrics.corporations} corps
+                          {#if camp.metrics.partyMetrics.alliances > 0}
+                            in {camp.metrics.partyMetrics.alliances} alliances
+                          {/if}
+                        {/if}
+                      {:else if camp.composition}
+                        {camp.composition.activeCount}/{camp.composition
+                          .originalCount} active
+                        {#if camp.composition.killedCount > 0}
+                          <span class="text-eve-danger font-bold"
+                            >(-{camp.composition.killedCount})</span
+                          >
+                        {/if}
+                      {:else}
+                        Computing...
+                      {/if}
+                    </span>
+                  </div>
+
+                  {#if camp.metrics?.shipCounts}
+                    <div class="mt-1 p-2 bg-eve-secondary rounded">
+                      <div class="flex flex-wrap gap-1">
+                        {#each Object.entries(camp.metrics.shipCounts) as [shipId, count]}
+                          {#if THREAT_SHIPS[shipId]}
+                            <span
+                              class="px-2 py-1 rounded text-sm"
+                              style="background-color: {getShipThreatColor(
+                                THREAT_SHIPS[shipId].weight
+                              )}"
+                              title="Threat Ship x{count}"
+                            >
+                              {getShipIcon(THREAT_SHIPS[shipId].category)}
+                            </span>
+                          {/if}
+                        {/each}
+                      </div>
+                    </div>
+                  {/if}
+
+                  {#if camp.state === "CRASHED"}
+                    <div class="text-center py-1 bg-eve-danger/50 rounded mt-1">
+                      CRASHED
+                    </div>
+                  {/if}
+
+                  <div
+                    class="flex justify-between py-0.5 border-b border-white/10"
+                  >
+                    <span class="text-gray-400">Last Activity:</span>
+                    <span class="text-gray-400 italic"
+                      >{getTimeAgo(camp.lastKill)}</span
+                    >
+                  </div>
+                </div>
+              </button>
             </div>
 
-            <!-- Card Content -->
-            <button
-              type="button"
-              class="w-full text-left bg-eve-primary p-3"
-              on:click={() => openCampHistory(camp)}
-              on:keypress={(e) => {
-                if (e.key === "Enter" || e.key === " ") {
-                  openCampHistory(camp);
-                }
-              }}
+            <!-- Probability Log Tooltip -->
+            <div
+              class="hidden group-hover:block absolute top-full left-0 right-0 z-50 mt-1"
             >
-              <!-- Probability and Actions Row -->
-              <div class="flex justify-between items-center mb-3">
-                <div class="flex items-center gap-2">
-                  {#if camp.type === "smartbomb"}
-                    <span
-                      class="px-2 py-1 bg-blue-600 rounded text-xl"
-                      title="Smartbomb Camp">⚡</span
-                    >
-                  {/if}
+              <pre
+                class="bg-eve-primary text-white p-3 rounded border border-eve-accent/20 font-mono text-xs leading-relaxed shadow-lg max-w-[500px] max-h-[400px] overflow-y-auto">
+                  {formatProbabilityLog(camp.probabilityLog)}
+                </pre>
+            </div>
+          </div>
+        {/each}
+      </div>
+    {:else}
+      <!-- Chart View -->
+      <div class="overflow-x-auto">
+        <table class="w-full">
+          <thead class="bg-eve-secondary">
+            <tr>
+              <th class="px-4 py-2 text-left">Location</th>
+              <th class="px-4 py-2 text-left">Status</th>
+              <th class="px-4 py-2 text-left">Activity</th>
+              <th class="px-4 py-2 text-left">Value</th>
+              <th class="px-4 py-2 text-left">Composition</th>
+              <th class="px-4 py-2 text-left">Last Activity</th>
+            </tr>
+          </thead>
+          <tbody>
+            {#each camps as camp}
+              <tr
+                class="border-b border-eve-secondary/30 hover:bg-eve-secondary/20 cursor-pointer"
+                on:click={() => openCampHistory(camp)}
+                on:contextmenu|preventDefault={(e) =>
+                  handleContextMenu(e, camp)}
+                on:keypress={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    openCampHistory(camp);
+                  }
+                }}
+                role="button"
+                tabindex="0"
+              >
+                <td class="px-4 py-2">{camp.stargateName}</td>
+                <td class="px-4 py-2">
                   <span
-                    class="px-2 py-1 rounded text-black font-bold text-sm"
+                    class="px-2 py-1 rounded text-black text-sm"
                     style="background-color: {getProbabilityColor(
                       camp.probability
                     )}"
                   >
-                    {Math.round(camp.probability)}% Confidence
+                    {Math.round(camp.probability)}%
                   </span>
-                </div>
-                <button
-                  type="button"
-                  class="px-3 py-1 bg-eve-accent text-black font-medium rounded hover:bg-eve-accent/80 transition-colors"
-                  title="View Latest Kill"
-                  on:click|stopPropagation={(e) => {
-                    e.preventDefault();
-                    const latestKill = camp.kills[camp.kills.length - 1];
-                    if (latestKill) {
-                      window.open(
-                        `https://zkillboard.com/kill/${latestKill.killID}/`,
-                        "_blank"
-                      );
-                    }
-                  }}
-                >
-                  Last Kill
-                </button>
-              </div>
-
-              <!-- Camp Details -->
-              <div class="space-y-1">
-                <div
-                  class="flex justify-between py-0.5 border-b border-white/10"
-                >
-                  <span class="text-gray-400">System:</span>
-                  <span class="text-white">
-                    {camp.kills[0]?.pinpoints?.celestialData?.solarsystemname ||
-                      camp.systemId}
-                  </span>
-                </div>
-
-                <div
-                  class="flex justify-between py-0.5 border-b border-white/10"
-                >
-                  <span class="text-gray-400">Duration:</span>
-                  <span class="text-white">
-                    {#if camp.firstKillTime}
-                      {getTimeAgo(camp.firstKillTime).replace(" ago", "")}
-                    {:else}
-                      0m active
-                    {/if}
-                  </span>
-                </div>
-
-                <div
-                  class="flex justify-between py-0.5 border-b border-white/10"
-                >
-                  <span class="text-gray-400">Activity:</span>
-                  <span class="text-white flex items-center">
-                    {camp.kills.filter(
-                      (k) => k.killmail.victim.ship_type_id !== CAPSULE_ID
-                    ).length} kills
-                    {#if camp.metrics?.podKills > 0}
-                      ({camp.metrics.podKills} pods)
-                    {/if}
-                    {#if hasInterdictor(camp.kills)}
-                      <span
-                        class="ml-2 cursor-help"
-                        title="Interdictor/HICTOR present">⚠️</span
-                      >
-                    {/if}
-                  </span>
-                </div>
-
-                <div
-                  class="flex justify-between py-0.5 border-b border-white/10"
-                >
-                  <span class="text-gray-400">Value:</span>
-                  <span class="text-eve-danger font-bold"
-                    >{formatValue(camp.totalValue)} ISK</span
-                  >
-                </div>
-
-                <div
-                  class="flex justify-between py-0.5 border-b border-white/10"
-                >
-                  <span class="text-gray-400">Composition:</span>
-                  <span class="text-white">
-                    {#if camp.metrics?.partyMetrics}
-                      {camp.metrics.partyMetrics.characters} pilots
-                      {#if camp.metrics.partyMetrics.corporations > 0}
-                        from {camp.metrics.partyMetrics.corporations} corps
-                        {#if camp.metrics.partyMetrics.alliances > 0}
-                          in {camp.metrics.partyMetrics.alliances} alliances
-                        {/if}
-                      {/if}
-                    {:else if camp.composition}
-                      {camp.composition.activeCount}/{camp.composition
-                        .originalCount} active
-                      {#if camp.composition.killedCount > 0}
-                        <span class="text-eve-danger font-bold"
-                          >(-{camp.composition.killedCount})</span
-                        >
-                      {/if}
-                    {:else}
-                      Computing...
-                    {/if}
-                  </span>
-                </div>
-
-                {#if camp.metrics?.shipCounts}
-                  <div class="mt-1 p-2 bg-eve-secondary rounded">
-                    <div class="flex flex-wrap gap-1">
-                      {#each Object.entries(camp.metrics.shipCounts) as [shipId, count]}
-                        {#if THREAT_SHIPS[shipId]}
-                          <span
-                            class="px-2 py-1 rounded text-sm"
-                            style="background-color: {getShipThreatColor(
-                              THREAT_SHIPS[shipId].weight
-                            )}"
-                            title="Threat Ship x{count}"
-                          >
-                            {getShipIcon(THREAT_SHIPS[shipId].category)}
-                          </span>
-                        {/if}
-                      {/each}
-                    </div>
-                  </div>
-                {/if}
-
-                {#if camp.state === "CRASHED"}
-                  <div class="text-center py-1 bg-eve-danger/50 rounded mt-1">
-                    CRASHED
-                  </div>
-                {/if}
-
-                <div
-                  class="flex justify-between py-0.5 border-b border-white/10"
-                >
-                  <span class="text-gray-400">Last Activity:</span>
-                  <span class="text-gray-400 italic"
-                    >{getTimeAgo(camp.lastKill)}</span
-                  >
-                </div>
-              </div>
-            </button>
-          </div>
-
-          <!-- Probability Log Tooltip -->
-          <div
-            class="hidden group-hover:block absolute top-full left-0 right-0 z-50 mt-1"
-          >
-            <pre
-              class="bg-eve-primary text-white p-3 rounded border border-eve-accent/20 font-mono text-xs leading-relaxed shadow-lg max-w-[500px] max-h-[400px] overflow-y-auto">
-              {formatProbabilityLog(camp.probabilityLog)}
-            </pre>
-          </div>
-        </div>
-      {/each}
-    </div>
-  {:else}
-    <!-- Chart View -->
-    <div class="overflow-x-auto">
-      <table class="w-full">
-        <thead class="bg-eve-secondary">
-          <tr>
-            <th class="px-4 py-2 text-left">Location</th>
-            <th class="px-4 py-2 text-left">Status</th>
-            <th class="px-4 py-2 text-left">Activity</th>
-            <th class="px-4 py-2 text-left">Value</th>
-            <th class="px-4 py-2 text-left">Composition</th>
-            <th class="px-4 py-2 text-left">Last Activity</th>
-          </tr>
-        </thead>
-        <tbody>
-          {#each camps as camp}
-            <tr
-              class="border-b border-eve-secondary/30 hover:bg-eve-secondary/20 cursor-pointer"
-              on:click={() => openCampHistory(camp)}
-              on:contextmenu|preventDefault={(e) => handleContextMenu(e, camp)}
-              on:keypress={(e) => {
-                if (e.key === "Enter" || e.key === " ") {
-                  openCampHistory(camp);
-                }
-              }}
-              role="button"
-              tabindex="0"
-            >
-              <td class="px-4 py-2">{camp.stargateName}</td>
-              <td class="px-4 py-2">
-                <span
-                  class="px-2 py-1 rounded text-black text-sm"
-                  style="background-color: {getProbabilityColor(
-                    camp.probability
-                  )}"
-                >
-                  {Math.round(camp.probability)}%
-                </span>
-              </td>
-              <td class="px-4 py-2">
-                {camp.kills.length} kills
-                {#if camp.metrics?.podKills > 0}
-                  ({camp.metrics.podKills} pods)
-                {/if}
-              </td>
-              <td class="px-4 py-2 text-eve-danger">
-                {formatValue(camp.totalValue)}
-              </td>
-              <td class="px-4 py-2">
-                {#if camp.metrics?.partyMetrics}
-                  {camp.metrics.partyMetrics.characters} pilots
-                  {#if camp.metrics.partyMetrics.corporations > 0}
-                    ({camp.metrics.partyMetrics.corporations} corps)
+                </td>
+                <td class="px-4 py-2">
+                  {camp.kills.length} kills
+                  {#if camp.metrics?.podKills > 0}
+                    ({camp.metrics.podKills} pods)
                   {/if}
-                {:else if camp.composition}
-                  {camp.composition.activeCount} pilots
-                {:else}
-                  Computing...
-                {/if}
-              </td>
-              <td class="px-4 py-2 text-gray-400">
-                {getTimeAgo(camp.lastKill)}
-              </td>
-            </tr>
-          {/each}
-        </tbody>
-      </table>
-    </div>
+                </td>
+                <td class="px-4 py-2 text-eve-danger">
+                  {formatValue(camp.totalValue)}
+                </td>
+                <td class="px-4 py-2">
+                  {#if camp.metrics?.partyMetrics}
+                    {camp.metrics.partyMetrics.characters} pilots
+                    {#if camp.metrics.partyMetrics.corporations > 0}
+                      ({camp.metrics.partyMetrics.corporations} corps)
+                    {/if}
+                  {:else if camp.composition}
+                    {camp.composition.activeCount} pilots
+                  {:else}
+                    Computing...
+                  {/if}
+                </td>
+                <td class="px-4 py-2 text-gray-400">
+                  {getTimeAgo(camp.lastKill)}
+                </td>
+              </tr>
+            {/each}
+          </tbody>
+        </table>
+      </div>
+    {/if}
   {/if}
 </div>
 

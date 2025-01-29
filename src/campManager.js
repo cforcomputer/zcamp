@@ -19,9 +19,11 @@ class CampManager extends EventEmitter {
     this.updateInterval = null;
     this.lastUpdate = Date.now();
 
-    // Subscribe to killmail store to process new kills
+    // Subscribe to killmail store but also process existing killmails immediately
     killmails.subscribe((kills) => {
-      this.processKillmails(kills);
+      if (kills && kills.length > 0) {
+        this.processKillmails(kills);
+      }
     });
   }
 
@@ -271,8 +273,8 @@ class CampManager extends EventEmitter {
 
     // General smartbomb activity check
     if (camp.type === "smartbomb") {
-      probability += 0.4; // Add 40% probability for any smartbomb activity
-      log.push("Smartbomb activity detected: +40%");
+      probability += 0.16; // Add 16% probability for any smartbomb activity
+      log.push("Smartbomb activity detected: +16%");
 
       // Additional bonus for specific smartbomb ships
       const hasSmartbombShip = camp.kills.some((kill) =>
@@ -283,8 +285,8 @@ class CampManager extends EventEmitter {
       );
 
       if (hasSmartbombShip) {
-        probability += 0.2; // Additional 20% for dedicated smartbomb ships
-        log.push("Dedicated smartbomb ship bonus: +20%");
+        probability += 0.3; // Additional 30% for dedicated smartbomb ships
+        log.push("Dedicated smartbomb ship bonus: +30%");
       }
     }
 
@@ -496,6 +498,11 @@ class CampManager extends EventEmitter {
       avgValuePerKill:
         kills.reduce((sum, k) => sum + k.zkb.totalValue, 0) / kills.length,
     };
+  }
+
+  forceUpdate() {
+    this.updateAllProbabilities();
+    activeCamps.set(this._camps);
   }
 
   cleanup() {

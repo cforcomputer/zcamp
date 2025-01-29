@@ -16,9 +16,11 @@ class RoamManager extends EventEmitter {
     this.updateInterval = null;
     this.lastUpdate = Date.now();
 
-    // Subscribe to killmail store
+    // Subscribe to killmail store but also process existing killmails immediately
     killmails.subscribe((kills) => {
-      this.processKillmails(kills);
+      if (kills && kills.length > 0) {
+        this.processKillmails(kills);
+      }
     });
   }
 
@@ -191,6 +193,11 @@ class RoamManager extends EventEmitter {
     }
 
     return this._roams;
+  }
+
+  forceUpdate() {
+    this.clearExpiredRoams();
+    activeRoams.set(this._roams);
   }
 
   cleanup() {

@@ -40,8 +40,8 @@
   const KM_PER_AU = 149597870.7;
 
   const SIZES = {
-    KILL: { radius: 0.00001 },
-    SUN: { radius: 0.03 }, // Adjusted scale
+    KILL: { radius: 0.01 },
+    SUN: { radius: 0.03 },
     PLANET: { radius: 0.003 },
     MOON: { radius: 0.00009 },
     ASTEROID: {
@@ -119,13 +119,15 @@
     canvas.height = 32;
     const context = canvas.getContext("2d");
 
-    // Draw red circle with white border
+    // Draw orange-red circle
     context.beginPath();
     context.arc(16, 16, 12, 0, 2 * Math.PI);
-    context.fillStyle = "#ff0000";
+    context.fillStyle = "#ff0000"; //
     context.fill();
+
+    // Add white outline
     context.strokeStyle = "#ffffff";
-    context.lineWidth = 2;
+    context.lineWidth = 1;
     context.stroke();
 
     const texture = new THREE.CanvasTexture(canvas);
@@ -136,8 +138,7 @@
 
     const sprite = new THREE.Sprite(spriteMaterial);
     sprite.position.copy(position);
-    sprite.scale.set(20, 20, 1); // Adjust size as needed
-
+    sprite.scale.set(500, 500);
     return sprite;
   }
 
@@ -424,6 +425,13 @@
       });
     }
 
+    // Update arrow animations
+    scene.traverse((object) => {
+      if (object.userData.updateArrows) {
+        object.userData.updateArrows();
+      }
+    });
+
     sunBrightnessAnimation();
     controls.update();
     renderer.render(scene, camera);
@@ -519,10 +527,10 @@
   `;
   }
 
-  function getRomanNumeralGroup(name) {
-    const match = name?.match(/ ([IVX]+)( -|$)/);
-    return match ? match[1] : null;
-  }
+  // function getRomanNumeralGroup(name) {
+  //   const match = name?.match(/ ([IVX]+)( -|$)/);
+  //   return match ? match[1] : null;
+  // }
 
   function focusOnSun() {
     const sunObject = Array.from(objectsWithLabels.entries()).find(
@@ -691,8 +699,8 @@
       const geometry = new THREE.SphereGeometry(SIZES.KILL.radius);
       const material = new THREE.MeshPhongMaterial({
         color: 0xff0000,
-        transparent: true,
-        opacity: 0.6,
+        transparent: false,
+        opacity: 1,
         depthWrite: true,
       });
       const sphere = new THREE.Mesh(geometry, material);
@@ -1203,9 +1211,21 @@
             km)
           </p>
         {/each}
+      {:else if kill.pinpoints?.nearestCelestial}
+        <p>
+          Near celestial: {kill.pinpoints.nearestCelestial.name} ({(
+            kill.pinpoints.nearestCelestial.distance / 1000
+          ).toFixed(2)} km)
+        </p>
       {:else}
         <p>Wreck triangulation not possible</p>
       {/if}
+    {:else if kill.pinpoints?.nearestCelestial}
+      <p>
+        Near celestial: {kill.pinpoints.nearestCelestial.name} ({(
+          kill.pinpoints.nearestCelestial.distance / 1000
+        ).toFixed(2)} km)
+      </p>
     {:else}
       <p>Wreck triangulation not possible</p>
     {/if}
