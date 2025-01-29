@@ -28,6 +28,14 @@
   import MapVisualization from "./MapVisualization.svelte";
   import WreckFieldDialog from "./WreckFieldDialog.svelte";
   import { slide } from "svelte/transition";
+  import { writable, get } from "svelte/store";
+  import {
+    startLocationPolling,
+    stopLocationPolling,
+  } from "./locationStore.js";
+
+  // Create a store for tracking state
+  const trackingStore = writable(false);
 
   let showWelcome = false;
   let checkingSession = true;
@@ -41,7 +49,7 @@
   let selectedKillmail = null;
   let showWreckFieldDialog = false;
   let selectedWreckData = null;
-  let isTracking = false;
+  let isTrackingEnabled = false;
 
   $: userSettings = $settings;
   $: kills = $killmails;
@@ -49,6 +57,24 @@
   $: userProfiles = $profiles;
   $: isConnected = $socketConnected;
   $: socketError = $lastSocketError;
+  $: isTracking = $trackingStore;
+
+  $: {
+    isTrackingEnabled = $trackingStore;
+    console.log("Tracking state:", isTrackingEnabled);
+    if (isTrackingEnabled) {
+      // Initialize location polling when tracking is enabled
+      const startPolling = async () => {
+        const success = await startLocationPolling();
+        if (!success) {
+          trackingStore.set(false); // Reset if polling fails
+        }
+      };
+      startPolling();
+    } else {
+      stopLocationPolling();
+    }
+  }
 
   function handleVerified() {
     showWelcome = false;
@@ -56,7 +82,9 @@
   }
 
   function toggleTracking() {
-    isTracking = !isTracking;
+    const newValue = !get(trackingStore);
+    trackingStore.set(newValue);
+    console.log("Tracking toggled to:", newValue); // Debug log
   }
 
   async function handleLogin(event) {
@@ -93,20 +121,44 @@
         settings.set(initializeSettings({}));
       }
 
-      // Clean up any URL parameters
       window.history.replaceState({}, document.title, "/");
     } catch (error) {
       console.error("Error during login:", error);
     }
   }
 
+  async function handleLogout() {
+    try {
+      const response = await fetch("/api/logout", {
+        method: "POST",
+        credentials: "include",
+      });
+
+      if (response.ok) {
+        if (isTrackingEnabled) {
+          stopLocationPolling(); // Stop polling before clearing state
+        }
+        settings.set({});
+        filterLists.set([]);
+        profiles.set([]);
+        killmails.set([]);
+        cleanup();
+        loggedIn = false;
+        username = "";
+        showWelcome = true;
+        trackingStore.set(false);
+        window.location.reload();
+      }
+    } catch (error) {
+      console.error("Error during logout:", error);
+    }
+  }
+
   async function checkSession() {
     try {
-      // Check URL parameters first
       const params = new URLSearchParams(window.location.search);
       const isAuthCallback = params.get("authenticated") === "true";
 
-      // If we're already logged in, don't show welcome screen
       if (loggedIn) {
         showWelcome = false;
         return;
@@ -122,7 +174,6 @@
         loggedIn = true;
         showWelcome = false;
 
-        // Get stored filter lists
         try {
           const filterListsResponse = await fetch(
             "/api/filter-lists/" + data.user.id,
@@ -138,7 +189,6 @@
           console.error("Error fetching filter lists:", error);
         }
 
-        // Get stored profiles
         try {
           const profilesResponse = await fetch(
             "/api/profiles/" + data.user.id,
@@ -154,59 +204,26 @@
           console.error("Error fetching profiles:", error);
         }
 
-        // Set user settings
         if (data.user.settings) {
           settings.set(initializeSettings(data.user.settings));
         }
 
-        // Initialize socket and request data
         initializeSocketStore();
         socket.emit("requestInitialKillmails");
 
-        // Clean up URL parameters if this was an SSO callback
         if (isAuthCallback) {
           window.history.replaceState({}, document.title, "/");
         }
       } else if (!isAuthCallback && response.status === 401) {
-        // Only show welcome screen if:
-        // 1. Not an auth callback
-        // 2. Session is invalid (401)
-        // 3. Not already logged in
         showWelcome = true;
       }
     } catch (error) {
       console.error("Error checking session:", error);
-      // Only show welcome screen if not already logged in and not an auth callback
       if (!loggedIn && !window.location.search.includes("authenticated=true")) {
         showWelcome = true;
       }
     } finally {
       checkingSession = false;
-    }
-  }
-
-  async function handleLogout() {
-    try {
-      const response = await fetch("/api/logout", {
-        method: "POST",
-        credentials: "include",
-      });
-
-      if (response.ok) {
-        settings.set({});
-        filterLists.set([]);
-        profiles.set([]);
-        killmails.set([]);
-        cleanup();
-        loggedIn = false;
-        username = "";
-        showWelcome = true; // Show welcome screen after logout
-
-        // Force reload the page to clear any cached state
-        window.location.reload();
-      }
-    } catch (error) {
-      console.error("Error during logout:", error);
     }
   }
 
@@ -237,10 +254,7 @@
   }
 
   onMount(async () => {
-    // Use the checkSession function
     await checkSession();
-
-    // Add event listener for session expiry
     const handleSessionExpiry = () => {
       loggedIn = false;
       showLoginModal = true;
@@ -248,173 +262,178 @@
       filterLists.set([]);
       profiles.set([]);
       killmails.set([]);
+      trackingStore.set(false);
       cleanup();
     };
 
     window.addEventListener("session-expired", handleSessionExpiry);
-
     return () => {
       window.removeEventListener("session-expired", handleSessionExpiry);
     };
   });
 
   onDestroy(() => {
+    if (isTrackingEnabled) {
+      stopLocationPolling();
+    }
     cleanup();
   });
 </script>
 
+<svelte:head>
+  <style>
+    body {
+      margin: 0;
+      overflow-y: scroll !important;
+      padding-right: 0 !important;
+    }
+  </style>
+</svelte:head>
+
 {#if !checkingSession}
-  {#if showWelcome}
-    <WelcomeOverlay
-      on:verified={handleVerified}
-      on:login={() => {
-        showWelcome = false;
-        showLoginModal = true;
-        initializeSocketStore();
-      }}
-    />
-  {/if}
+  <div class="min-h-screen">
+    {#if showWelcome}
+      <WelcomeOverlay
+        on:verified={handleVerified}
+        on:login={() => {
+          showWelcome = false;
+          showLoginModal = true;
+          initializeSocketStore();
+        }}
+      />
+    {/if}
 
-  {#if showWreckFieldDialog && selectedWreckData}
-    <!-- svelte-ignore a11y-no-static-element-interactions -->
-    <div
-      class="fixed inset-0 z-50 flex items-center justify-center"
-      on:click={closeWreckField}
-      on:keydown={(e) => {
-        if (e.key === "Escape") closeWreckField();
-      }}
-    >
-      <div class="fixed inset-0 bg-black/75 backdrop-blur-sm" />
-      <!-- svelte-ignore a11y-click-events-have-key-events -->
-      <!-- svelte-ignore a11y-no-static-element-interactions -->
-      <div class="relative z-50" on:click|stopPropagation>
-        <WreckFieldDialog
-          wrecks={selectedWreckData.wrecks}
-          totalValue={selectedWreckData.totalValue}
-          nearestCelestial={selectedWreckData.nearestCelestial}
-          onClose={closeWreckField}
-        />
-      </div>
-    </div>
-  {/if}
-
-  <div class="fixed top-0 left-0 right-0 z-40">
-    <!-- Main Navigation -->
-    <nav class="bg-eve-dark/90 backdrop-blur-md border-b border-eve-accent/20">
-      <div class="max-w-7xl mx-auto px-4">
-        <div class="flex items-center justify-between h-16">
-          <div class="flex space-x-1">
-            <button
-              class="eve-nav-item {currentPage === 'camps'
-                ? 'bg-eve-accent/20 text-eve-accent'
-                : ''}"
-              on:click={() => (currentPage = "camps")}
-            >
-              Gate Camps
-            </button>
-            <button
-              class="eve-nav-item {currentPage === 'kills'
-                ? 'bg-eve-accent/20 text-eve-accent'
-                : ''}"
-              on:click={() => (currentPage = "kills")}
-            >
-              KM Hunter
-            </button>
-            <button
-              class="eve-nav-item {currentPage === 'battles'
-                ? 'bg-eve-accent/20 text-eve-accent'
-                : ''}"
-              on:click={() => (currentPage = "battles")}
-            >
-              Battles
-            </button>
-            <button
-              class="eve-nav-item {currentPage === 'gangs'
-                ? 'bg-eve-accent/20 text-eve-accent'
-                : ''}"
-              on:click={() => (currentPage = "gangs")}
-            >
-              Gangs
-            </button>
-            <button
-              class="eve-nav-item {currentPage === 'salvage'
-                ? 'bg-eve-accent/20 text-eve-accent'
-                : ''}"
-              on:click={() => (currentPage = "salvage")}
-            >
-              Salvage Fields
-            </button>
-            <button
-              class="eve-nav-item {currentPage === 'bountyboard'
-                ? 'bg-eve-accent/20 text-eve-accent'
-                : ''}"
-              on:click={() => (currentPage = "bountyboard")}
-            >
-              Bountyboard
-            </button>
-          </div>
-
-          <div class="flex items-center">
-            {#if loggedIn}
-              <!-- Tracking toggle in top bar -->
-              <div class="flex items-center gap-2">
-                <label class="relative inline-flex items-center cursor-pointer">
-                  <input
-                    type="checkbox"
-                    bind:checked={isTracking}
-                    on:change={toggleTracking}
-                    class="sr-only peer"
-                  />
-                  <div
-                    class="w-9 h-5 bg-gray-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-eve-accent"
-                  ></div>
-                  <span class="ml-2 text-sm font-medium text-white">Track</span>
-                </label>
-              </div>
-
-              <!-- Tracking info panel -->
-              {#if isTracking}
-                <div
-                  transition:slide
-                  class="absolute top-full left-0 right-0 bg-eve-dark/80 backdrop-blur-sm border-b border-eve-accent/10"
-                >
-                  <div class="max-w-7xl mx-auto px-4 h-12">
-                    <LocationTracker {isTracking} />
-                  </div>
-                </div>
-              {/if}
-
-              <button
-                class="eve-nav-item ml-4 text-eve-danger hover:bg-eve-danger/20"
-                on:click={handleLogout}
-              >
-                Logout
-              </button>
-            {:else}
-              <button
-                class="eve-nav-item ml-4 text-eve-accent hover:bg-eve-accent/20"
-                on:click={() => (showLoginModal = true)}
-              >
-                Login
-              </button>
-            {/if}
-          </div>
-        </div>
-      </div>
-    </nav>
-
-    <!-- Location Tracker Bar -->
-    {#if loggedIn}
+    {#if showWreckFieldDialog && selectedWreckData}
       <div
-        class="bg-eve-dark/80 backdrop-blur-sm border-b border-eve-accent/10 h-12"
+        class="fixed inset-0 z-50 flex items-center justify-center"
+        on:click={closeWreckField}
+        on:keydown={(e) => {
+          if (e.key === "Escape") closeWreckField();
+        }}
       >
-        <div class="max-w-7xl mx-auto px-4 h-full">
-          <LocationTracker />
+        <div class="fixed inset-0 bg-black/75 backdrop-blur-sm" />
+        <div class="relative z-50" on:click|stopPropagation>
+          <WreckFieldDialog
+            wrecks={selectedWreckData.wrecks}
+            totalValue={selectedWreckData.totalValue}
+            nearestCelestial={selectedWreckData.nearestCelestial}
+            onClose={closeWreckField}
+          />
         </div>
       </div>
     {/if}
 
-    <main class="pt-20 px-4 max-w-7xl mx-auto">
+    <div class="fixed top-0 left-0 right-0 z-40 flex flex-col">
+      <nav
+        class="bg-eve-dark/90 backdrop-blur-md border-b border-eve-accent/20"
+      >
+        <div class="max-w-7xl mx-auto px-4">
+          <div class="flex items-center justify-between h-16">
+            <div class="flex space-x-1">
+              <button
+                class="eve-nav-item {currentPage === 'camps'
+                  ? 'bg-eve-accent/20 text-eve-accent'
+                  : ''}"
+                on:click={() => (currentPage = "camps")}
+              >
+                Gate Camps
+              </button>
+              <button
+                class="eve-nav-item {currentPage === 'kills'
+                  ? 'bg-eve-accent/20 text-eve-accent'
+                  : ''}"
+                on:click={() => (currentPage = "kills")}
+              >
+                KM Hunter
+              </button>
+              <button
+                class="eve-nav-item {currentPage === 'battles'
+                  ? 'bg-eve-accent/20 text-eve-accent'
+                  : ''}"
+                on:click={() => (currentPage = "battles")}
+              >
+                Battles
+              </button>
+              <button
+                class="eve-nav-item {currentPage === 'gangs'
+                  ? 'bg-eve-accent/20 text-eve-accent'
+                  : ''}"
+                on:click={() => (currentPage = "gangs")}
+              >
+                Gangs
+              </button>
+              <button
+                class="eve-nav-item {currentPage === 'salvage'
+                  ? 'bg-eve-accent/20 text-eve-accent'
+                  : ''}"
+                on:click={() => (currentPage = "salvage")}
+              >
+                Salvage Fields
+              </button>
+              <button
+                class="eve-nav-item {currentPage === 'bountyboard'
+                  ? 'bg-eve-accent/20 text-eve-accent'
+                  : ''}"
+                on:click={() => (currentPage = "bountyboard")}
+              >
+                Bountyboard
+              </button>
+            </div>
+
+            <div class="flex items-center">
+              {#if loggedIn}
+                <div class="flex items-center gap-2">
+                  <label
+                    class="relative inline-flex items-center cursor-pointer"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={isTrackingEnabled}
+                      on:change={toggleTracking}
+                      class="sr-only peer"
+                    />
+                    <div
+                      class="w-9 h-5 bg-gray-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-eve-accent"
+                    />
+                    <span class="ml-2 text-sm font-medium text-white"
+                      >Track</span
+                    >
+                  </label>
+                </div>
+
+                <button
+                  class="eve-nav-item ml-4 text-eve-danger hover:bg-eve-danger/20"
+                  on:click={handleLogout}
+                >
+                  Logout
+                </button>
+              {:else}
+                <button
+                  class="eve-nav-item ml-4 text-eve-accent hover:bg-eve-accent/20"
+                  on:click={() => (showLoginModal = true)}
+                >
+                  Login
+                </button>
+              {/if}
+            </div>
+          </div>
+        </div>
+      </nav>
+
+      {#if loggedIn && $trackingStore}
+        <div
+          transition:slide
+          class="bg-eve-dark/80 backdrop-blur-sm border-b border-eve-accent/10"
+        >
+          <div class="max-w-7xl mx-auto px-4 h-12">
+            <LocationTracker isTracking={isTrackingEnabled} />
+          </div>
+        </div>
+      {/if}
+    </div>
+
+    <!-- Main content -->
+    <main class="pt-16 px-4 max-w-7xl mx-auto {$trackingStore ? 'mt-12' : ''}">
       {#if currentPage === "kills"}
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <div class="eve-card">

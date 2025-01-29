@@ -1,7 +1,12 @@
+<!-- LocationTracker.svelte -->
 <script>
   import { currentLocation, locationError } from "./locationStore";
   import { activeCamps } from "./campManager.js";
   import { onMount, onDestroy } from "svelte";
+  import {
+    startLocationPolling,
+    stopLocationPolling,
+  } from "./locationStore.js";
 
   export let isTracking;
 
@@ -15,13 +20,21 @@
   // Subscribe to activeCamps store
   $: camps = $activeCamps;
 
+  $: if (isTracking) {
+    startLocationPolling();
+  } else {
+    stopLocationPolling();
+  }
+
   function initializeVoice() {
-    window.speechSynthesis.onvoiceschanged = () => {
-      const voices = window.speechSynthesis.getVoices();
-      selectedVoice =
-        voices.find((voice) => voice.name.includes("Microsoft Hazel")) ||
-        voices.find((voice) => voice.lang.includes("en-GB"));
-    };
+    if (typeof window !== "undefined" && window.speechSynthesis) {
+      window.speechSynthesis.onvoiceschanged = () => {
+        const voices = window.speechSynthesis.getVoices();
+        selectedVoice =
+          voices.find((voice) => voice.name.includes("Microsoft Hazel")) ||
+          voices.find((voice) => voice.lang.includes("en-GB"));
+      };
+    }
   }
 
   function processNextSpeechItem() {
@@ -36,13 +49,13 @@
   }
 
   function queueSpeech(text) {
+    if (!isTracking) return; // Don't queue speech if not tracking
     speechQueue.push(text);
     processNextSpeechItem();
   }
 
   function speak(text, callback) {
-    if (!window.speechSynthesis) {
-      console.error("Speech synthesis not supported");
+    if (!window.speechSynthesis || !isTracking) {
       if (callback) callback();
       return;
     }
@@ -69,6 +82,7 @@
 
   function getCampSummary(camps) {
     if (!$currentLocation) return "No location data available";
+    if (!isTracking) return ""; // Don't show summary if not tracking
 
     const warnings = [];
 
@@ -169,11 +183,10 @@
   }
 
   function stripSymbols(text) {
-    // Remove emoji and other symbols commonly used in warnings
     return text.replace(/[⚠️✓]/g, "");
   }
 
-  // Subscribe to location changes
+  // Location change handler
   $: if ($currentLocation && isTracking) {
     if (lastSystemId !== $currentLocation.solar_system_id) {
       const campSummary = getCampSummary(camps);
@@ -204,33 +217,37 @@
         const newCampSummary = getCampSummary(
           currentCamps.filter((c) => newCamps.includes(c.id))
         );
-        queueSpeech(`New camp alert! ${newCampSummary}`);
+        queueSpeech(`New camp alert! ${stripSymbols(newCampSummary)}`);
         lastCampWarning.campIds = currentCampIds;
       }
     }
   }
 
   onMount(async () => {
-    try {
-      const response = await fetch("/api/session", {
-        credentials: "include",
-      });
-      const data = await response.json();
-      trackedCharacter = data.user?.character_name;
-    } catch (error) {
-      console.error("Error getting session data:", error);
-    }
+    if (typeof window !== "undefined") {
+      try {
+        const response = await fetch("/api/session", {
+          credentials: "include",
+        });
+        const data = await response.json();
+        trackedCharacter = data.user?.character_name;
+      } catch (error) {
+        console.error("Error getting session data:", error);
+      }
 
-    initializeVoice();
+      initializeVoice();
+    }
   });
 
   onDestroy(() => {
-    window.speechSynthesis.cancel();
+    if (typeof window !== "undefined" && window.speechSynthesis) {
+      window.speechSynthesis.cancel();
+    }
   });
 </script>
 
 <div class="tracking-info" class:error={$locationError}>
-  {#if $currentLocation}
+  {#if $currentLocation && isTracking}
     <div class="flex items-center gap-4">
       <div class="system-info">
         <span class="system-name">{$currentLocation.systemName}</span>
@@ -242,7 +259,7 @@
     </div>
   {/if}
 
-  {#if $locationError}
+  {#if $locationError && isTracking}
     <span class="error-message">{$locationError}</span>
   {/if}
 </div>
@@ -250,6 +267,9 @@
 <style>
   .tracking-info {
     width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
     color: white;
   }
 
