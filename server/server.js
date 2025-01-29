@@ -1656,6 +1656,100 @@ app.get("/callback", async (req, res) => {
   }
 });
 
+// checks to see if the eve user needs to log in again with SSO.
+app.get("/api/check-session", async (req, res) => {
+  try {
+    if (!req.session?.user?.character_id) {
+      // Check URL parameters for EVE SSO callback
+      const params = new URLSearchParams(req.url.split("?")[1] || "");
+      if (params.get("authenticated") === "true") {
+        // SSO callback successful, return success without showing welcome screen
+        return res.json({
+          validSession: true,
+          user: req.session.user,
+          ssoCallback: true,
+        });
+      }
+      return res.status(401).json({ error: "No session found" });
+    }
+
+    // Get stored refresh token from database
+    const { rows } = await db.execute({
+      sql: "SELECT refresh_token, token_expiry FROM users WHERE character_id = ?",
+      args: [req.session.user.character_id],
+    });
+
+    if (!rows[0]?.refresh_token) {
+      return res.status(401).json({ error: "No refresh token found" });
+    }
+
+    // Check if we need to refresh the token
+    const now = Math.floor(Date.now() / 1000);
+    if (now >= rows[0].token_expiry - 60) {
+      try {
+        // Attempt token refresh
+        const tokenResponse = await axios.post(
+          "https://login.eveonline.com/v2/oauth/token",
+          `grant_type=refresh_token&refresh_token=${rows[0].refresh_token}`,
+          {
+            headers: {
+              Authorization: `Basic ${Buffer.from(
+                `${EVE_SSO_CONFIG.client_id}:${EVE_SSO_CONFIG.client_secret}`
+              ).toString("base64")}`,
+              "Content-Type": "application/x-www-form-urlencoded",
+            },
+          }
+        );
+
+        const { access_token, refresh_token, expires_in } = tokenResponse.data;
+        const token_expiry = Math.floor(Date.now() / 1000) + expires_in;
+
+        // Update database and session with new tokens
+        await db.execute({
+          sql: "UPDATE users SET access_token = ?, refresh_token = ?, token_expiry = ? WHERE character_id = ?",
+          args: [
+            access_token,
+            refresh_token,
+            token_expiry,
+            req.session.user.character_id,
+          ],
+        });
+
+        req.session.user = {
+          ...req.session.user,
+          access_token,
+          refresh_token,
+          token_expiry,
+        };
+
+        await new Promise((resolve, reject) => {
+          req.session.save((err) => {
+            if (err) reject(err);
+            else resolve();
+          });
+        });
+
+        return res.json({
+          validSession: true,
+          user: req.session.user,
+        });
+      } catch (error) {
+        console.error("Token refresh failed:", error);
+        return res.status(401).json({ error: "Token refresh failed" });
+      }
+    }
+
+    // Session is valid and token doesn't need refresh
+    res.json({
+      validSession: true,
+      user: req.session.user,
+    });
+  } catch (error) {
+    console.error("Session check error:", error);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
 app.get("/api/celestials/system/:systemId", async (req, res) => {
   try {
     const systemId = req.params.systemId;

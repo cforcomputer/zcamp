@@ -17,6 +17,7 @@ import {
 export const socketConnected = writable(false);
 export const lastSocketError = writable(null);
 export const isInitialLoadComplete = writable(false);
+let isSyncing = false;
 
 // Initialize socket connection and event handlers
 export function initializeSocketStore() {
@@ -24,15 +25,14 @@ export function initializeSocketStore() {
   let expectedCacheSize = 0;
 
   socket.on("connect", () => {
-    console.log("Socket connected, requesting initial data");
+    console.log("Socket connected");
     socketConnected.set(true);
     lastSocketError.set(null);
 
-    // Always request initial data on connect/reconnect
-    // dirty fix, should be done in a more elegant way
-    // Preserve state in local storage so client doesn't need to reprocess
-    // and server isn't sending full cache on every reconnect
-    socket.emit("requestInitialKillmails");
+    // Only request initial data if we haven't completed a sync
+    if (!get(isInitialLoadComplete)) {
+      socket.emit("requestInitialKillmails");
+    }
     socket.emit("requestCamps");
     socket.emit("requestRoams");
   });
@@ -50,27 +50,34 @@ export function initializeSocketStore() {
 
   // Cache initialization and synchronization
   socket.on("cacheInitStart", ({ totalSize }) => {
-    console.log(`Starting cache initialization. Expected size: ${totalSize}`);
-    expectedCacheSize = totalSize;
-    receivedKillmails = [];
+    // Only start a new sync if we're not already syncing
+    if (!isSyncing) {
+      console.log(`Starting cache initialization. Expected size: ${totalSize}`);
+      isSyncing = true;
+      expectedCacheSize = totalSize;
+      receivedKillmails = [];
+    }
   });
 
   socket.on("cacheChunk", ({ chunk, currentCount, totalSize }) => {
-    receivedKillmails.push(...chunk);
-    console.log(`Received chunk. Progress: ${currentCount}/${totalSize}`);
+    // Only process chunks if we're syncing
+    if (isSyncing) {
+      receivedKillmails.push(...chunk);
+      console.log(`Received chunk. Progress: ${currentCount}/${totalSize}`);
 
-    // Process the chunk
-    chunk.forEach((killmail) => {
-      processNewSalvage(killmail);
-      addKillmailToBattles(killmail);
-    });
-
-    if (currentCount === totalSize) {
-      console.log("Cache chunk reception complete");
-      killmails.set(receivedKillmails);
-      socket.emit("cacheSyncComplete", {
-        receivedSize: receivedKillmails.length,
+      // Process the chunk
+      chunk.forEach((killmail) => {
+        processNewSalvage(killmail);
+        addKillmailToBattles(killmail);
       });
+
+      if (currentCount === totalSize) {
+        console.log("Cache chunk reception complete");
+        killmails.set(receivedKillmails);
+        socket.emit("cacheSyncComplete", {
+          receivedSize: receivedKillmails.length,
+        });
+      }
     }
   });
 
@@ -78,6 +85,8 @@ export function initializeSocketStore() {
     if (success) {
       console.log("Cache sync verified, enabling live updates");
       isInitialLoadComplete.set(true);
+      // Mark sync as complete
+      isSyncing = false;
     }
   });
 

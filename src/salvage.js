@@ -157,10 +157,11 @@ export function initializeSalvage(initialKillmails) {
         category,
         estimatedValue,
         expiryTime,
-        isTriangulatable,
+        isTriangulatable: killmail.pinpoints?.triangulationPossible || false,
         killmailId: killmail.killmail_id || killmail.killID,
         celestialData: killmail.pinpoints?.celestialData,
         securityType,
+        pinpoints: killmail.pinpoints, // Add this line to include all pinpoint data
       });
       system.totalValue += estimatedValue;
     }

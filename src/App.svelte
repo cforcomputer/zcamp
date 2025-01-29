@@ -54,33 +54,128 @@
   }
 
   async function handleLogin(event) {
-    if (event.detail.type === "credentials") {
-      username = event.detail.username;
-      loggedIn = true;
-    } else if (event.detail.type === "eve") {
-      loggedIn = true;
-    }
-
-    showLoginModal = false;
-    initializeSocketStore();
-
     try {
-      const response = await fetch("/api/session");
+      if (event.detail.type === "credentials") {
+        username = event.detail.username;
+        loggedIn = true;
+      } else if (event.detail.type === "eve") {
+        loggedIn = true;
+      }
+
+      showLoginModal = false;
+      showWelcome = false;
+      initializeSocketStore();
+
+      try {
+        const response = await fetch("/api/session");
+        const data = await response.json();
+
+        if (data.user) {
+          if (data.filterLists) {
+            filterLists.set(data.filterLists);
+          }
+          if (data.profiles) {
+            profiles.set(data.profiles);
+          }
+          if (data.user.settings) {
+            settings.set(initializeSettings(data.user.settings));
+          }
+          socket.emit("requestInitialKillmails");
+        }
+      } catch (error) {
+        console.error("Error loading initial session data:", error);
+        settings.set(initializeSettings({}));
+      }
+
+      // Clean up any URL parameters
+      window.history.replaceState({}, document.title, "/");
+    } catch (error) {
+      console.error("Error during login:", error);
+    }
+  }
+
+  async function checkSession() {
+    try {
+      // Check URL parameters first
+      const params = new URLSearchParams(window.location.search);
+      const isAuthCallback = params.get("authenticated") === "true";
+
+      // If we're already logged in, don't show welcome screen
+      if (loggedIn) {
+        showWelcome = false;
+        return;
+      }
+
+      const response = await fetch("/api/check-session", {
+        credentials: "include",
+      });
+
       const data = await response.json();
 
-      if (data.user) {
-        if (data.filterLists) {
-          filterLists.set(data.filterLists);
+      if (data.validSession && data.user) {
+        loggedIn = true;
+        showWelcome = false;
+
+        // Get stored filter lists
+        try {
+          const filterListsResponse = await fetch(
+            "/api/filter-lists/" + data.user.id,
+            {
+              credentials: "include",
+            }
+          );
+          const filterListsData = await filterListsResponse.json();
+          if (filterListsData.success) {
+            filterLists.set(filterListsData.filterLists);
+          }
+        } catch (error) {
+          console.error("Error fetching filter lists:", error);
         }
-        if (data.profiles) {
-          profiles.set(data.profiles);
+
+        // Get stored profiles
+        try {
+          const profilesResponse = await fetch(
+            "/api/profiles/" + data.user.id,
+            {
+              credentials: "include",
+            }
+          );
+          const profilesData = await profilesResponse.json();
+          if (profilesData.success) {
+            profiles.set(profilesData.profiles);
+          }
+        } catch (error) {
+          console.error("Error fetching profiles:", error);
         }
+
+        // Set user settings
         if (data.user.settings) {
           settings.set(initializeSettings(data.user.settings));
         }
+
+        // Initialize socket and request data
+        initializeSocketStore();
+        socket.emit("requestInitialKillmails");
+
+        // Clean up URL parameters if this was an SSO callback
+        if (isAuthCallback) {
+          window.history.replaceState({}, document.title, "/");
+        }
+      } else if (!isAuthCallback && response.status === 401) {
+        // Only show welcome screen if:
+        // 1. Not an auth callback
+        // 2. Session is invalid (401)
+        // 3. Not already logged in
+        showWelcome = true;
       }
     } catch (error) {
-      console.error("Error loading initial session data:", error);
+      console.error("Error checking session:", error);
+      // Only show welcome screen if not already logged in and not an auth callback
+      if (!loggedIn && !window.location.search.includes("authenticated=true")) {
+        showWelcome = true;
+      }
+    } finally {
+      checkingSession = false;
     }
   }
 
@@ -136,34 +231,25 @@
   }
 
   onMount(async () => {
-    try {
-      const response = await fetch("/api/session");
-      if (response.status === 401) {
-        showWelcome = true;
-        checkingSession = false;
-        return;
-      }
+    // Use the checkSession function
+    await checkSession();
 
-      const data = await response.json();
-      if (data.user) {
-        loggedIn = true;
-        if (data.filterLists) filterLists.set(data.filterLists);
-        if (data.profiles) profiles.set(data.profiles);
-        if (data.user.settings)
-          settings.set(initializeSettings(data.user.settings));
+    // Add event listener for session expiry
+    const handleSessionExpiry = () => {
+      loggedIn = false;
+      showLoginModal = true;
+      settings.set({});
+      filterLists.set([]);
+      profiles.set([]);
+      killmails.set([]);
+      cleanup();
+    };
 
-        // Initialize socket and request data AFTER session verification
-        initializeSocketStore();
-        socket.emit("requestInitialKillmails"); // Add this line
-      } else {
-        showWelcome = true;
-      }
-    } catch (error) {
-      console.error("Error checking session:", error);
-      showWelcome = true;
-    } finally {
-      checkingSession = false;
-    }
+    window.addEventListener("session-expired", handleSessionExpiry);
+
+    return () => {
+      window.removeEventListener("session-expired", handleSessionExpiry);
+    };
   });
 
   onDestroy(() => {

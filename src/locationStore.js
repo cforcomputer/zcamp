@@ -1,6 +1,6 @@
+// locationStore.js
 import { writable } from "svelte/store";
 import socket from "./socket.js";
-import campManager from "./campManager.js";
 
 export const currentLocation = writable(null);
 export const locationError = writable(null);
@@ -9,6 +9,7 @@ let pollInterval;
 let lastSystemId = null;
 
 const POLL_INTERVAL = 20000; // 20 seconds
+const TOKEN_REFRESH_BUFFER = 60; // Refresh token 60 seconds before expiry
 
 async function refreshToken(refreshToken) {
   try {
@@ -34,7 +35,7 @@ async function refreshToken(refreshToken) {
 
 async function pollLocation() {
   try {
-    // Get current session data
+    // Get current session data with token refresh handling
     const sessionResponse = await fetch("/api/session", {
       credentials: "include",
     });
@@ -45,15 +46,33 @@ async function pollLocation() {
 
     const { user } = await sessionResponse.json();
 
+    // Check if we have required user data
+    if (!user?.character_id || !user?.access_token) {
+      throw new Error("Missing required user data");
+    }
+
     // Check if token needs refresh
     const now = Math.floor(Date.now() / 1000);
-    if (user.token_expiry && now >= user.token_expiry) {
+    if (user.token_expiry && now >= user.token_expiry - 60) {
       let retryCount = 3;
       while (retryCount > 0) {
         try {
-          const refreshResponse = await refreshToken(user.refresh_token);
-          user.access_token = refreshResponse.access_token;
-          user.token_expiry = refreshResponse.token_expiry;
+          const refreshResponse = await fetch("/api/refresh-token", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            credentials: "include",
+            body: JSON.stringify({ refresh_token: user.refresh_token }),
+          });
+
+          if (!refreshResponse.ok) {
+            throw new Error("Failed to refresh token");
+          }
+
+          const refreshData = await refreshResponse.json();
+          user.access_token = refreshData.access_token;
+          user.token_expiry = refreshData.token_expiry;
           break;
         } catch (refreshError) {
           console.error(
@@ -61,8 +80,9 @@ async function pollLocation() {
             refreshError
           );
           retryCount--;
-          if (retryCount === 0)
+          if (retryCount === 0) {
             throw new Error("Failed to refresh token after multiple attempts");
+          }
           await new Promise((resolve) => setTimeout(resolve, 1000));
         }
       }
@@ -101,15 +121,6 @@ async function pollLocation() {
           gateName: gate.itemname,
         }));
 
-      // Get active camps from campManager for current and connected systems
-      const currentCamps = campManager
-        .getActiveCamps()
-        .filter(
-          (camp) =>
-            camp.systemId === locationData.solar_system_id ||
-            connectedSystems.map((sys) => sys.id).includes(camp.systemId)
-        );
-
       // Update current location with all relevant data
       currentLocation.set({
         solar_system_id: locationData.solar_system_id,
@@ -117,14 +128,6 @@ async function pollLocation() {
         connected_systems: connectedSystems,
         regionName: celestialData[0]?.regionname || "Unknown Region",
         regionId: celestialData[0]?.regionid,
-        camps: {
-          current: currentCamps.filter(
-            (camp) => camp.systemId === locationData.solar_system_id
-          ),
-          connected: currentCamps.filter((camp) =>
-            connectedSystems.map((sys) => sys.id).includes(camp.systemId)
-          ),
-        },
         celestialData: celestialData,
         timestamp: new Date().toISOString(),
       });
@@ -134,11 +137,27 @@ async function pollLocation() {
   } catch (err) {
     console.error("Location polling error:", err);
     locationError.set(err.message);
-    if (err.message.includes("token")) {
-      // Don't stop polling on token errors, just skip this cycle
+
+    if (
+      err.message.includes("token") ||
+      err.message.includes("401") ||
+      err.message.includes("403")
+    ) {
+      // Token-related errors
+      window.dispatchEvent(new CustomEvent("session-expired"));
+      stopLocationPolling();
       return;
     }
-    stopLocationPolling();
+
+    if (err.message.includes("Failed to get session data")) {
+      // Session-related errors
+      window.dispatchEvent(new CustomEvent("session-expired"));
+      stopLocationPolling();
+      return;
+    }
+
+    // For other errors, continue polling but set error state
+    locationError.set(err.message);
   }
 }
 
@@ -147,24 +166,15 @@ export async function startLocationPolling() {
     console.log("Starting location polling...");
     const sessionResponse = await fetch("/api/session", {
       credentials: "include",
-      headers: {
-        Accept: "application/json",
-        "Content-Type": "application/json",
-      },
     });
-    console.log("Session response status:", sessionResponse.status);
 
     if (!sessionResponse.ok) {
-      const errorData = await sessionResponse.json();
-      console.error("Session verification failed:", errorData);
       throw new Error("Session verification failed");
     }
 
     const { user } = await sessionResponse.json();
-    console.log("Session user data:", user);
 
     if (!user?.character_id || !user?.access_token) {
-      console.error("Missing required user data:", user);
       throw new Error(
         "No authenticated character - Please log in with EVE Online"
       );
