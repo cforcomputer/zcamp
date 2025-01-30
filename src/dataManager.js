@@ -90,13 +90,6 @@ export function initializeSocketStore() {
     }
   });
 
-  socket.on("reinitializeCache", () => {
-    console.log("Cache mismatch detected, reinitializing");
-    receivedKillmails = [];
-    isInitialLoadComplete.set(false);
-    socket.emit("requestInitialKillmails");
-  });
-
   // Live killmail updates
   socket.on("newKillmail", (killmail) => {
     if (get(isInitialLoadComplete)) {
@@ -166,7 +159,6 @@ function cleanupSocket() {
     "cacheInitStart",
     "cacheChunk",
     "syncVerified",
-    "reinitializeCache",
     "newKillmail",
     "campUpdate",
     "roamUpdate",
