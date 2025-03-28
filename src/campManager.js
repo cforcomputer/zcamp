@@ -60,7 +60,8 @@ class CampManager extends EventEmitter {
       .map((camp) => ({
         ...camp,
         probability: this.calculateCampProbability(camp),
-      }));
+      }))
+      .filter((camp) => camp.probability > 0);
 
     // Sort camps by probability (descending order) after updating
     this._camps.sort((a, b) => b.probability - a.probability);

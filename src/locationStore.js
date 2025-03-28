@@ -1,5 +1,6 @@
-// locationStore.js
+// locationStore.js - improved implementation
 import { writable } from "svelte/store";
+import { getValidAccessToken } from "./tokenManager.js";
 import socket from "./socket.js";
 
 export const currentLocation = writable(null);
@@ -9,103 +10,77 @@ let pollInterval;
 let lastSystemId = null;
 
 const POLL_INTERVAL = 20000; // 20 seconds
-const TOKEN_REFRESH_BUFFER = 60; // Refresh token 60 seconds before expiry
-
-async function refreshToken(refreshToken) {
-  try {
-    console.log("Attempting to refresh token");
-    const response = await fetch("/api/refresh-token", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      credentials: "include",
-      body: JSON.stringify({ refresh_token: refreshToken }),
-    });
-
-    if (!response.ok) throw new Error("Failed to refresh token");
-    const data = await response.json();
-    console.log("Token refresh successful");
-    return data;
-  } catch (err) {
-    console.error("Token refresh failed:", err);
-    throw err;
-  }
-}
 
 async function pollLocation() {
   try {
     // Clear any previous errors at the start of a successful poll attempt
     locationError.set(null);
 
-    // Get current session data with token refresh handling
-    const sessionResponse = await fetch("/api/session", {
-      credentials: "include",
-    });
+    // Get character ID first to avoid unnecessary token refreshes if we don't have it
+    const characterId = await getCurrentCharacterId();
 
-    if (!sessionResponse.ok) {
-      throw new Error("Failed to get session data");
-    }
+    // Get a valid token from our tokenManager with explicit refresh for location endpoint
+    const accessToken = await getValidAccessToken(true); // Force refresh to ensure valid token
 
-    const { user } = await sessionResponse.json();
-
-    // Check if we have required user data
-    if (!user?.character_id || !user?.access_token) {
-      throw new Error("Missing required user data");
-    }
-
-    // Check if token needs refresh
-    const now = Math.floor(Date.now() / 1000);
-    if (user.token_expiry && now >= user.token_expiry - 60) {
-      let retryCount = 3;
-      while (retryCount > 0) {
-        try {
-          const refreshResponse = await fetch("/api/refresh-token", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            credentials: "include",
-            body: JSON.stringify({ refresh_token: user.refresh_token }),
-          });
-
-          if (!refreshResponse.ok) {
-            throw new Error("Failed to refresh token");
-          }
-
-          const refreshData = await refreshResponse.json();
-          user.access_token = refreshData.access_token;
-          user.token_expiry = refreshData.token_expiry;
-          break;
-        } catch (refreshError) {
-          console.error(
-            `Token refresh attempt failed (${retryCount} remaining):`,
-            refreshError
-          );
-          retryCount--;
-          if (retryCount === 0) {
-            throw new Error("Failed to refresh token after multiple attempts");
-          }
-          await new Promise((resolve) => setTimeout(resolve, 1000));
-        }
-      }
-    }
-
-    let response = await fetch(
-      `https://esi.evetech.net/latest/characters/${user.character_id}/location/`,
+    // Use the token for the API call
+    const response = await fetch(
+      `https://esi.evetech.net/latest/characters/${characterId}/location/`,
       {
         headers: {
-          Authorization: `Bearer ${user.access_token}`,
+          Authorization: `Bearer ${accessToken}`,
         },
       }
     );
 
     if (!response.ok) {
-      throw new Error(`EVE API request failed: ${response.status}`);
+      if (response.status === 403) {
+        // This is a scope permission issue, not a token issue
+        console.error("Missing required scope: esi-location.read_location.v1");
+        throw new Error(
+          `You don't have permission to access location data. Make sure you granted the correct scopes when logging in.`
+        );
+      } else if (response.status === 401) {
+        // Try one more token refresh before giving up
+        const newToken = await getValidAccessToken(true);
+        const retryResponse = await fetch(
+          `https://esi.evetech.net/latest/characters/${characterId}/location/`,
+          {
+            headers: {
+              Authorization: `Bearer ${newToken}`,
+            },
+          }
+        );
+
+        if (!retryResponse.ok) {
+          throw new Error(
+            `EVE API request failed after token refresh: ${retryResponse.status}`
+          );
+        }
+
+        const locationData = await retryResponse.json();
+        processLocationData(locationData);
+        return;
+      } else {
+        throw new Error(`EVE API request failed: ${response.status}`);
+      }
     }
 
     const locationData = await response.json();
+    processLocationData(locationData);
+  } catch (err) {
+    console.error("Location polling error:", err);
+    locationError.set(err.message);
 
+    // Only trigger session expired for token-related errors
+    if (err.message.includes("token") || err.message.includes("session")) {
+      window.dispatchEvent(new CustomEvent("session-expired"));
+      stopLocationPolling();
+    }
+  }
+}
+
+async function processLocationData(locationData) {
+  try {
     if (locationData.solar_system_id !== lastSystemId) {
       const systemResponse = await fetch(
         `/api/celestials/system/${locationData.solar_system_id}`
@@ -117,10 +92,10 @@ async function pollLocation() {
 
       // Get connected systems from celestial data
       const connectedSystems = celestialData
-        .filter((cel) => cel.typename?.includes("Stargate"))
+        .filter((cel) => cel.typename?.toLowerCase().includes("stargate"))
         .map((gate) => ({
           id: gate.destinationid,
-          name: gate.itemname.match(/\(([^)]+)\)/)[1],
+          name: gate.itemname.match(/\(([^)]+)\)/)?.[1] || "Unknown",
           gateName: gate.itemname,
         }));
 
@@ -137,52 +112,33 @@ async function pollLocation() {
 
       lastSystemId = locationData.solar_system_id;
     }
-
-    // Important: Clear any previous errors on success
-    locationError.set(null);
   } catch (err) {
-    console.error("Location polling error:", err);
-    locationError.set(err.message);
-
-    if (
-      err.message.includes("token") ||
-      err.message.includes("401") ||
-      err.message.includes("403")
-    ) {
-      // Token-related errors
-      window.dispatchEvent(new CustomEvent("session-expired"));
-      stopLocationPolling();
-      return;
-    }
-
-    if (err.message.includes("Failed to get session data")) {
-      // Session-related errors
-      window.dispatchEvent(new CustomEvent("session-expired"));
-      stopLocationPolling();
-      return;
-    }
+    console.error("Error processing location data:", err);
+    throw err;
   }
+}
+
+// Helper function to get the current character ID
+async function getCurrentCharacterId() {
+  const response = await fetch("/api/session", {
+    credentials: "include",
+  });
+
+  if (!response.ok) {
+    throw new Error("Failed to get session data");
+  }
+
+  const { user } = await response.json();
+  if (!user?.character_id) {
+    throw new Error("Character ID not found in session");
+  }
+
+  return user.character_id;
 }
 
 export async function startLocationPolling() {
   try {
     console.log("Starting location polling...");
-    const sessionResponse = await fetch("/api/session", {
-      credentials: "include",
-    });
-
-    if (!sessionResponse.ok) {
-      throw new Error("Session verification failed");
-    }
-
-    const { user } = await sessionResponse.json();
-
-    if (!user?.character_id || !user?.access_token) {
-      throw new Error(
-        "No authenticated character - Please log in with EVE Online"
-      );
-    }
-
     // Initial poll
     await pollLocation();
 

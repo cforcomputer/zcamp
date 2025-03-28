@@ -117,6 +117,7 @@ Tech stack:
 
 - Pick up where you left off, or save many profiles to rapidly change your presets to hunt for different things.
 
-### 
+### TODO
 
--
+- Add additional options for the tts messages. Allow the user to enable roaming gang warnings, and high risk system warnings, also potentially nearby roam warnings (example, if a gang kills someone in your region).
+- Add npc losses tab, showing where players died to valuable npcs (if it is triangulatable)
