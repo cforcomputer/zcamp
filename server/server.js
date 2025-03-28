@@ -16,6 +16,7 @@ import { THRESHOLDS } from "../src/constants";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const shipTypeCache = new Map();
 const app = express();
 const server = createServer(app);
 const io = new Server(server, {
@@ -832,23 +833,29 @@ async function getShipCategory(shipTypeId, killmail) {
   if (!shipTypeId) return null;
 
   try {
-    // First check database
-    const shipData = await getShipCategoryFromDb(shipTypeId);
+    // Check memory cache first
+    if (shipTypeCache.has(shipTypeId)) {
+      return shipTypeCache.get(shipTypeId);
+    }
 
-    // If we have complete data, return it
-    if (shipData && shipData.name && shipData.tier) {
-      return {
+    // Then check database
+    const shipData = await getShipCategoryFromDb(shipTypeId);
+    if (shipData?.name && shipData?.tier) {
+      const result = {
         category: shipData.category,
         name: shipData.name,
         tier: shipData.tier,
       };
+      shipTypeCache.set(shipTypeId, result);
+      return result;
     }
 
-    // If data is missing or incomplete, determine category and store it
+    // Finally fetch from ESI and store
     const newShipData = await determineShipCategory(shipTypeId, killmail);
     await storeShipCategory(shipTypeId, newShipData);
-    console.log(`Stored new ship data for ${shipTypeId}:`, newShipData);
 
+    // Add to cache with 24-hour TTL (implement cache expiry separately)
+    shipTypeCache.set(shipTypeId, newShipData);
     return newShipData;
   } catch (error) {
     console.error(`Error getting ship category for ${shipTypeId}:`, error);
@@ -857,60 +864,42 @@ async function getShipCategory(shipTypeId, killmail) {
 }
 
 async function addShipCategoriesToKillmail(killmail) {
-  console.log(
-    "Starting addShipCategoriesToKillmail for killmail:",
-    killmail.killID
-  );
-
   try {
-    console.log("Fetching victim ship category...");
-    const victimCategory = await getShipCategory(
-      killmail.killmail.victim.ship_type_id,
-      killmail
-    );
-    console.log("Victim category:", victimCategory);
+    // Process victim ship type
+    const victimShipId = killmail.killmail.victim.ship_type_id;
+    const victimCategory = await getShipCategory(victimShipId, killmail);
 
-    if (!victimCategory) {
-      console.log("No valid victim category found");
-      return killmail;
-    }
+    if (!victimCategory) return killmail;
 
     killmail.shipCategories = {
-      victim: {
-        category: victimCategory.category,
-        name: victimCategory.name,
-        tier: victimCategory.tier,
-      },
+      victim: victimCategory,
       attackers: [],
     };
 
-    console.log("Processing attacker ship types...");
-    const attackerShipTypes = killmail.killmail.attackers
-      .map((attacker) => attacker.ship_type_id)
-      .filter((shipTypeId) => shipTypeId);
+    // Get unique attacker ship types using a Set
+    const uniqueAttackerShipTypes = [
+      ...new Set(
+        killmail.killmail.attackers
+          .map((attacker) => attacker.ship_type_id)
+          .filter((id) => id)
+      ),
+    ];
 
-    console.log("Unique attacker ship types:", attackerShipTypes);
+    // Process all ship types in parallel
+    const attackerCategories = await Promise.all(
+      uniqueAttackerShipTypes.map(async (shipTypeId) => {
+        const category = await getShipCategory(shipTypeId, killmail);
+        return { shipTypeId, ...category };
+      })
+    );
 
-    for (const shipTypeId of attackerShipTypes) {
-      console.log(`Processing ship type: ${shipTypeId}`);
-      const category = await getShipCategory(shipTypeId, killmail);
-      console.log(`Category for ship type ${shipTypeId}:`, category);
+    // Filter out any null results and add to killmail
+    killmail.shipCategories.attackers = attackerCategories.filter(Boolean);
 
-      if (category) {
-        killmail.shipCategories.attackers.push({
-          shipTypeId,
-          category: category.category,
-          name: category.name,
-          tier: category.tier,
-        });
-      }
-    }
-
-    console.log("Completed ship categories processing");
     return killmail;
   } catch (error) {
-    console.error("Fatal error in addShipCategoriesToKillmail:", error);
-    throw error;
+    console.error("Error in addShipCategoriesToKillmail:", error);
+    return killmail; // Return original killmail instead of throwing
   }
 }
 
