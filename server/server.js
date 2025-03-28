@@ -14,9 +14,62 @@ import { createClient as createRedisClient } from "redis";
 import { compare } from "bcrypt";
 import { THRESHOLDS } from "../src/constants";
 
+class TaskQueue {
+  constructor(concurrency = 3) {
+    this.concurrency = concurrency;
+    this.running = 0;
+    this.queue = [];
+  }
+
+  async enqueue(task) {
+    return new Promise((resolve, reject) => {
+      // Add task to queue
+      this.queue.push({
+        task,
+        resolve,
+        reject,
+      });
+
+      // Try to run task immediately
+      this.runNext();
+    });
+  }
+
+  async runNext() {
+    // If at concurrency limit or no tasks, do nothing
+    if (this.running >= this.concurrency || this.queue.length === 0) {
+      return;
+    }
+
+    // Get the next task
+    const { task, resolve, reject } = this.queue.shift();
+    this.running++;
+
+    try {
+      // Execute the task
+      const result = await task();
+      resolve(result);
+    } catch (error) {
+      reject(error);
+    } finally {
+      // Reduce running count
+      this.running--;
+
+      // Try to run next task
+      this.runNext();
+    }
+  }
+}
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// Caches for common items
+const MAX_SHIP_CACHE_SIZE = 2000;
 const shipTypeCache = new Map();
+
+const killmailProcessingQueue = new TaskQueue(3);
+
 const app = express();
 const server = createServer(app);
 const io = new Server(server, {
@@ -846,7 +899,15 @@ async function getShipCategory(shipTypeId, killmail) {
         name: shipData.name,
         tier: shipData.tier,
       };
+
+      // Add to cache
+      if (shipTypeCache.size >= MAX_SHIP_CACHE_SIZE) {
+        // Remove oldest entry when cache is full
+        const firstKey = shipTypeCache.keys().next().value;
+        shipTypeCache.delete(firstKey);
+      }
       shipTypeCache.set(shipTypeId, result);
+
       return result;
     }
 
@@ -854,8 +915,13 @@ async function getShipCategory(shipTypeId, killmail) {
     const newShipData = await determineShipCategory(shipTypeId, killmail);
     await storeShipCategory(shipTypeId, newShipData);
 
-    // Add to cache with 24-hour TTL (implement cache expiry separately)
+    // Add to cache
+    if (shipTypeCache.size >= MAX_SHIP_CACHE_SIZE) {
+      const firstKey = shipTypeCache.keys().next().value;
+      shipTypeCache.delete(firstKey);
+    }
     shipTypeCache.set(shipTypeId, newShipData);
+
     return newShipData;
   } catch (error) {
     console.error(`Error getting ship category for ${shipTypeId}:`, error);
@@ -865,11 +931,16 @@ async function getShipCategory(shipTypeId, killmail) {
 
 async function addShipCategoriesToKillmail(killmail) {
   try {
+    console.log("Processing killmail:", killmail.killID);
+
     // Process victim ship type
     const victimShipId = killmail.killmail.victim.ship_type_id;
     const victimCategory = await getShipCategory(victimShipId, killmail);
 
-    if (!victimCategory) return killmail;
+    if (!victimCategory) {
+      console.log("No valid victim category found");
+      return killmail;
+    }
 
     killmail.shipCategories = {
       victim: victimCategory,
@@ -877,28 +948,39 @@ async function addShipCategoriesToKillmail(killmail) {
     };
 
     // Get unique attacker ship types using a Set
-    const uniqueAttackerShipTypes = [
-      ...new Set(
-        killmail.killmail.attackers
-          .map((attacker) => attacker.ship_type_id)
-          .filter((id) => id)
-      ),
-    ];
+    const attackerShipTypeSet = new Set();
+    killmail.killmail.attackers.forEach((attacker) => {
+      if (attacker.ship_type_id) {
+        attackerShipTypeSet.add(attacker.ship_type_id);
+      }
+    });
+
+    const uniqueAttackerShipTypes = Array.from(attackerShipTypeSet);
+    console.log(
+      `Processing ${uniqueAttackerShipTypes.length} unique attacker ship types`
+    );
 
     // Process all ship types in parallel
-    const attackerCategories = await Promise.all(
-      uniqueAttackerShipTypes.map(async (shipTypeId) => {
-        const category = await getShipCategory(shipTypeId, killmail);
-        return { shipTypeId, ...category };
-      })
+    const attackerCategoryPromises = uniqueAttackerShipTypes.map(
+      async (shipTypeId) => {
+        try {
+          const category = await getShipCategory(shipTypeId, killmail);
+          return category ? { shipTypeId, ...category } : null;
+        } catch (err) {
+          console.error(`Error processing ship type ${shipTypeId}:`, err);
+          return null;
+        }
+      }
     );
+
+    const attackerCategories = await Promise.all(attackerCategoryPromises);
 
     // Filter out any null results and add to killmail
     killmail.shipCategories.attackers = attackerCategories.filter(Boolean);
 
     return killmail;
   } catch (error) {
-    console.error("Error in addShipCategoriesToKillmail:", error);
+    console.error("Fatal error in addShipCategoriesToKillmail:", error);
     return killmail; // Return original killmail instead of throwing
   }
 }
@@ -942,8 +1024,11 @@ setInterval(cleanupShipTypes, 7 * 24 * 60 * 60 * 1000);
 async function fetchCelestialData(systemId) {
   console.log(`Fetching celestial data for system ${systemId}`);
 
+  // Use a longer timeout for database operations
+  const DB_TIMEOUT = 5000; // 5 seconds instead of 2
+
   try {
-    // Check database first - with a short timeout
+    // Check database first with increased timeout
     try {
       const dbPromise = db.execute({
         sql: "SELECT celestial_data FROM celestial_data WHERE system_id = ?",
@@ -953,20 +1038,19 @@ async function fetchCelestialData(systemId) {
       const { rows } = await Promise.race([
         dbPromise,
         new Promise((_, reject) =>
-          setTimeout(() => reject(new Error("Database timeout")), 2000)
+          setTimeout(() => reject(new Error("Database timeout")), DB_TIMEOUT)
         ),
       ]);
 
-      // If found in database, return it
       if (rows[0]?.celestial_data) {
         return JSON.parse(rows[0].celestial_data);
       }
     } catch (dbError) {
       console.error(`Database error for system ${systemId}:`, dbError);
-      // Continue to API call if database fails
     }
 
-    // If not in database, fetch from API - with its own timeout
+    // If not in database, fetch from API with a longer timeout
+    const API_TIMEOUT = 8000; // 8 seconds
     const apiPromise = axios.get(
       `https://www.fuzzwork.co.uk/api/mapdata.php?solarsystemid=${systemId}&format=json`
     );
@@ -974,7 +1058,7 @@ async function fetchCelestialData(systemId) {
     const response = await Promise.race([
       apiPromise,
       new Promise((_, reject) =>
-        setTimeout(() => reject(new Error("API timeout")), 5000)
+        setTimeout(() => reject(new Error("API timeout")), API_TIMEOUT)
       ),
     ]);
 
@@ -982,7 +1066,7 @@ async function fetchCelestialData(systemId) {
       throw new Error(`Invalid API response for system ${systemId}`);
     }
 
-    // Store in database - non-blocking
+    // Store in database non-blocking
     db.execute({
       sql: `REPLACE INTO celestial_data 
             (system_id, system_name, celestial_data, last_updated) 
@@ -2712,15 +2796,32 @@ async function pollRedisQ() {
         !isDuplicate(killmail) &&
         isWithinLast24Hours(killmail.killmail.killmail_time)
       ) {
-        const processedKillmail = await processKillmailData(
-          await addShipCategoriesToKillmail(killmail)
-        );
+        // Enqueue processing instead of processing immediately
+        killmailProcessingQueue
+          .enqueue(async () => {
+            try {
+              // First add ship categories (faster operation)
+              const killmailWithShips = await addShipCategoriesToKillmail(
+                killmail
+              );
 
-        killmails.push(processedKillmail);
-        killmails = cleanKillmailsCache(killmails);
+              // Then do the more expensive pinpoint calculations
+              const processedKillmail = await processKillmailData(
+                killmailWithShips
+              );
 
-        // Emit only to synced clients
-        io.to("live-updates").emit("newKillmail", processedKillmail);
+              killmails.push(processedKillmail);
+              killmails = cleanKillmailsCache(killmails);
+
+              // Emit only to synced clients
+              io.to("live-updates").emit("newKillmail", processedKillmail);
+            } catch (error) {
+              console.error("Error processing killmail in queue:", error);
+            }
+          })
+          .catch((err) => {
+            console.error("Error enqueueing killmail task:", err);
+          });
       }
     }
   } catch (error) {
