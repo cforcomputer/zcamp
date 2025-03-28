@@ -10,7 +10,7 @@
   let previousKillmailIds = new Set();
   let scrollContainer;
   let isUserScrolling = false;
-  let shouldAutoScroll = true;
+  let shouldAutoScroll = false; // set to bottom of window if true
 
   // Context menu state
   let contextMenu = {
@@ -218,11 +218,11 @@
     shouldAutoScroll = scrollTop + clientHeight >= scrollHeight - 5;
   }
 
-  function scrollToBottom() {
-    if (scrollContainer && shouldAutoScroll) {
-      scrollContainer.scrollTop = scrollContainer.scrollHeight;
-    }
-  }
+  // function scrollToBottom() {
+  //   if (scrollContainer && shouldAutoScroll) {
+  //     scrollContainer.scrollTop = scrollContainer.scrollHeight;
+  //   }
+  // }
 
   function getTriangulationIcon(killmail) {
     if (!killmail?.pinpoints) return "○"; // Empty circle for unknown/error
@@ -258,15 +258,15 @@
   }
 
   onMount(() => {
-    scrollToBottom();
+    // scrollToBottom();
     audioManager.init();
   });
 
-  $: {
-    if (sortedKillmails.length && !isUserScrolling && shouldAutoScroll) {
-      setTimeout(scrollToBottom, 0);
-    }
-  }
+  // $: {
+  //   if (sortedKillmails.length && !isUserScrolling && shouldAutoScroll) {
+  //     setTimeout(scrollToBottom, 0);
+  //   }
+  // }
 </script>
 
 <div
