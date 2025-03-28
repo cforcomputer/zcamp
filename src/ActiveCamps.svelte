@@ -13,7 +13,10 @@
 
   // Reactive statement to sort camps whenever the array is updated
   // Reactive subscription to activeCamps store
-  $: camps = $activeCamps.sort((a, b) => b.probability - a.probability);
+  // filter out camps with 0% probability.
+  $: camps = $activeCamps
+    .filter((camp) => camp.probability > 0)
+    .sort((a, b) => b.probability - a.probability);
 
   $: if (mounted && $activeCamps) {
     isLoading = false;
