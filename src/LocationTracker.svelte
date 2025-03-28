@@ -260,7 +260,21 @@
   {/if}
 
   {#if $locationError && isTracking}
-    <span class="error-message">{$locationError}</span>
+    <span class="error-message">
+      {$locationError}
+      <!-- Show a retry button for errors -->
+      <button
+        class="px-2 py-1 ml-2 bg-eve-danger/30 hover:bg-eve-danger/50 rounded-sm"
+        on:click={() => {
+          stopLocationPolling();
+          setTimeout(() => {
+            if (isTracking) startLocationPolling();
+          }, 1000);
+        }}
+      >
+        Retry
+      </button>
+    </span>
   {/if}
 </div>
 

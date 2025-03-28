@@ -9,14 +9,14 @@ export const KM_PER_AU = 149597870.7;
 
 export const SALVAGE_VALUES = {
   frigate: 3_000_000,
-  destroyer: 6_000_000,
-  cruiser: 12_000_000,
-  battlecruiser: 25_000_000,
-  battleship: 40_000_000,
+  destroyer: 4_000_000,
+  cruiser: 6_000_000,
+  battlecruiser: 8_000_000,
+  battleship: 15_000_000,
   industrial: 5_000_000,
-  mining: 5_000_000,
-  capital: 100_000_000,
-  structure: 50_000_000,
+  mining: 3_000_000,
+  capital: 15_000_000,
+  structure: 40_000_000,
   // Default to frigate value for unknown types
   unknown: 3_000_000,
 };

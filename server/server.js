@@ -1033,68 +1033,97 @@ app.post("/api/refresh-token", async (req, res) => {
   try {
     const { refresh_token } = req.body;
 
-    const tokenResponse = await axios.post(
-      "https://login.eveonline.com/v2/oauth/token",
-      `grant_type=refresh_token&refresh_token=${refresh_token}`,
-      {
-        headers: {
-          Authorization:
-            "Basic " +
-            Buffer.from(
-              `${EVE_SSO_CONFIG.client_id}:${EVE_SSO_CONFIG.client_secret}`
-            ).toString("base64"),
-          "Content-Type": "application/x-www-form-urlencoded",
-          Host: "login.eveonline.com",
-        },
-      }
-    );
-
-    const {
-      access_token,
-      refresh_token: new_refresh_token,
-      expires_in,
-    } = tokenResponse.data;
-    const token_expiry = Math.floor(Date.now() / 1000) + expires_in;
-
-    // Update database
-    if (req.session?.user?.character_id) {
-      await db.execute({
-        sql: `UPDATE users SET access_token = ?, refresh_token = ?, token_expiry = ? WHERE character_id = ?`,
-        args: [
-          access_token,
-          new_refresh_token,
-          token_expiry,
-          req.session.user.character_id,
-        ],
-      });
+    if (!refresh_token) {
+      return res.status(400).json({ error: "No refresh token provided" });
     }
 
-    // Update session with new tokens
-    req.session.user = {
-      ...req.session.user,
-      access_token,
-      refresh_token: new_refresh_token,
-      token_expiry,
-    };
-
-    // Explicitly save session to Redis
-    await new Promise((resolve, reject) => {
-      req.session.save((err) => {
-        if (err) {
-          console.error("Session save error:", err);
-          reject(err);
-          return;
+    try {
+      const tokenResponse = await axios.post(
+        "https://login.eveonline.com/v2/oauth/token",
+        `grant_type=refresh_token&refresh_token=${refresh_token}`,
+        {
+          headers: {
+            Authorization:
+              "Basic " +
+              Buffer.from(
+                `${EVE_SSO_CONFIG.client_id}:${EVE_SSO_CONFIG.client_secret}`
+              ).toString("base64"),
+            "Content-Type": "application/x-www-form-urlencoded",
+            Host: "login.eveonline.com",
+          },
         }
-        console.log("Session updated in Redis with new tokens");
-        resolve();
-      });
-    });
+      );
 
-    res.json({
-      access_token,
-      refresh_token: new_refresh_token,
-      token_expiry,
-    });
+      const {
+        access_token,
+        refresh_token: new_refresh_token,
+        expires_in,
+      } = tokenResponse.data;
+      const token_expiry = Math.floor(Date.now() / 1000) + expires_in;
+
+      // Update database and session
+      if (req.session?.user?.character_id) {
+        await db.execute({
+          sql: `UPDATE users SET access_token = ?, refresh_token = ?, token_expiry = ? WHERE character_id = ?`,
+          args: [
+            access_token,
+            new_refresh_token,
+            token_expiry,
+            req.session.user.character_id,
+          ],
+        });
+
+        // Update session with new tokens
+        req.session.user = {
+          ...req.session.user,
+          access_token,
+          refresh_token: new_refresh_token,
+          token_expiry,
+        };
+
+        // Save session
+        await new Promise((resolve, reject) => {
+          req.session.save((err) => {
+            if (err) {
+              console.error("Session save error:", err);
+              reject(err);
+              return;
+            }
+            resolve();
+          });
+        });
+      }
+
+      res.json({
+        access_token,
+        refresh_token: new_refresh_token,
+        token_expiry,
+      });
+    } catch (error) {
+      console.error(
+        "EVE SSO token refresh error:",
+        error.response?.data || error.message
+      );
+
+      // Check for specific error codes that indicate invalid refresh token
+      if (
+        error.response?.status === 400 &&
+        (error.response?.data?.error === "invalid_grant" ||
+          error.response?.data?.error === "invalid_token")
+      ) {
+        // Clear the user's session
+        req.session.destroy((err) => {
+          if (err) console.error("Session destruction error:", err);
+        });
+
+        return res.status(401).json({
+          error: "Your EVE Online session has expired",
+          sessionExpired: true,
+        });
+      }
+
+      throw error; // Re-throw for general error handling
+    }
   } catch (error) {
     console.error("Token refresh failed:", error);
     res.status(500).json({ error: "Failed to refresh token" });
@@ -2319,16 +2348,10 @@ io.on("connection", (socket) => {
     }
   });
 
-  socket.on("cacheSyncComplete", ({ receivedSize }) => {
-    const currentCacheSize = killmails.length;
-    if (receivedSize === currentCacheSize) {
-      socket.emit("syncVerified", { success: true });
-      // Start sending live updates
-      socket.join("live-updates");
-    } else {
-      // Request reinitialize if sizes don't match
-      socket.emit("reinitializeCache");
-    }
+  socket.on("cacheSyncComplete", () => {
+    // Simply acknowledge completion and enable live updates
+    socket.emit("syncVerified", { success: true });
+    socket.join("live-updates");
   });
 
   socket.on("fetchFilterLists", async () => {

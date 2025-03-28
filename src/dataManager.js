@@ -40,7 +40,9 @@ export function initializeSocketStore() {
   socket.on("disconnect", (reason) => {
     console.log("Socket disconnected:", reason);
     socketConnected.set(false);
-    isInitialLoadComplete.set(false);
+
+    // We don't reset isInitialLoadComplete on disconnect
+    // This prevents unnecessary reinitialization on reconnect
   });
 
   socket.on("connect_error", (error) => {
@@ -50,12 +52,14 @@ export function initializeSocketStore() {
 
   // Cache initialization and synchronization
   socket.on("cacheInitStart", ({ totalSize }) => {
-    // Only start a new sync if we're not already syncing
-    if (!isSyncing) {
+    // Only start a new sync if we haven't completed the initial load
+    if (!get(isInitialLoadComplete)) {
       console.log(`Starting cache initialization. Expected size: ${totalSize}`);
       isSyncing = true;
       expectedCacheSize = totalSize;
       receivedKillmails = [];
+    } else {
+      console.log("Ignoring cache init request - already synchronized");
     }
   });
 
@@ -74,10 +78,12 @@ export function initializeSocketStore() {
       if (currentCount === totalSize) {
         console.log("Cache chunk reception complete");
         killmails.set(receivedKillmails);
-        socket.emit("cacheSyncComplete", {
-          receivedSize: receivedKillmails.length,
-        });
+
+        // Complete the sync
+        socket.emit("cacheSyncComplete");
       }
+    } else {
+      console.log("Ignoring chunk - not currently syncing");
     }
   });
 
@@ -85,7 +91,6 @@ export function initializeSocketStore() {
     if (success) {
       console.log("Cache sync verified, enabling live updates");
       isInitialLoadComplete.set(true);
-      // Mark sync as complete
       isSyncing = false;
     }
   });
@@ -144,9 +149,13 @@ export function initializeSocketStore() {
   });
 
   socket.on("reconnect", () => {
-    receivedKillmails = [];
-    isInitialLoadComplete.set(false);
-    socket.emit("requestInitialKillmails");
+    console.log("Socket reconnected");
+
+    // On reconnect, only request new data if we never completed the initial load
+    if (!get(isInitialLoadComplete)) {
+      receivedKillmails = [];
+      socket.emit("requestInitialKillmails");
+    }
   });
 }
 

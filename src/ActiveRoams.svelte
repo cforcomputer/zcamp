@@ -93,33 +93,34 @@
     options: [],
   };
 
+  import { getValidAccessToken } from "./tokenManager.js";
+
   async function setDestination(systemId, clearOthers = true) {
     try {
-      const response = await fetch("/api/session", {
-        credentials: "include",
-      });
-      const data = await response.json();
-
-      if (!data.user?.access_token) {
-        console.error("User not authenticated with EVE SSO");
-        return;
-      }
+      const accessToken = await getValidAccessToken();
 
       const result = await fetch(
         `https://esi.evetech.net/latest/ui/autopilot/waypoint/?add_to_beginning=false&clear_other_waypoints=${clearOthers}&datasource=tranquility&destination_id=${systemId}`,
         {
           method: "POST",
           headers: {
-            Authorization: `Bearer ${data.user.access_token}`,
+            Authorization: `Bearer ${accessToken}`,
           },
         }
       );
 
       if (!result.ok) {
-        throw new Error("Failed to set destination");
+        if (result.status === 401) {
+          // Token issue - trigger session expired event
+          window.dispatchEvent(new CustomEvent("session-expired"));
+        }
+        throw new Error(`Failed to set destination: ${result.status}`);
       }
+
+      return true;
     } catch (error) {
       console.error("Error setting destination:", error);
+      return false;
     }
   }
 

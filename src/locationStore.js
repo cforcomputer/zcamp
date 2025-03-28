@@ -35,6 +35,9 @@ async function refreshToken(refreshToken) {
 
 async function pollLocation() {
   try {
+    // Clear any previous errors at the start of a successful poll attempt
+    locationError.set(null);
+
     // Get current session data with token refresh handling
     const sessionResponse = await fetch("/api/session", {
       credentials: "include",
@@ -134,6 +137,9 @@ async function pollLocation() {
 
       lastSystemId = locationData.solar_system_id;
     }
+
+    // Important: Clear any previous errors on success
+    locationError.set(null);
   } catch (err) {
     console.error("Location polling error:", err);
     locationError.set(err.message);
@@ -155,9 +161,6 @@ async function pollLocation() {
       stopLocationPolling();
       return;
     }
-
-    // For other errors, continue polling but set error state
-    locationError.set(err.message);
   }
 }
 
