@@ -13,7 +13,6 @@
   const SCOPES = [
     "publicData",
     "esi-location.read_location.v1",
-    "esi-bookmarks.read_character_bookmarks.v1",
     "esi-ui.write_waypoint.v1",
   ];
 
