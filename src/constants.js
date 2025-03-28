@@ -1,7 +1,7 @@
 // Contains all the static id codes
 
-export const CAMP_TIMEOUT = 40 * 60 * 1000; // 40 minutes
-export const DECAY_START = 20 * 60 * 1000; // 20 minutes
+export const CAMP_TIMEOUT = 30 * 60 * 1000; // 30 minutes
+export const DECAY_START = 10 * 60 * 1000; // 10 minutes
 export const CAPSULE_ID = 670;
 
 //server.js AU

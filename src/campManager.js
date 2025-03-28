@@ -55,13 +55,20 @@ class CampManager extends EventEmitter {
     this._camps = this._camps
       .filter((camp) => {
         const timeSinceLastKill = now - new Date(camp.lastKill).getTime();
+        const minutesSinceLastKill = timeSinceLastKill / (60 * 1000);
+
+        // Hard cutoff at 40 minutes regardless of probability
+        if (minutesSinceLastKill > 40) {
+          return false;
+        }
+
         return timeSinceLastKill <= CAMP_TIMEOUT;
       })
       .map((camp) => ({
         ...camp,
         probability: this.calculateCampProbability(camp),
       }))
-      .filter((camp) => camp.probability > 0);
+      .filter((camp) => camp.probability > 0); // Only keep camps with probability > 0
 
     // Sort camps by probability (descending order) after updating
     this._camps.sort((a, b) => b.probability - a.probability);
@@ -438,8 +445,11 @@ class CampManager extends EventEmitter {
 
     if (minutesSinceLastKill > DECAY_START / (60 * 1000)) {
       const decayMinutes = minutesSinceLastKill - DECAY_START / (60 * 1000);
-      // Calculate direct percentage points to reduce (5% per minute after decay start)
-      timeDecayPercent = Math.min(0.95, decayMinutes * 0.05);
+
+      // FIXED: Remove the 0.95 cap and allow full decay to zero
+      timeDecayPercent = Math.min(1.0, decayMinutes * 0.1);
+
+      // Apply the decay
       finalProbability = rawProbability * (1 - timeDecayPercent);
 
       log.push(
@@ -452,10 +462,28 @@ class CampManager extends EventEmitter {
           rawProbability * 100
         ).toFixed(1)}% → ${(finalProbability * 100).toFixed(1)}%)`
       );
+
+      // ADDED: Hard timeout after 30 minutes since decay start
+      if (decayMinutes > CAMP_TIMEOUT) {
+        log.push(`Camp expired: More than 30 minutes since activity`);
+        return 0;
+      }
     }
 
-    // Final normalization
+    // Final normalization with minimum threshold
     finalProbability = Math.max(0, Math.min(0.95, finalProbability));
+
+    // ADDED: Minimum threshold to appear in UI
+    if (finalProbability < 0.05) {
+      // 5% minimum threshold
+      log.push(
+        `Camp below minimum threshold (5%): ${(finalProbability * 100).toFixed(
+          1
+        )}% → 0%`
+      );
+      return 0;
+    }
+
     const percentProbability = Math.round(finalProbability * 100);
     log.push(`Final normalized probability: ${percentProbability}%`);
 

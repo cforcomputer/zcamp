@@ -119,5 +119,7 @@ Tech stack:
 
 ### TODO
 
-- Add additional options for the tts messages. Allow the user to enable roaming gang warnings, and high risk system warnings, also potentially nearby roam warnings (example, if a gang kills someone in your region).
-- Add npc losses tab, showing where players died to valuable npcs (if it is triangulatable)
+- Add additional options for the tts messages. Allow the user to enable roaming gang warnings, and high risk system warnings, also potentially nearby roam warnings (example, if a gang kills someone in your region). It should warn you of the location of the combat activity and tell you what the composition is of the activity if occurred in the last 3 minutes.
+- Give the "AI" voice a name, like TARA.
+- Add npc losses tab, showing where players died to valuable npcs (if it is triangulatable) --> within the last 1 hour.
+- Add an option to pin camp systems so you can see their status at the top (linked to the player account, so it remembers)
