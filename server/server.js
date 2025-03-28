@@ -15,7 +15,7 @@ import { compare } from "bcrypt";
 import { THRESHOLDS } from "../src/constants";
 
 class TaskQueue {
-  constructor(concurrency = 3) {
+  constructor(concurrency = 5) {
     this.concurrency = concurrency;
     this.running = 0;
     this.queue = [];
@@ -68,7 +68,7 @@ const __dirname = path.dirname(__filename);
 const MAX_SHIP_CACHE_SIZE = 2000;
 const shipTypeCache = new Map();
 
-const killmailProcessingQueue = new TaskQueue(3);
+const killmailProcessingQueue = new TaskQueue(5);
 
 const app = express();
 const server = createServer(app);

@@ -173,8 +173,18 @@ class CampManager extends EventEmitter {
     );
 
     // Early validation
-    if (camp.kills.some((kill) => kill.zkb?.labels?.includes("npc"))) {
-      log.push("Camp excluded: NPC kill detected");
+    if (
+      camp.kills.some(
+        (kill) =>
+          kill.zkb?.labels?.includes("npc") ||
+          kill.shipCategories?.victim === "structure" ||
+          kill.shipCategories?.victim?.category === "structure" ||
+          kill.killmail.victim.ship_type_id === 35834 ||
+          (kill.killmail.victim.corporation_id &&
+            !kill.killmail.victim.character_id)
+      )
+    ) {
+      log.push("Camp excluded: NPC kill or structure detected");
       camp.probabilityLog = log;
       return 0;
     }
@@ -211,7 +221,8 @@ class CampManager extends EventEmitter {
     }
 
     const now = Date.now();
-    let probability = 0;
+    const isSingleKill = gateKills.length === 1;
+    let baseProbability = 0;
     log.push(`Starting with base probability of 0%`);
 
     const recentKills = gateKills.filter(
@@ -223,23 +234,33 @@ class CampManager extends EventEmitter {
     const lastKillTime = new Date(camp.lastKill).getTime();
     const minutesSinceLastKill = (now - lastKillTime) / (60 * 1000);
 
-    const killTimes = gateKills
-      .map((k) => new Date(k.killmail.killmail_time).getTime())
-      .sort();
-    const firstKillTime = killTimes[0];
-    const campAge = (now - firstKillTime) / (60 * 1000);
-    log.push(`Camp age: ${campAge.toFixed(1)} minutes`);
+    // Get unique victim characters to check for real player-vs-player engagements
+    const uniqueVictimCharacters = new Set(
+      gateKills.map((kill) => kill.killmail.victim.character_id).filter(Boolean)
+    );
+
+    // ======== STAGE 1: BASIC CLASSIFICATION FACTORS ========
 
     // Initial burst penalty
-    if (
-      campAge <= 15 &&
-      killTimes.some((time, i) => i > 0 && time - killTimes[i - 1] < 120000)
-    ) {
-      probability -= 0.2;
-      log.push("Burst kill penalty applied: -20%");
+    if (camp.kills.length > 1) {
+      const killTimes = gateKills
+        .map((k) => new Date(k.killmail.killmail_time).getTime())
+        .sort();
+      const firstKillTime = killTimes[0];
+      const campAge = (now - firstKillTime) / (60 * 1000);
+      log.push(`Camp age: ${campAge.toFixed(1)} minutes`);
+
+      if (
+        campAge <= 15 &&
+        killTimes.some((time, i) => i > 0 && time - killTimes[i - 1] < 120000)
+      ) {
+        baseProbability -= 0.2;
+        log.push("Burst kill penalty applied: -20%");
+      }
     }
 
-    // Threat ship calculation
+    // ======== STAGE 2: THREAT SHIP CALCULATION ========
+
     let threatShipScore = 0;
     const threatShips = new Map();
 
@@ -267,14 +288,32 @@ class CampManager extends EventEmitter {
       });
     }
 
-    probability += threatShipScore;
+    // ======== STAGE 3: CAP THREAT SHIP SCORE FOR SINGLE KILLS ========
+
+    let cappedThreatShipScore = threatShipScore;
+    if (isSingleKill) {
+      cappedThreatShipScore = Math.min(0.5, threatShipScore);
+      if (threatShipScore > 0.5) {
+        log.push(
+          `Threat ship score capped at 50% for single kill (was ${(
+            threatShipScore * 100
+          ).toFixed(1)}%)`
+        );
+      }
+    }
+
+    baseProbability += cappedThreatShipScore;
     log.push(
-      `Total threat ship bonus: +${(threatShipScore * 100).toFixed(1)}%`
+      `Final threat ship contribution: +${(cappedThreatShipScore * 100).toFixed(
+        1
+      )}%`
     );
+
+    // ======== STAGE 4: ADDITIONAL IDENTIFICATION FACTORS ========
 
     // General smartbomb activity check
     if (camp.type === "smartbomb") {
-      probability += 0.16; // Add 16% probability for any smartbomb activity
+      let smartbombBonus = 0.16; // Base 16% probability for smartbomb activity
       log.push("Smartbomb activity detected: +16%");
 
       // Additional bonus for specific smartbomb ships
@@ -286,9 +325,12 @@ class CampManager extends EventEmitter {
       );
 
       if (hasSmartbombShip) {
-        probability += 0.3; // Additional 30% for dedicated smartbomb ships
-        log.push("Dedicated smartbomb ship bonus: +30%");
+        const extraBonus = isSingleKill ? 0.15 : 0.3; // Limit bonus for single kill
+        smartbombBonus += extraBonus;
+        log.push(`Dedicated smartbomb ship bonus: +${extraBonus * 100}%`);
       }
+
+      baseProbability += smartbombBonus;
     }
 
     // Known camping location bonus
@@ -299,7 +341,7 @@ class CampManager extends EventEmitter {
         camp.stargateName.toLowerCase().includes(gate.toLowerCase())
       )
     ) {
-      probability += systemData.weight;
+      baseProbability += systemData.weight;
       log.push(
         `Known camping location bonus: +${(systemData.weight * 100).toFixed(
           1
@@ -307,56 +349,7 @@ class CampManager extends EventEmitter {
       );
     }
 
-    // Attacker consistency bonus
-    const CONSISTENCY_BONUS = 0.15;
-    const consistencyCheckKills = gateKills.slice(-3);
-    let consistencyBonus = 0;
-
-    if (consistencyCheckKills.length < 2) {
-      log.push(
-        "No consistency bonus: Need at least 2 kills to check consistency"
-      );
-    } else {
-      const latestAttackers = new Set(
-        consistencyCheckKills[
-          consistencyCheckKills.length - 1
-        ].killmail.attackers
-          .map((a) => a.character_id)
-          .filter((id) => id)
-      );
-
-      for (let i = consistencyCheckKills.length - 2; i >= 0; i--) {
-        const previousAttackers = new Set(
-          consistencyCheckKills[i].killmail.attackers
-            .map((a) => a.character_id)
-            .filter((id) => id)
-        );
-
-        const intersection = new Set(
-          [...latestAttackers].filter((x) => previousAttackers.has(x))
-        );
-
-        if (intersection.size >= 2) {
-          consistencyBonus += CONSISTENCY_BONUS;
-          log.push(
-            `Attacker consistency bonus with kill ${i + 1}: +${(
-              CONSISTENCY_BONUS * 100
-            ).toFixed(1)}% (${intersection.size} same attackers)`
-          );
-        }
-      }
-    }
-
-    if (consistencyBonus > 0) {
-      probability += consistencyBonus;
-      log.push(
-        `Total attacker consistency bonus: +${(consistencyBonus * 100).toFixed(
-          1
-        )}%`
-      );
-    }
-
-    // Vulnerable victim bonus
+    // Vulnerable victim bonus - limited for single kills
     const vulnerableKills = validKills.filter(
       (kill) =>
         kill.shipCategories?.victim ===
@@ -366,40 +359,108 @@ class CampManager extends EventEmitter {
     );
 
     if (vulnerableKills.length > 0) {
-      probability += 0.4;
+      const vulnerableBonus = isSingleKill ? 0.2 : 0.4; // Reduced for single kill
+      baseProbability += vulnerableBonus;
       log.push(
-        `Vulnerable victim bonus (${vulnerableKills.length} industrial/mining ships): +40%`
+        `Vulnerable victim bonus (${
+          vulnerableKills.length
+        } industrial/mining ships): +${vulnerableBonus * 100}%`
       );
     }
 
-    // Time decay
+    // ======== STAGE 5: CONSECUTIVE KILLS & CONSISTENCY CALCULATION ========
+
+    let consistencyBonus = 0;
+
+    if (camp.kills.length >= 2) {
+      const CONSISTENCY_BONUS = 0.15; // Each consistent kill adds 15%
+      const consistencyCheckKills = gateKills.slice(-3);
+
+      if (consistencyCheckKills.length >= 2) {
+        const latestAttackers = new Set(
+          consistencyCheckKills[
+            consistencyCheckKills.length - 1
+          ].killmail.attackers
+            .map((a) => a.character_id)
+            .filter((id) => id)
+        );
+
+        for (let i = consistencyCheckKills.length - 2; i >= 0; i--) {
+          const previousAttackers = new Set(
+            consistencyCheckKills[i].killmail.attackers
+              .map((a) => a.character_id)
+              .filter((id) => id)
+          );
+
+          const intersection = new Set(
+            [...latestAttackers].filter((x) => previousAttackers.has(x))
+          );
+
+          if (intersection.size >= 2) {
+            consistencyBonus += CONSISTENCY_BONUS;
+            log.push(
+              `Attacker consistency bonus with kill ${i + 1}: +${(
+                CONSISTENCY_BONUS * 100
+              ).toFixed(1)}% (${intersection.size} same attackers)`
+            );
+          }
+        }
+
+        if (consistencyBonus > 0) {
+          log.push(
+            `Total attacker consistency bonus: +${(
+              consistencyBonus * 100
+            ).toFixed(1)}%`
+          );
+        }
+      } else {
+        log.push(
+          "No consistency bonus: Need at least 2 kills to check consistency"
+        );
+      }
+    }
+
+    baseProbability += consistencyBonus;
+
+    // ======== STAGE 6: FINAL PROBABILITY CALCULATION & CAPPING ========
+
+    // Cap final probability at 95% before time decay
+    const rawProbability = Math.min(0.95, baseProbability);
+    log.push(
+      `Raw probability (capped at 95%): ${(rawProbability * 100).toFixed(1)}%`
+    );
+
+    // ======== STAGE 7: TIME DECAY CALCULATION ========
+
+    // Apply time decay directly to the final percentage
+    let finalProbability = rawProbability;
     let timeDecayPercent = 0;
+
     if (minutesSinceLastKill > DECAY_START / (60 * 1000)) {
       const decayMinutes = minutesSinceLastKill - DECAY_START / (60 * 1000);
+      // Calculate direct percentage points to reduce (5% per minute after decay start)
       timeDecayPercent = Math.min(0.95, decayMinutes * 0.05);
+      finalProbability = rawProbability * (1 - timeDecayPercent);
+
       log.push(
         `Applying decay for ${decayMinutes.toFixed(
           1
         )} minutes beyond decay start`
       );
-
-      const beforeDecay = probability;
-      probability *= 1 - timeDecayPercent;
       log.push(
-        `Time decay adjustment (${minutesSinceLastKill.toFixed(
-          1
-        )} minutes since last kill): -${(timeDecayPercent * 100).toFixed(
-          1
-        )}% (${beforeDecay} → ${probability})`
+        `Time decay adjustment: -${(timeDecayPercent * 100).toFixed(1)}% (${(
+          rawProbability * 100
+        ).toFixed(1)}% → ${(finalProbability * 100).toFixed(1)}%)`
       );
     }
 
     // Final normalization
-    probability = Math.max(0, Math.min(95, Math.round(probability * 100)));
-    log.push(`Final normalized probability: ${probability}%`);
+    finalProbability = Math.max(0, Math.min(0.95, finalProbability));
+    const percentProbability = Math.round(finalProbability * 100);
+    log.push(`Final normalized probability: ${percentProbability}%`);
 
     camp.probabilityLog = log;
-    return probability;
+    return percentProbability;
   }
 
   isGateCamp(killmail) {
