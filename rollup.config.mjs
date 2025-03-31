@@ -13,7 +13,7 @@ import autoprefixer from "autoprefixer";
 const production = !process.env.ROLLUP_WATCH;
 
 export default [
-  // Client-side bundle
+  // Client-side bundle - no changes here
   {
     input: "src/main.js",
     output: {
@@ -68,7 +68,7 @@ export default [
     ],
   },
 
-  // Server-side bundle
+  // Server-side bundle - with new changes
   {
     input: "./server/server.js",
     output: {
@@ -84,7 +84,18 @@ export default [
         dedupe: [],
         exportConditions: ["node"],
       }),
-      commonjs(),
+      commonjs({
+        // Add these options to handle CommonJS better
+        transformMixedEsModules: true,
+        esmExternals: true,
+      }),
+      // Add this new plugin to inject globals at the top of the bundle
+      {
+        name: "inject-globals",
+        renderChunk(code) {
+          return `import { fileURLToPath } from 'url';\nimport { dirname } from 'path';\nglobal.__filename = fileURLToPath(import.meta.url);\nglobal.__dirname = dirname(global.__filename);\n${code}`;
+        },
+      },
     ],
     external: [
       "express",
@@ -101,6 +112,8 @@ export default [
       "fs",
       "events",
       "zlib",
+      "pg",
+      "pg-native", // Add pg-native to externals as suggested earlier
     ],
   },
 ];

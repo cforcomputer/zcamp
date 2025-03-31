@@ -3,9 +3,9 @@ import express from "express";
 import { createServer } from "http";
 import { Server } from "socket.io";
 import axios from "axios";
-import { createClient as createSqlClient } from "@libsql/client";
+// import { createClient as createSqlClient } from "@libsql/client";
 import path from "path";
-import { fileURLToPath } from "url";
+
 import cors from "cors";
 import fs from "fs";
 import session from "express-session";
@@ -13,6 +13,9 @@ import RedisStore from "connect-redis";
 import { createClient as createRedisClient } from "redis";
 import { compare } from "bcrypt";
 import { THRESHOLDS } from "../src/constants";
+import pg from "pg";
+
+const { Pool } = pg;
 
 class TaskQueue {
   constructor(concurrency = 5) {
@@ -60,9 +63,6 @@ class TaskQueue {
     }
   }
 }
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 // Caches for common items
 const MAX_SHIP_CACHE_SIZE = 2000;
@@ -183,9 +183,14 @@ const REDISQ_URL = "https://redisq.zkillboard.com/listen.php?queueID=zcamp";
 let killmails = [];
 let isDatabaseInitialized = false;
 
-const db = createSqlClient({
-  url: process.env.LIBSQL_URL || "file:zcamp.db",
-  authToken: process.env.LIBSQL_AUTH_TOKEN,
+// const db = createSqlClient({
+//   url: process.env.LIBSQL_URL || "file:zcamp.db",
+//   authToken: process.env.LIBSQL_AUTH_TOKEN,
+// });
+
+const pool = new Pool({
+  connectionString: process.env.POSTGRES_URL,
+  native: false,
 });
 
 // Initialize Redis store
@@ -258,14 +263,14 @@ if (!EVE_SSO_CONFIG.client_id || !EVE_SSO_CONFIG.client_secret) {
 
 // Database setup
 async function initializeDatabase() {
-  console.log("Attempting to connect to database:", process.env.LIBSQL_URL);
-  console.log("Auth token present:", !!process.env.LIBSQL_AUTH_TOKEN);
+  console.log("Initializing PostgreSQL database");
 
   try {
-    await db.execute(`
+    // Users table
+    await pool.query(`
       CREATE TABLE IF NOT EXISTS users (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        username TEXT UNIQUE,
+        id SERIAL PRIMARY KEY,
+        username VARCHAR(255) UNIQUE,
         password TEXT,
         settings TEXT,
         character_id TEXT UNIQUE,
@@ -276,9 +281,9 @@ async function initializeDatabase() {
       )
     `);
 
-    await db.execute(`
+    await pool.query(`
       CREATE TABLE IF NOT EXISTS filter_lists (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        id SERIAL PRIMARY KEY,
         user_id INTEGER,
         name TEXT,
         ids TEXT,
@@ -289,9 +294,9 @@ async function initializeDatabase() {
       )
     `);
 
-    await db.execute(`
+    await pool.query(`
       CREATE TABLE IF NOT EXISTS user_profiles (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        id SERIAL PRIMARY KEY,
         user_id INTEGER,
         name TEXT,
         settings TEXT,
@@ -299,46 +304,46 @@ async function initializeDatabase() {
       )
     `);
 
-    await db.execute(`
+    await pool.query(`
       CREATE TABLE IF NOT EXISTS celestial_data (
         system_id INTEGER PRIMARY KEY,
         system_name TEXT,
         celestial_data TEXT,
-        last_updated DATETIME DEFAULT CURRENT_TIMESTAMP
+        last_updated TIMESTAMP DEFAULT NOW()
       )
     `);
 
-    await db.execute(`
+    await pool.query(`
       CREATE TABLE IF NOT EXISTS ship_types (
         ship_type_id INTEGER PRIMARY KEY,
         category TEXT NOT NULL,
-        name TEXT NULL,
-        tier TEXT NULL,
-        last_updated DATETIME DEFAULT CURRENT_TIMESTAMP
+        name TEXT,
+        tier TEXT,
+        last_updated TIMESTAMP DEFAULT NOW()
       )
     `);
 
-    await db.execute(`
+    await pool.query(`
       CREATE TABLE IF NOT EXISTS camp_crushers (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        id SERIAL PRIMARY KEY,
         character_id TEXT NOT NULL,
         character_name TEXT NOT NULL,
         bashbucks INTEGER DEFAULT 0,
         FOREIGN KEY(character_id) REFERENCES users(character_id)
       )
-  `);
+    `);
 
-    await db.execute(`
-    CREATE TABLE IF NOT EXISTS camp_crusher_targets (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS camp_crusher_targets (
+        id SERIAL PRIMARY KEY,
         character_id TEXT NOT NULL,
         camp_id TEXT NOT NULL,
-        start_time DATETIME NOT NULL,
-        end_time DATETIME NOT NULL,
+        start_time TIMESTAMP NOT NULL,
+        end_time TIMESTAMP NOT NULL,
         completed BOOLEAN DEFAULT FALSE,
         FOREIGN KEY(character_id) REFERENCES users(character_id)
-    )
-`);
+      )
+    `);
 
     console.log("Database initialized successfully");
     isDatabaseInitialized = true;
@@ -575,7 +580,7 @@ app.get("/health", async (_, res) => {
       });
     }
 
-    const result = await db.execute("SELECT 1 as health_check");
+    const result = await pool.query("SELECT 1 as health_check");
     if (result.rows?.[0]?.health_check === 1) {
       return res.status(200).json({
         status: "healthy",
@@ -590,10 +595,11 @@ app.get("/health", async (_, res) => {
           )}MB`,
         },
         cache: {
-          killmailsLast24h: killmails.filter(
+          killmailsLast6h: killmails.filter(
+            // Changed from 24h to 6h
             (km) =>
               new Date(km.killmail.killmail_time) >
-              new Date(Date.now() - 24 * 60 * 60 * 1000)
+              new Date(Date.now() - 6 * 60 * 60 * 1000) // 6 hours instead of 24
           ).length,
           killmailsLast2h: killmails.filter(
             (km) =>
@@ -656,11 +662,12 @@ const PARENT_MARKET_GROUPS = {
 };
 
 // Function to check if a killmail is within the last 24 hours
-function isWithinLast24Hours(killmailTime) {
+function isWithinLast6Hours(killmailTime) {
+  // Rename function to match new purpose
   const now = new Date();
   const killTime = new Date(killmailTime);
   const timeDiff = now - killTime;
-  return timeDiff <= 24 * 60 * 60 * 1000; // 24 hours in milliseconds
+  return timeDiff <= 6 * 60 * 60 * 1000; // 6 hours in milliseconds
 }
 
 function isNPC(shipTypeID, killmail) {
@@ -707,10 +714,10 @@ function isNPC(shipTypeID, killmail) {
 
 async function getShipCategoryFromDb(shipTypeId) {
   try {
-    const { rows } = await db.execute({
-      sql: "SELECT category, name, tier FROM ship_types WHERE ship_type_id = ?",
-      args: [shipTypeId],
-    });
+    const { rows } = await pool.query(
+      "SELECT category, name, tier FROM ship_types WHERE ship_type_id = $1",
+      [shipTypeId]
+    );
     return rows[0];
   } catch (err) {
     console.error(`Database error fetching ship type ${shipTypeId}:`, err);
@@ -720,18 +727,23 @@ async function getShipCategoryFromDb(shipTypeId) {
 
 async function storeShipCategory(shipTypeId, shipData) {
   try {
-    await db.execute({
-      sql: `INSERT OR REPLACE INTO ship_types 
-            (ship_type_id, category, name, tier, last_updated) 
-            VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)`,
-      args: [shipTypeId, shipData.category, shipData.name, shipData.tier],
-    });
+    await pool.query(
+      `INSERT INTO ship_types 
+        (ship_type_id, category, name, tier, last_updated) 
+        VALUES ($1, $2, $3, $4, NOW())
+        ON CONFLICT (ship_type_id) 
+        DO UPDATE SET 
+          category = $2, 
+          name = $3, 
+          tier = $4, 
+          last_updated = NOW()`,
+      [shipTypeId, shipData.category, shipData.name, shipData.tier]
+    );
   } catch (error) {
     console.error(`Database error storing ship type ${shipTypeId}:`, error);
     throw error;
   }
 }
-
 // function serializeData(data) {
 //   if (typeof data === "bigint") {
 //     return data.toString();
@@ -988,11 +1000,11 @@ async function addShipCategoriesToKillmail(killmail) {
 // Function to get the total size of a user's filter lists
 async function getFilterListsSize(userId) {
   try {
-    const { rows } = await db.execute({
-      sql: "SELECT COUNT(*) as count FROM filter_lists WHERE user_id = ?",
-      args: [userId],
-    });
-    return rows[0].count;
+    const { rows } = await pool.query(
+      "SELECT COUNT(*) as count FROM filter_lists WHERE user_id = $1",
+      [userId]
+    );
+    return parseInt(rows[0].count);
   } catch (err) {
     console.error("Error getting filter lists size:", err);
     throw err;
@@ -1001,10 +1013,9 @@ async function getFilterListsSize(userId) {
 
 // Add to server.js
 async function cleanupCelestialData() {
-  const OLD_DATA_THRESHOLD = 7 * 24 * 60 * 60 * 1000; // 7 days
-  await db.execute(`
+  await pool.query(`
     DELETE FROM celestial_data 
-    WHERE last_updated < datetime('now', '-7 days')
+    WHERE last_updated < NOW() - INTERVAL '7 days'
   `);
 }
 
@@ -1012,9 +1023,9 @@ async function cleanupCelestialData() {
 setInterval(cleanupCelestialData, 24 * 60 * 60 * 1000);
 
 async function cleanupShipTypes() {
-  await db.execute(`
+  await pool.query(`
     DELETE FROM ship_types 
-    WHERE last_updated < datetime('now', '-30 days')
+    WHERE last_updated < NOW() - INTERVAL '30 days'
   `);
 }
 
@@ -1024,16 +1035,15 @@ setInterval(cleanupShipTypes, 7 * 24 * 60 * 60 * 1000);
 async function fetchCelestialData(systemId) {
   console.log(`Fetching celestial data for system ${systemId}`);
 
-  // Use a longer timeout for database operations
-  const DB_TIMEOUT = 5000; // 5 seconds instead of 2
+  const DB_TIMEOUT = 5000; // 5 seconds
 
   try {
     // Check database first with increased timeout
     try {
-      const dbPromise = db.execute({
-        sql: "SELECT celestial_data FROM celestial_data WHERE system_id = ?",
-        args: [systemId],
-      });
+      const dbPromise = pool.query(
+        "SELECT celestial_data FROM celestial_data WHERE system_id = $1",
+        [systemId]
+      );
 
       const { rows } = await Promise.race([
         dbPromise,
@@ -1067,21 +1077,28 @@ async function fetchCelestialData(systemId) {
     }
 
     // Store in database non-blocking
-    db.execute({
-      sql: `REPLACE INTO celestial_data 
-            (system_id, system_name, celestial_data, last_updated) 
-            VALUES (?, ?, ?, CURRENT_TIMESTAMP)`,
-      args: [
-        systemId,
-        response.data[0]?.solarsystemname || String(systemId),
-        JSON.stringify(response.data),
-      ],
-    }).catch((err) => {
-      console.error(
-        `Failed to store celestial data for system ${systemId}:`,
-        err
-      );
-    });
+    pool
+      .query(
+        `INSERT INTO celestial_data 
+         (system_id, system_name, celestial_data, last_updated) 
+       VALUES ($1, $2, $3, NOW())
+       ON CONFLICT (system_id) 
+       DO UPDATE SET 
+         system_name = $2, 
+         celestial_data = $3, 
+         last_updated = NOW()`,
+        [
+          systemId,
+          response.data[0]?.solarsystemname || String(systemId),
+          JSON.stringify(response.data),
+        ]
+      )
+      .catch((err) => {
+        console.error(
+          `Failed to store celestial data for system ${systemId}:`,
+          err
+        );
+      });
 
     return response.data;
   } catch (error) {
@@ -1216,14 +1233,15 @@ app.post("/api/register", async (req, res) => {
   try {
     const hashedPassword = await hash(password, 10);
 
-    await db.execute({
-      sql: "INSERT INTO users (username, password, settings) VALUES (?, ?, ?)",
-      args: [username, hashedPassword, JSON.stringify({})],
-    });
+    await pool.query(
+      "INSERT INTO users (username, password, settings) VALUES ($1, $2, $3)",
+      [username, hashedPassword, JSON.stringify({})]
+    );
 
     res.json({ success: true });
   } catch (err) {
-    if (err.message?.includes("UNIQUE constraint failed")) {
+    if (err.code === "23505") {
+      // PostgreSQL unique violation error code
       res
         .status(409)
         .json({ success: false, message: "Username already exists" });
@@ -1272,23 +1290,23 @@ app.post("/api/filter-list", async (req, res) => {
     console.log("Processed IDs:", processedIds);
 
     // Insert into database
-    const result = await db.execute({
-      sql: "INSERT INTO filter_lists (user_id, name, ids, enabled, is_exclude, filter_type) VALUES (?, ?, ?, ?, ?, ?)",
-      args: [
+    const result = await pool.query(
+      "INSERT INTO filter_lists (user_id, name, ids, enabled, is_exclude, filter_type) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id",
+      [
         userId,
         name,
         JSON.stringify(processedIds),
         enabled ? 1 : 0,
         isExclude ? 1 : 0,
         filterType || null,
-      ],
-    });
+      ]
+    );
 
     console.log("Database insert result:", result);
 
     // Convert BigInt to string for the ID
     const newFilterList = {
-      id: result.lastInsertRowid.toString(),
+      id: result.rows[0].id.toString(),
       user_id: userId.toString(),
       name,
       ids: processedIds,
@@ -1370,13 +1388,13 @@ app.post("/api/profile", async (req, res) => {
     const userId = req.session.user.id;
     const profileData = JSON.stringify({ settings, filterLists });
 
-    const result = await db.execute({
-      sql: "INSERT INTO user_profiles (user_id, name, settings) VALUES (?, ?, ?)",
-      args: [userId, name, profileData],
-    });
+    const result = await pool.query(
+      "INSERT INTO user_profiles (user_id, name, settings) VALUES ($1, $2, $3) RETURNING id",
+      [userId, name, profileData]
+    );
 
     const newProfile = {
-      id: result.lastInsertRowid, // Use lastInsertRowid instead of lastInsertId
+      id: result.rows[0].id,
       name,
       settings: profileData,
     };
@@ -1624,10 +1642,10 @@ app.get("/callback", async (req, res) => {
       console.log("Starting database operations...");
 
       // User lookup/creation
-      const { rows: existingUser } = await db.execute({
-        sql: "SELECT id, settings FROM users WHERE character_id = ?",
-        args: [characterId],
-      });
+      const { rows: existingUser } = await pool.query(
+        "SELECT id, settings FROM users WHERE character_id = $1",
+        [characterId]
+      );
 
       let userId;
       let userSettings = {};
@@ -1637,57 +1655,57 @@ app.get("/callback", async (req, res) => {
         userId = existingUser[0].id;
         userSettings = JSON.parse(existingUser[0].settings || "{}");
 
-        await db.execute({
-          sql: `UPDATE users 
-                SET access_token = ?, refresh_token = ?, character_name = ?, token_expiry = ? 
-                WHERE character_id = ?`,
-          args: [
+        await pool.query(
+          `UPDATE users 
+           SET access_token = $1, refresh_token = $2, character_name = $3, token_expiry = $4 
+           WHERE character_id = $5`,
+          [
             access_token,
             refresh_token,
             characterName,
             token_expiry,
             characterId,
-          ],
-        });
+          ]
+        );
       } else {
         console.log("Creating new user...");
-        const result = await db.execute({
-          sql: `INSERT INTO users 
-                (character_id, character_name, access_token, refresh_token, token_expiry, settings) 
-                VALUES (?, ?, ?, ?, ?, ?)`,
-          args: [
+        const result = await pool.query(
+          `INSERT INTO users 
+           (character_id, character_name, access_token, refresh_token, token_expiry, settings) 
+           VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+          [
             characterId,
             characterName,
             access_token,
             refresh_token,
             token_expiry,
             "{}",
-          ],
-        });
-        userId = result.lastInsertRowid;
+          ]
+        );
+        userId = result.rows[0].id;
       }
 
       console.log("Ensuring camp_crushers entry exists...");
-      await db.execute({
-        sql: `INSERT INTO camp_crushers (character_id, character_name, bashbucks)
-              SELECT ?, ?, 0
-              WHERE NOT EXISTS (
-                SELECT 1 FROM camp_crushers WHERE character_id = ?
-              )`,
-        args: [characterId, characterName, characterId],
-      });
+      await pool.query(
+        `INSERT INTO camp_crushers (character_id, character_name, bashbucks)
+         SELECT $1, $2, 0
+         WHERE NOT EXISTS (
+           SELECT 1 FROM camp_crushers WHERE character_id = $3
+         )`,
+        [characterId, characterName, characterId]
+      );
 
       // Fetch filter lists
-      const { rows: filterLists } = await db.execute({
-        sql: "SELECT * FROM filter_lists WHERE user_id = ?",
-        args: [userId],
-      });
+      const { rows: filterLists } = await pool.query(
+        "SELECT * FROM filter_lists WHERE user_id = $1",
+        [userId]
+      );
 
       // Fetch profiles
-      const { rows: profiles } = await db.execute({
-        sql: "SELECT id, name, settings FROM user_profiles WHERE user_id = ?",
-        args: [userId],
-      });
+      const { rows: profiles } = await pool.query(
+        "SELECT id, name, settings FROM user_profiles WHERE user_id = $1",
+        [userId]
+      );
 
       const processedFilterLists = filterLists.map((list) => ({
         id: list.id.toString(),
@@ -2332,15 +2350,16 @@ async function processKillmailData(killmail) {
     pinpointData.celestialData = celestialInfo;
 
     // Check for camp crusher rewards
+    // Check for camp crusher rewards
     console.log("Checking camp crusher targets...");
     try {
-      const { rows: targets } = await db.execute({
-        sql: `SELECT ct.*, cc.bashbucks 
-              FROM camp_crusher_targets ct 
-              JOIN camp_crushers cc ON ct.character_id = cc.character_id
-              WHERE ct.camp_id = ? AND ct.completed = FALSE AND ct.end_time > CURRENT_TIMESTAMP`,
-        args: [killmail.killmail.solar_system_id],
-      });
+      const { rows: targets } = await pool.query(
+        `SELECT ct.*, cc.bashbucks 
+     FROM camp_crusher_targets ct 
+     JOIN camp_crushers cc ON ct.character_id = cc.character_id
+     WHERE ct.camp_id = $1 AND ct.completed = FALSE AND ct.end_time > CURRENT_TIMESTAMP`,
+        [killmail.killmail.solar_system_id]
+      );
       console.log(`Found ${targets.length} potential camp crusher targets`);
 
       for (const target of targets) {
@@ -2352,15 +2371,15 @@ async function processKillmailData(killmail) {
           const bashbucksAwarded = Math.floor(
             killmail.zkb.totalValue / 1000000
           );
-          await db.execute({
-            sql: "UPDATE camp_crushers SET bashbucks = bashbucks + ? WHERE character_id = ?",
-            args: [bashbucksAwarded, target.character_id],
-          });
+          await pool.query(
+            "UPDATE camp_crushers SET bashbucks = bashbucks + $1 WHERE character_id = $2",
+            [bashbucksAwarded, target.character_id]
+          );
 
-          await db.execute({
-            sql: "UPDATE camp_crusher_targets SET completed = TRUE WHERE id = ?",
-            args: [target.id],
-          });
+          await pool.query(
+            "UPDATE camp_crusher_targets SET completed = TRUE WHERE id = $1",
+            [target.id]
+          );
 
           io.to(target.character_id).emit("bashbucksAwarded", {
             amount: bashbucksAwarded,
@@ -2600,20 +2619,20 @@ io.on("connection", (socket) => {
         ? ids
         : ids.map((id) => id.trim());
 
-      const result = await db.execute({
-        sql: "INSERT INTO filter_lists (user_id, name, ids, enabled, is_exclude, filter_type) VALUES (?, ?, ?, ?, ?, ?)",
-        args: [
+      const result = await pool.query(
+        "INSERT INTO filter_lists (user_id, name, ids, enabled, is_exclude, filter_type) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id",
+        [
           userId,
           name,
           JSON.stringify(processedIds),
           enabled ? 1 : 0,
           is_exclude ? 1 : 0,
           filter_type,
-        ],
-      });
+        ]
+      );
 
       const newFilterList = {
-        id: result.lastInsertRowid.toString(),
+        id: result.rows[0].id.toString(),
         user_id: userId.toString(),
         name,
         ids: processedIds,
@@ -2650,24 +2669,24 @@ io.on("connection", (socket) => {
         filterLists: serializedFilterLists,
       });
 
-      const { rows: existingProfile } = await db.execute({
-        sql: "SELECT id FROM user_profiles WHERE user_id = ? AND name = ?",
-        args: [userId, name],
-      });
+      const { rows: existingProfile } = await pool.query(
+        "SELECT id FROM user_profiles WHERE user_id = $1 AND name = $2",
+        [userId, name]
+      );
 
       let profileId;
-      if (existingProfile[0]) {
-        await db.execute({
-          sql: "UPDATE user_profiles SET settings = ? WHERE id = ?",
-          args: [profileData, existingProfile[0].id],
-        });
+      if (existingProfile.length > 0) {
+        await pool.query(
+          "UPDATE user_profiles SET settings = $1 WHERE id = $2",
+          [profileData, existingProfile[0].id]
+        );
         profileId = existingProfile[0].id;
       } else {
-        const result = await db.execute({
-          sql: "INSERT INTO user_profiles (user_id, name, settings) VALUES (?, ?, ?)",
-          args: [userId, name, profileData],
-        });
-        profileId = result.lastInsertRowid;
+        const result = await pool.query(
+          "INSERT INTO user_profiles (user_id, name, settings) VALUES ($1, $2, $3) RETURNING id",
+          [userId, name, profileData]
+        );
+        profileId = result.rows[0].id;
       }
 
       const savedProfile = {
@@ -2757,12 +2776,12 @@ io.on("connection", (socket) => {
     }
 
     try {
-      const result = await db.execute({
-        sql: "DELETE FROM user_profiles WHERE id = ? AND user_id = ?",
-        args: [id, socket.request.session.user.id],
-      });
+      const result = await pool.query(
+        "DELETE FROM user_profiles WHERE id = $1 AND user_id = $2",
+        [id, socket.request.session.user.id]
+      );
 
-      if (result.rowsAffected > 0) {
+      if (result.rowCount > 0) {
         socket.emit("profileDeleted", id);
       } else {
         socket.emit("error", { message: "Profile not found" });
@@ -2794,7 +2813,7 @@ async function pollRedisQ() {
 
       if (
         !isDuplicate(killmail) &&
-        isWithinLast24Hours(killmail.killmail.killmail_time)
+        isWithinLast6Hours(killmail.killmail.killmail_time) // Updated function name
       ) {
         // Enqueue processing instead of processing immediately
         killmailProcessingQueue
@@ -2841,7 +2860,7 @@ function cleanKillmailsCache(killmails) {
   return killmails.filter((km) => {
     const killTime = new Date(km.killmail.killmail_time);
     const timeDiff = now - killTime;
-    return timeDiff <= 24 * 60 * 60 * 1000; // 24 hours
+    return timeDiff <= 6 * 60 * 60 * 1000; // 6 hours instead of 24
   });
 }
 
