@@ -345,6 +345,12 @@ async function initializeDatabase() {
       )
     `);
 
+    // await pool.query(`
+    //   ALTER TABLE camp_crusher_targets
+    //   ADD COLUMN IF NOT EXISTS system_id TEXT,
+    //   ADD COLUMN IF NOT EXISTS stargate_name TEXT
+    // `);
+
     console.log("Database initialized successfully");
     isDatabaseInitialized = true;
   } catch (err) {
@@ -395,17 +401,17 @@ app.get("/api/campcrushers/stats", async (req, res) => {
   }
 
   try {
-    const { rows } = await db.execute({
-      sql: "SELECT character_name, bashbucks FROM camp_crushers WHERE character_id = ?",
-      args: [req.session.user.character_id],
-    });
+    const { rows } = await pool.query(
+      "SELECT character_name, bashbucks FROM camp_crushers WHERE character_id = $1",
+      [req.session.user.character_id]
+    );
 
     if (rows.length === 0) {
       // Initialize new player
-      await db.execute({
-        sql: "INSERT INTO camp_crushers (character_id, character_name, bashbucks) VALUES (?, ?, 0)",
-        args: [req.session.user.character_id, req.session.user.character_name],
-      });
+      await pool.query(
+        "INSERT INTO camp_crushers (character_id, character_name, bashbucks) VALUES ($1, $2, 0)",
+        [req.session.user.character_id, req.session.user.character_name]
+      );
       return res.json({ bashbucks: 0 });
     }
 
@@ -460,31 +466,31 @@ app.post("/api/campcrushers/target", async (req, res) => {
 
   try {
     // Check for existing active target
-    const { rows } = await db.execute({
-      sql: `SELECT id FROM camp_crusher_targets 
-            WHERE character_id = ? AND completed = FALSE 
-            AND end_time > CURRENT_TIMESTAMP`,
-      args: [req.session.user.character_id],
-    });
+    const { rows } = await pool.query(
+      `SELECT id FROM camp_crusher_targets 
+       WHERE character_id = $1 AND completed = FALSE 
+       AND end_time > CURRENT_TIMESTAMP`,
+      [req.session.user.character_id]
+    );
 
     if (rows.length > 0) {
       return res.status(400).json({ error: "Active target already exists" });
     }
 
     // Create new target with more camp details
-    await db.execute({
-      sql: `INSERT INTO camp_crusher_targets 
-            (character_id, camp_id, system_id, stargate_name, start_time, end_time) 
-            VALUES (?, ?, ?, ?, ?, ?)`,
-      args: [
+    await pool.query(
+      `INSERT INTO camp_crusher_targets 
+       (character_id, camp_id, system_id, stargate_name, start_time, end_time) 
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [
         req.session.user.character_id,
         campId,
         systemId,
         stargateName,
         startTime,
         endTime,
-      ],
-    });
+      ]
+    );
 
     res.json({ success: true, endTime });
   } catch (error) {
@@ -495,18 +501,33 @@ app.post("/api/campcrushers/target", async (req, res) => {
 
 app.get("/api/campcrushers/leaderboard", async (req, res) => {
   try {
-    // Basic SELECT without any JOINs first to verify we can get the base data
-    const { rows } = await db.execute({
-      sql: `SELECT 
-              character_id, 
-              character_name, 
-              bashbucks,
-              target_camp_id,
-              target_start_time
-            FROM camp_crushers 
-            ORDER BY bashbucks DESC`,
-      args: [],
-    });
+    // This query gets players and their current active targets (if any)
+    const { rows } = await pool.query(`
+      SELECT 
+        cc.character_id, 
+        cc.character_name, 
+        cc.bashbucks,
+        current_target.camp_id AS target_camp_id,
+        current_target.start_time AS target_start_time
+      FROM 
+        camp_crushers cc
+      LEFT JOIN LATERAL (
+        SELECT 
+          camp_id, 
+          start_time
+        FROM 
+          camp_crusher_targets
+        WHERE 
+          character_id = cc.character_id
+          AND completed = FALSE 
+          AND end_time > CURRENT_TIMESTAMP
+        ORDER BY 
+          start_time DESC
+        LIMIT 1
+      ) current_target ON true
+      ORDER BY 
+        cc.bashbucks DESC
+    `);
 
     // If we have no data, return empty array
     if (!rows || !Array.isArray(rows)) {
@@ -533,42 +554,6 @@ app.get("/api/campcrushers/leaderboard", async (req, res) => {
     });
   }
 });
-
-// app.get("/api/debug/camp-crushers", async (req, res) => {
-//   try {
-//     // Get table info
-//     const { rows: tableInfo } = await db.execute({
-//       sql: "SELECT sql FROM sqlite_master WHERE type='table' AND name='camp_crushers'",
-//       args: [],
-//     });
-
-//     // Get count
-//     const { rows: countInfo } = await db.execute({
-//       sql: "SELECT COUNT(*) as count FROM camp_crushers",
-//       args: [],
-//     });
-
-//     // Get sample data
-//     const { rows: sampleData } = await db.execute({
-//       sql: "SELECT * FROM camp_crushers LIMIT 5",
-//       args: [],
-//     });
-
-//     res.json({
-//       tableStructure: tableInfo?.[0]?.sql,
-//       recordCount: countInfo?.[0]?.count,
-//       sampleData: sampleData,
-//     });
-//   } catch (error) {
-//     res.status(500).json({
-//       error: "Debug query failed",
-//       details: error.message,
-//     });
-//   }
-// });
-
-// Add health check endpoint
-// server.js
 
 app.get("/health", async (_, res) => {
   try {
@@ -1153,15 +1138,15 @@ app.post("/api/refresh-token", async (req, res) => {
 
       // Update database and session
       if (req.session?.user?.character_id) {
-        await db.execute({
-          sql: `UPDATE users SET access_token = ?, refresh_token = ?, token_expiry = ? WHERE character_id = ?`,
-          args: [
+        await pool.query(
+          `UPDATE users SET access_token = $1, refresh_token = $2, token_expiry = $3 WHERE character_id = $4`,
+          [
             access_token,
             new_refresh_token,
             token_expiry,
             req.session.user.character_id,
-          ],
-        });
+          ]
+        );
 
         // Update session with new tokens
         req.session.user = {
@@ -1332,10 +1317,10 @@ app.put("/api/filter-list/:id", async (req, res) => {
   const id = req.params.id;
 
   try {
-    const { rows } = await db.execute({
-      sql: "SELECT user_id FROM filter_lists WHERE id = ?",
-      args: [id],
-    });
+    const { rows } = await pool.query(
+      "SELECT user_id FROM filter_lists WHERE id = $1",
+      [id]
+    );
 
     if (rows.length === 0) {
       return res
@@ -1345,17 +1330,17 @@ app.put("/api/filter-list/:id", async (req, res) => {
 
     const userId = rows[0].user_id;
 
-    await db.execute({
-      sql: "UPDATE filter_lists SET name = ?, ids = ?, enabled = ?, is_exclude = ?, filter_type = ? WHERE id = ?",
-      args: [
+    await pool.query(
+      "UPDATE filter_lists SET name = $1, ids = $2, enabled = $3, is_exclude = $4, filter_type = $5 WHERE id = $6",
+      [
         name,
         JSON.stringify(ids),
         enabled ? 1 : 0,
         isExclude ? 1 : 0,
         filterType || null,
         id,
-      ],
-    });
+      ]
+    );
 
     const updatedList = {
       id: id.toString(),
@@ -1411,10 +1396,10 @@ app.post("/api/profile", async (req, res) => {
 
 app.get("/api/filter-lists/:userId", async (req, res) => {
   try {
-    const { rows } = await db.execute({
-      sql: "SELECT * FROM filter_lists WHERE user_id = ?",
-      args: [req.params.userId],
-    });
+    const { rows } = await pool.query(
+      "SELECT * FROM filter_lists WHERE user_id = $1",
+      [req.params.userId]
+    );
 
     const filterLists = rows.map((row) => ({
       ...row,
@@ -1455,16 +1440,16 @@ app.get("/api/session", async (req, res) => {
 
   try {
     // Fetch filter lists
-    const { rows: filterLists } = await db.execute({
-      sql: "SELECT * FROM filter_lists WHERE user_id = ?",
-      args: [req.session.user.id],
-    });
+    const { rows: filterLists } = await pool.query(
+      "SELECT * FROM filter_lists WHERE user_id = $1",
+      [req.session.user.id]
+    );
 
     // Add profile fetch
-    const { rows: profiles } = await db.execute({
-      sql: "SELECT id, name, settings FROM user_profiles WHERE user_id = ?",
-      args: [req.session.user.id],
-    });
+    const { rows: profiles } = await pool.query(
+      "SELECT id, name, settings FROM user_profiles WHERE user_id = $1",
+      [req.session.user.id]
+    );
 
     const processedFilterLists = filterLists.map((list) => ({
       id: list.id.toString(),
@@ -1510,10 +1495,10 @@ app.post("/api/login", async (req, res) => {
       });
     }
 
-    const { rows } = await db.execute({
-      sql: "SELECT * FROM users WHERE username = ?",
-      args: [username],
-    });
+    const { rows } = await pool.query(
+      "SELECT * FROM users WHERE username = $1",
+      [username]
+    );
 
     const user = rows[0];
     if (!user) {
@@ -1532,10 +1517,11 @@ app.post("/api/login", async (req, res) => {
     }
 
     // Get user's filter lists
-    const { rows: filterLists } = await db.execute({
-      sql: "SELECT * FROM filter_lists WHERE user_id = ?",
-      args: [user.id],
-    });
+    // Get user's filter lists
+    const { rows: filterLists } = await pool.query(
+      "SELECT * FROM filter_lists WHERE user_id = $1",
+      [user.id]
+    );
 
     const processedFilterLists = filterLists.map((list) => ({
       ...list,
@@ -1794,10 +1780,10 @@ app.get("/api/check-session", async (req, res) => {
     }
 
     // Get stored refresh token from database
-    const { rows } = await db.execute({
-      sql: "SELECT refresh_token, token_expiry FROM users WHERE character_id = ?",
-      args: [req.session.user.character_id],
-    });
+    const { rows } = await pool.query(
+      "SELECT refresh_token, token_expiry FROM users WHERE character_id = $1",
+      [req.session.user.character_id]
+    );
 
     if (!rows[0]?.refresh_token) {
       return res.status(401).json({ error: "No refresh token found" });
@@ -1825,15 +1811,15 @@ app.get("/api/check-session", async (req, res) => {
         const token_expiry = Math.floor(Date.now() / 1000) + expires_in;
 
         // Update database and session with new tokens
-        await db.execute({
-          sql: "UPDATE users SET access_token = ?, refresh_token = ?, token_expiry = ? WHERE character_id = ?",
-          args: [
+        await pool.query(
+          `UPDATE users SET access_token = $1, refresh_token = $2, token_expiry = $3 WHERE character_id = $4`,
+          [
             access_token,
             refresh_token,
             token_expiry,
             req.session.user.character_id,
-          ],
-        });
+          ]
+        );
 
         req.session.user = {
           ...req.session.user,
@@ -2207,10 +2193,10 @@ app.put("/api/filter-list/:id", async (req, res) => {
 
   try {
     // Get the user ID for this filter list
-    const result = await db.execute({
-      sql: "SELECT user_id FROM filter_lists WHERE id = ?",
-      args: [id],
-    });
+    const { rows } = await pool.query(
+      "SELECT user_id FROM filter_lists WHERE id = $1",
+      [id]
+    );
     if (result.rows.length === 0) {
       return res
         .status(404)
@@ -2218,7 +2204,19 @@ app.put("/api/filter-list/:id", async (req, res) => {
     }
 
     // Check if updating this list would exceed the size limit
-    const currentSize = await getFilterListsSize(filterList.user_id);
+    // Get the user ID for this filter list first
+    const { rows: oldList } = await pool.query(
+      "SELECT * FROM filter_lists WHERE id = $1",
+      [id]
+    );
+    if (oldList.length === 0) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Filter list not found" });
+    }
+
+    // Check if updating this list would exceed the size limit
+    const currentSize = await getFilterListsSize(oldList[0].user_id);
     const newListSize = JSON.stringify({
       name,
       ids,
@@ -2226,9 +2224,7 @@ app.put("/api/filter-list/:id", async (req, res) => {
       isExclude,
       filterType,
     }).length;
-    const oldListSize = JSON.stringify(
-      await db.get("SELECT * FROM filter_lists WHERE id = ?", [id])
-    ).length;
+    const oldListSize = JSON.stringify(oldList[0]).length;
     if (currentSize - oldListSize + newListSize > 1024 * 1024) {
       // 1MB limit
       return res
@@ -2236,35 +2232,33 @@ app.put("/api/filter-list/:id", async (req, res) => {
         .json({ success: false, message: "Filter lists size limit exceeded" });
     }
 
-    db.run(
-      "UPDATE filter_lists SET name = ?, ids = ?, enabled = ?, is_exclude = ?, filter_type = ? WHERE id = ?",
-      [
-        name,
-        JSON.stringify(ids),
-        enabled ? 1 : 0,
-        isExclude ? 1 : 0,
-        filterType || null,
+    try {
+      await pool.query(
+        "UPDATE filter_lists SET name = $1, ids = $2, enabled = $3, is_exclude = $4, filter_type = $5 WHERE id = $6",
+        [
+          name,
+          JSON.stringify(ids),
+          enabled ? 1 : 0,
+          isExclude ? 1 : 0,
+          filterType || null,
+          id,
+        ]
+      );
+      console.log("Updated filter list:", {
         id,
-      ],
-      function (err) {
-        if (err) {
-          console.error("Error updating filter list:", err);
-          res
-            .status(500)
-            .json({ success: false, message: "Error updating filter list" });
-        } else {
-          console.log("Updated filter list:", {
-            id,
-            name,
-            ids,
-            enabled,
-            isExclude,
-            filterType,
-          });
-          res.json({ success: true });
-        }
-      }
-    );
+        name,
+        ids,
+        enabled,
+        isExclude,
+        filterType,
+      });
+      res.json({ success: true });
+    } catch (err) {
+      console.error("Error updating filter list:", err);
+      res
+        .status(500)
+        .json({ success: false, message: "Error updating filter list" });
+    }
   } catch (error) {
     console.error("Server error:", error);
     res.status(500).json({ success: false, message: "Server error" });
@@ -2274,10 +2268,7 @@ app.put("/api/filter-list/:id", async (req, res) => {
 // Delete a filter list
 app.delete("/api/filter-list/:id", async (req, res) => {
   try {
-    await db.execute({
-      sql: "DELETE FROM filter_lists WHERE id = ?",
-      args: [req.params.id],
-    });
+    await pool.query("DELETE FROM filter_lists WHERE id = $1", [req.params.id]);
     res.json({ success: true });
   } catch (err) {
     res
@@ -2349,7 +2340,6 @@ async function processKillmailData(killmail) {
     // Set celestial data for pinpoints
     pinpointData.celestialData = celestialInfo;
 
-    // Check for camp crusher rewards
     // Check for camp crusher rewards
     console.log("Checking camp crusher targets...");
     try {
@@ -2453,10 +2443,10 @@ io.on("connection", (socket) => {
     }
 
     try {
-      const { rows } = await db.execute({
-        sql: "SELECT * FROM filter_lists WHERE user_id = ?",
-        args: [socket.request.session.user.id],
-      });
+      const { rows } = await pool.query(
+        "SELECT * FROM filter_lists WHERE user_id = $1",
+        [socket.request.session.user.id]
+      );
 
       const processedLists = rows.map((list) => ({
         id: list.id.toString(),
@@ -2477,10 +2467,10 @@ io.on("connection", (socket) => {
 
   socket.on("login", async ({ username, password }) => {
     try {
-      const { rows } = await db.execute({
-        sql: "SELECT id, username, password, settings, character_id, character_name, access_token FROM users WHERE username = ?",
-        args: [username],
-      });
+      const { rows } = await pool.query(
+        "SELECT id, username, password, settings, character_id, character_name, access_token FROM users WHERE username = $1",
+        [username]
+      );
 
       const user = rows[0];
       if (user) {
@@ -2511,16 +2501,16 @@ io.on("connection", (socket) => {
           socket.username = username;
 
           // Fetch filter lists
-          const { rows: filterLists } = await db.execute({
-            sql: "SELECT * FROM filter_lists WHERE user_id = ?",
-            args: [sessionUser.id],
-          });
+          const { rows: filterLists } = await pool.query(
+            "SELECT * FROM filter_lists WHERE user_id = $1",
+            [socket.request.session.user.id]
+          );
 
           // Fetch profiles
-          const { rows: profiles } = await db.execute({
-            sql: "SELECT id, name, settings FROM user_profiles WHERE user_id = ?",
-            args: [sessionUser.id],
-          });
+          const { rows: profiles } = await pool.query(
+            "SELECT id, name, settings FROM user_profiles WHERE user_id = $1",
+            [socket.request.session.user.id]
+          );
 
           const processedFilterLists = filterLists.map((list) => ({
             id: list.id.toString(),
@@ -2559,10 +2549,10 @@ io.on("connection", (socket) => {
   socket.on("updateSettings", async (newSettings) => {
     if (socket.username) {
       try {
-        await db.execute({
-          sql: "UPDATE users SET settings = ? WHERE username = ?",
-          args: [JSON.stringify(newSettings), socket.username],
-        });
+        await pool.query("UPDATE users SET settings = $1 WHERE username = $2", [
+          JSON.stringify(newSettings),
+          socket.username,
+        ]);
         console.log("Settings updated for user:", socket.username);
       } catch (err) {
         console.error("Error updating settings:", err);
@@ -2585,10 +2575,10 @@ io.on("connection", (socket) => {
         socket.request.session.user.id ||
         socket.request.session.user.character_id;
 
-      const { rows: profiles } = await db.execute({
-        sql: "SELECT id, name, settings FROM user_profiles WHERE user_id = ?",
-        args: [userId],
-      });
+      const { rows: profiles } = await pool.query(
+        "SELECT id, name, settings FROM user_profiles WHERE user_id = $1",
+        [userId]
+      );
 
       const processedProfiles = profiles.map((profile) => ({
         id: profile.id.toString(),
@@ -2709,10 +2699,10 @@ io.on("connection", (socket) => {
     }
 
     try {
-      const { rows } = await db.execute({
-        sql: "SELECT settings, name FROM user_profiles WHERE id = ? AND user_id = ?",
-        args: [profileId, socket.request.session.user.id],
-      });
+      const { rows } = await pool.query(
+        "SELECT settings, name FROM user_profiles WHERE id = $1 AND user_id = $2",
+        [profileId, socket.request.session.user.id]
+      );
 
       if (!rows[0]) {
         socket.emit("error", { message: "Profile not found" });
@@ -2739,10 +2729,10 @@ io.on("connection", (socket) => {
 
     try {
       // First verify the filter list belongs to this user
-      const { rows } = await db.execute({
-        sql: "SELECT user_id FROM filter_lists WHERE id = ?",
-        args: [id],
-      });
+      const { rows } = await pool.query(
+        "SELECT user_id FROM filter_lists WHERE id = $1",
+        [id]
+      );
 
       if (
         rows.length === 0 ||
@@ -2755,10 +2745,7 @@ io.on("connection", (socket) => {
       }
 
       // Delete the filter list
-      await db.execute({
-        sql: "DELETE FROM filter_lists WHERE id = ?",
-        args: [id],
-      });
+      await pool.query("DELETE FROM filter_lists WHERE id = $1", [id]);
 
       // Emit the deletion event
       socket.emit("filterListDeleted", { id });
