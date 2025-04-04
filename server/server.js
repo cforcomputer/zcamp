@@ -345,11 +345,17 @@ async function initializeDatabase() {
       )
     `);
 
-    // await pool.query(`
-    //   ALTER TABLE camp_crusher_targets
-    //   ADD COLUMN IF NOT EXISTS system_id TEXT,
-    //   ADD COLUMN IF NOT EXISTS stargate_name TEXT
-    // `);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS pinned_systems (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER NOT NULL,
+        system_id INTEGER NOT NULL,
+        stargate_name TEXT NOT NULL,
+        created_at TIMESTAMP DEFAULT NOW(),
+        FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+        UNIQUE(user_id, system_id, stargate_name)
+      )
+    `);
 
     console.log("Database initialized successfully");
     isDatabaseInitialized = true;
@@ -392,6 +398,93 @@ app.post("/api/verify-turnstile", async (req, res) => {
   }
 
   res.json(data);
+});
+
+// Get pinned systems for the current user
+app.get("/api/pinned-systems", async (req, res) => {
+  if (!req.session?.user?.id) {
+    return res.status(401).json({ error: "Not authenticated" });
+  }
+
+  try {
+    const { rows } = await pool.query(
+      "SELECT * FROM pinned_systems WHERE user_id = $1 ORDER BY created_at DESC",
+      [req.session.user.id]
+    );
+    res.json(rows);
+  } catch (error) {
+    console.error("Error fetching pinned systems:", error);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+// Add a new pinned system
+app.post("/api/pinned-systems", async (req, res) => {
+  if (!req.session?.user?.id) {
+    return res.status(401).json({ error: "Not authenticated" });
+  }
+
+  const { system_id, stargate_name } = req.body;
+
+  try {
+    const { rows } = await pool.query(
+      `INSERT INTO pinned_systems (user_id, system_id, stargate_name) 
+       VALUES ($1, $2, $3) 
+       ON CONFLICT (user_id, system_id, stargate_name) DO NOTHING
+       RETURNING id`,
+      [req.session.user.id, system_id, stargate_name]
+    );
+
+    if (rows.length > 0) {
+      const newPin = {
+        id: rows[0].id,
+        user_id: req.session.user.id,
+        system_id,
+        stargate_name,
+        created_at: new Date().toISOString(),
+      };
+
+      // Make sure to emit to all sockets for this user
+      const userRoomId = req.session.user.id.toString();
+      io.to(userRoomId).emit("systemPinned", newPin);
+
+      res.status(201).json(newPin);
+    } else {
+      res.status(200).json({ message: "System already pinned" });
+    }
+  } catch (error) {
+    console.error("Error pinning system:", error);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+// Delete a pinned system
+app.delete("/api/pinned-systems/:id", async (req, res) => {
+  if (!req.session?.user?.id) {
+    return res.status(401).json({ error: "Not authenticated" });
+  }
+
+  const id = req.params.id;
+  try {
+    const { rows } = await pool.query(
+      "DELETE FROM pinned_systems WHERE id = $1 AND user_id = $2 RETURNING id",
+      [id, req.session.user.id]
+    );
+
+    if (rows.length > 0) {
+      // Notify connected clients
+      io.to(req.session.user.id.toString()).emit("systemUnpinned", {
+        id: rows[0].id,
+      });
+
+      res.json({ success: true, id: rows[0].id });
+    } else {
+      res.status(404).json({ error: "Pinned system not found" });
+    }
+  } catch (error) {
+    console.error("Error unpinning system:", error);
+    res.status(500).json({ error: "Server error" });
+  }
 });
 
 // CAMPCRUSHERS API

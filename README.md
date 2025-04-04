@@ -131,6 +131,9 @@ Tech stack:
 - Add a filter for gangs that is a dropdown to show currently active regions, user can also type it in to filter the dropdown to select what they want.
 - Add an option to send alerts if there is a gang in a specific region.
 - Allow "gangs" to be 1 person. This way we can detect and track active combat pilots, certain rules should apply to these though, they should be marked as solo.
+- Victims consistency duplication check for same is attackers for some reason? It is also skipping all consistency checks after one instance where they are all the same corp/alliance --> needs to just not apply for that specific one but allowed for later.
+- Threat ship limitation is no longer applied after the consistency check passes, this should probability be permanently limited to 50%
+- Smartbomb activity should be ignored if the kill is an awox kill.
 
 #### Next thing
 

@@ -4,12 +4,15 @@
   import campManager, { activeCamps } from "./campManager.js";
   import { CAMP_PROBABILITY_FACTORS, CAPSULE_ID } from "./constants.js";
   import ContextMenu from "./ContextMenu.svelte";
+  import PinnedSystemsList from "./PinnedSystemsList.svelte"; // New import
 
   const { THREAT_SHIPS } = CAMP_PROBABILITY_FACTORS;
 
   let viewMode = "cards"; // "cards" or "chart"
   let isLoading = true;
   let mounted = false;
+  let isLoggedIn = false; // New state for login status
+  let pinnedSystemsComponent;
 
   // Reactive statement to sort camps whenever the array is updated
   // Reactive subscription to activeCamps store
@@ -22,7 +25,21 @@
     isLoading = false;
   }
 
-  onMount(() => {
+  onMount(async () => {
+    // Check if user is logged in
+    try {
+      const response = await fetch("/api/session", {
+        credentials: "include",
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        isLoggedIn = !!data.user;
+      }
+    } catch (error) {
+      console.error("Error checking session:", error);
+    }
+
     mounted = true;
     campManager.startUpdates();
     return () => {
@@ -34,6 +51,43 @@
   onDestroy(() => {
     campManager.cleanup();
   });
+
+  async function pinSystem(camp) {
+    if (!isLoggedIn) return;
+
+    try {
+      const response = await fetch("/api/pinned-systems", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        credentials: "include",
+        body: JSON.stringify({
+          system_id: camp.systemId,
+          stargate_name: camp.stargateName,
+        }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+
+        // If we get a new pin back (not just "already pinned" message)
+        if (data.id) {
+          // Update the PinnedSystemsList UI immediately
+          pinnedSystemsComponent?.pinSystem({
+            id: data.id,
+            user_id: data.user_id,
+            system_id: camp.systemId,
+            stargate_name: camp.stargateName,
+            activeCamp: camp,
+            probability: camp.probability,
+          });
+        }
+      }
+    } catch (error) {
+      console.error("Error pinning system:", error);
+    }
+  }
 
   function formatValue(value) {
     if (!value) return "0 ISK";
@@ -96,7 +150,7 @@
     }
   }
 
-  // Add context menu handler
+  // Updated to add Pin option
   function handleContextMenu(event, camp) {
     event.preventDefault();
 
@@ -110,20 +164,31 @@
     const x = event.clientX - containerBounds.left;
     const y = event.clientY - containerBounds.top;
 
+    // Base options
+    const options = [
+      {
+        label: "Set Destination",
+        action: () => setDestination(camp.systemId, true),
+      },
+      {
+        label: "Add Waypoint",
+        action: () => setDestination(camp.systemId, false),
+      },
+    ];
+
+    // Add pin option if logged in
+    if (isLoggedIn) {
+      options.push({
+        label: "Pin System",
+        action: () => pinSystem(camp),
+      });
+    }
+
     contextMenu = {
       show: true,
       x,
       y,
-      options: [
-        {
-          label: "Set Destination",
-          action: () => setDestination(camp.systemId, true),
-        },
-        {
-          label: "Add Waypoint",
-          action: () => setDestination(camp.systemId, false),
-        },
-      ],
+      options,
     };
   }
 
@@ -207,6 +272,9 @@
 </script>
 
 <div class="p-4">
+  <!-- Add PinnedSystemsList component -->
+  <PinnedSystemsList bind:this={pinnedSystemsComponent} {isLoggedIn} />
+
   {#if isLoading}
     <div class="text-center py-8">
       <p class="text-gray-400">Loading camps...</p>
@@ -257,7 +325,8 @@
                 style="border-color: {getProbabilityColor(camp.probability)}"
               >
                 <h3 class="text-white text-base font-bold truncate">
-                  {camp.stargateName}
+                  {camp.kills[0]?.pinpoints?.celestialData?.solarsystemname ||
+                    camp.systemId}
                 </h3>
               </div>
 
@@ -314,10 +383,9 @@
                   <div
                     class="flex justify-between py-0.5 border-b border-white/10"
                   >
-                    <span class="text-gray-400">System:</span>
+                    <span class="text-gray-400">Stargate:</span>
                     <span class="text-white">
-                      {camp.kills[0]?.pinpoints?.celestialData
-                        ?.solarsystemname || camp.systemId}
+                      {camp.stargateName}
                     </span>
                   </div>
 
@@ -343,7 +411,6 @@
                       {/if}
                     </span>
                   </div>
-
                   <div
                     class="flex justify-between py-0.5 border-b border-white/10"
                   >
