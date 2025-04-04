@@ -1,7 +1,7 @@
 // Contains all the static id codes
 
 export const CAMP_TIMEOUT = 30 * 60 * 1000; // 30 minutes
-export const DECAY_START = 10 * 60 * 1000; // 10 minutes
+export const DECAY_START = 13 * 60 * 1000; // 13 minutes
 export const CAPSULE_ID = 670;
 
 //server.js AU
@@ -144,7 +144,7 @@ export const CAMP_PROBABILITY_FACTORS = {
     29984: { weight: 0.15 }, // Tengu
     29990: { weight: 0.29 }, // Loki
     11174: { weight: 0.3 }, // Keres
-    35683: { weight: 0.13 }, // Hecate
+    35683: { weight: 0.05 }, // Hecate
     11969: { weight: 0.3 }, // Arazu
     11961: { weight: 0.3 }, // Huginn
     11957: { weight: 0.04 }, // Falcon

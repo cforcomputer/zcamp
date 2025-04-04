@@ -384,41 +384,85 @@ class CampManager extends EventEmitter {
       const consistencyCheckKills = gateKills.slice(-3);
 
       if (consistencyCheckKills.length >= 2) {
-        const latestAttackers = new Set(
-          consistencyCheckKills[
-            consistencyCheckKills.length - 1
-          ].killmail.attackers
-            .map((a) => a.character_id)
-            .filter((id) => id)
+        // Check if these kills were part of a burst
+        const killTimes = consistencyCheckKills
+          .map((k) => new Date(k.killmail.killmail_time).getTime())
+          .sort();
+
+        const isBurst = killTimes.some(
+          (time, i) => i > 0 && time - killTimes[i - 1] < 120000
         );
 
-        for (let i = consistencyCheckKills.length - 2; i >= 0; i--) {
-          const previousAttackers = new Set(
-            consistencyCheckKills[i].killmail.attackers
-              .map((a) => a.character_id)
-              .filter((id) => id)
-          );
+        // Skip consistency bonus if all victims in burst are from same corp/alliance
+        let skipConsistencyBonus = false;
 
-          const intersection = new Set(
-            [...latestAttackers].filter((x) => previousAttackers.has(x))
-          );
+        if (isBurst) {
+          // Check corporation consistency
+          const victimCorps = consistencyCheckKills
+            .map((k) => k.killmail.victim.corporation_id)
+            .filter(Boolean);
 
-          if (intersection.size >= 2) {
-            consistencyBonus += CONSISTENCY_BONUS;
+          const uniqueCorps = new Set(victimCorps);
+
+          // Check alliance consistency
+          const victimAlliances = consistencyCheckKills
+            .map((k) => k.killmail.victim.alliance_id)
+            .filter(Boolean);
+
+          const uniqueAlliances = new Set(victimAlliances);
+
+          // If all victims have a corporation and they're all the same,
+          // or all victims have an alliance and they're all the same
+          if (
+            (victimCorps.length === consistencyCheckKills.length &&
+              uniqueCorps.size === 1) ||
+            (victimAlliances.length === consistencyCheckKills.length &&
+              uniqueAlliances.size === 1)
+          ) {
+            skipConsistencyBonus = true;
             log.push(
-              `Attacker consistency bonus with kill ${i + 1}: +${(
-                CONSISTENCY_BONUS * 100
-              ).toFixed(1)}% (${intersection.size} same attackers)`
+              "Burst kills from same corporation/alliance detected: skipping consistency bonus"
             );
           }
         }
 
-        if (consistencyBonus > 0) {
-          log.push(
-            `Total attacker consistency bonus: +${(
-              consistencyBonus * 100
-            ).toFixed(1)}%`
+        if (!skipConsistencyBonus) {
+          const latestAttackers = new Set(
+            consistencyCheckKills[
+              consistencyCheckKills.length - 1
+            ].killmail.attackers
+              .map((a) => a.character_id)
+              .filter((id) => id)
           );
+
+          for (let i = consistencyCheckKills.length - 2; i >= 0; i--) {
+            const previousAttackers = new Set(
+              consistencyCheckKills[i].killmail.attackers
+                .map((a) => a.character_id)
+                .filter((id) => id)
+            );
+
+            const intersection = new Set(
+              [...latestAttackers].filter((x) => previousAttackers.has(x))
+            );
+
+            if (intersection.size >= 2) {
+              consistencyBonus += CONSISTENCY_BONUS;
+              log.push(
+                `Attacker consistency bonus with kill ${i + 1}: +${(
+                  CONSISTENCY_BONUS * 100
+                ).toFixed(1)}% (${intersection.size} same attackers)`
+              );
+            }
+          }
+
+          if (consistencyBonus > 0) {
+            log.push(
+              `Total attacker consistency bonus: +${(
+                consistencyBonus * 100
+              ).toFixed(1)}%`
+            );
+          }
         }
       } else {
         log.push(
@@ -428,7 +472,6 @@ class CampManager extends EventEmitter {
     }
 
     baseProbability += consistencyBonus;
-
     // ======== STAGE 6: FINAL PROBABILITY CALCULATION & CAPPING ========
 
     // Cap final probability at 95% before time decay
