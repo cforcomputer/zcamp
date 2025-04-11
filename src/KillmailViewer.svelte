@@ -4,8 +4,18 @@
   import { onMount } from "svelte";
   import ContextMenu from "./ContextMenu.svelte";
   import audioManager from "./audioUtils";
+  import { slide } from "svelte/transition";
 
   export let openMap; // Receive openMap function from App.svelte
+
+  // Pagination configuration
+  let currentPage = 1;
+  let pageSize = 100;
+  let pageInputValue = 1;
+
+  // Track new killmails arriving while viewing other pages
+  let newKillmailCount = 0;
+  let previousKillmailCount = 0;
 
   let previousKillmailIds = new Set();
   let scrollContainer;
@@ -23,6 +33,19 @@
 
   $: killmailsToDisplay = $filteredKillmails;
 
+  // Track when new killmails arrive
+  $: {
+    if (
+      previousKillmailCount > 0 &&
+      killmailsToDisplay.length > previousKillmailCount &&
+      currentPage > 1
+    ) {
+      // Only increment counter when on pages other than first
+      newKillmailCount += killmailsToDisplay.length - previousKillmailCount;
+    }
+    previousKillmailCount = killmailsToDisplay.length;
+  }
+
   // Sort killmails by time, most recent first
   $: sortedKillmails = Array.isArray(killmailsToDisplay)
     ? [...killmailsToDisplay].sort((a, b) => {
@@ -32,6 +55,36 @@
         );
       })
     : [];
+
+  // Calculate total pages based on filtered results
+  $: totalPages = Math.max(1, Math.ceil(sortedKillmails.length / pageSize));
+
+  // Get only current page of killmails to render
+  $: currentPageKillmails = sortedKillmails.slice(
+    (currentPage - 1) * pageSize,
+    currentPage * pageSize
+  );
+
+  // Reset to first page when filter results change dramatically
+  $: {
+    if (sortedKillmails && totalPages > 0 && currentPage > totalPages) {
+      currentPage = 1;
+      pageInputValue = 1;
+    }
+  }
+
+  // Handle auto-scrolling for live data, but only on first page
+  $: if (
+    currentPage === 1 &&
+    sortedKillmails.length > 0 &&
+    sortedKillmails.length !== previousKillmailCount &&
+    shouldAutoScroll &&
+    !isUserScrolling
+  ) {
+    setTimeout(() => {
+      if (scrollContainer) scrollContainer.scrollTop = 0;
+    }, 0);
+  }
 
   // alert sounds for new killmails
   $: if ($settings.audio_alerts_enabled && $filteredKillmails?.length > 0) {
@@ -215,14 +268,8 @@
     }
 
     const { scrollTop, scrollHeight, clientHeight } = scrollContainer;
-    shouldAutoScroll = scrollTop + clientHeight >= scrollHeight - 5;
+    shouldAutoScroll = scrollTop === 0; // Auto-scroll when at top of container
   }
-
-  // function scrollToBottom() {
-  //   if (scrollContainer && shouldAutoScroll) {
-  //     scrollContainer.scrollTop = scrollContainer.scrollHeight;
-  //   }
-  // }
 
   function getTriangulationIcon(killmail) {
     if (!killmail?.pinpoints) return "○"; // Empty circle for unknown/error
@@ -257,21 +304,61 @@
     }
   }
 
+  function goToPage(page) {
+    const targetPage = Math.min(Math.max(1, page), totalPages);
+    if (targetPage !== currentPage) {
+      currentPage = targetPage;
+      pageInputValue = targetPage;
+
+      // Reset new killmail counter when going to first page
+      if (targetPage === 1) {
+        newKillmailCount = 0;
+      }
+
+      // Scroll back to top when changing pages
+      if (scrollContainer) {
+        scrollContainer.scrollTop = 0;
+      }
+    }
+  }
+
+  function goToLatest() {
+    goToPage(1);
+    newKillmailCount = 0;
+  }
+
+  function goToNextPage() {
+    goToPage(currentPage + 1);
+  }
+
+  function goToPreviousPage() {
+    goToPage(currentPage - 1);
+  }
+
   onMount(() => {
-    // scrollToBottom();
+    // Set initial auto-scroll behavior
+    shouldAutoScroll = true;
     audioManager.init();
   });
-
-  // $: {
-  //   if (sortedKillmails.length && !isUserScrolling && shouldAutoScroll) {
-  //     setTimeout(scrollToBottom, 0);
-  //   }
-  // }
 </script>
 
 <div
   class="flex flex-col bg-eve-dark/95 rounded-lg shadow-lg overflow-hidden relative"
 >
+  <!-- New Killmail Alert Banner -->
+  {#if newKillmailCount > 0}
+    <!-- svelte-ignore a11y-click-events-have-key-events -->
+    <!-- svelte-ignore a11y-no-static-element-interactions -->
+    <div
+      class="new-killmails-alert bg-eve-accent/20 text-eve-accent py-2 px-4 text-center border-b border-eve-accent/30 cursor-pointer"
+      on:click={goToLatest}
+      transition:slide
+    >
+      {newKillmailCount} new killmail{newKillmailCount === 1 ? "" : "s"} received!
+      Click to view.
+    </div>
+  {/if}
+
   <div class="overflow-x-auto">
     <table class="w-full"></table>
   </div>
@@ -286,7 +373,7 @@
     >
       <table class="w-full">
         <tbody>
-          {#each sortedKillmails as killmail (killmail.killID)}
+          {#each currentPageKillmails as killmail (killmail.killID)}
             <tr
               class="border-b border-eve-secondary/30 hover:bg-eve-secondary/20 transition-colors"
               on:contextmenu|preventDefault={(e) =>
@@ -338,7 +425,120 @@
           {/each}
         </tbody>
       </table>
+
+      {#if sortedKillmails.length === 0}
+        <div class="text-center py-10 text-gray-400">
+          No killmails match your current filters
+        </div>
+      {/if}
     </div>
+
+    <!-- Pagination controls -->
+    {#if totalPages > 1}
+      <div
+        class="pagination flex flex-wrap justify-between items-center p-4 border-t border-eve-secondary/30"
+      >
+        <div class="text-gray-400">
+          Showing {Math.min(
+            (currentPage - 1) * pageSize + 1,
+            sortedKillmails.length
+          )}
+          to {Math.min(currentPage * pageSize, sortedKillmails.length)}
+          of {sortedKillmails.length} killmails
+        </div>
+        <div class="flex items-center gap-4">
+          <!-- Jump to page input -->
+          <div class="flex items-center gap-2">
+            <span class="text-gray-400">Page</span>
+            <input
+              type="number"
+              class="w-16 px-2 py-1 bg-eve-secondary text-white rounded border border-eve-accent/20"
+              min="1"
+              max={totalPages}
+              bind:value={pageInputValue}
+              on:keydown={(e) => {
+                if (e.key === "Enter") {
+                  goToPage(parseInt(pageInputValue) || 1);
+                }
+              }}
+            />
+            <span class="text-gray-400">of {totalPages}</span>
+          </div>
+
+          <div class="flex gap-2">
+            <button
+              class="px-3 py-1 bg-eve-secondary text-white rounded disabled:opacity-50 disabled:cursor-not-allowed"
+              disabled={currentPage === 1}
+              on:click={goToPreviousPage}
+            >
+              Previous
+            </button>
+
+            {#if totalPages <= 7}
+              {#each Array(totalPages) as _, i}
+                <button
+                  class="px-3 py-1 rounded {currentPage === i + 1
+                    ? 'bg-eve-accent text-black'
+                    : 'bg-eve-secondary text-white'}"
+                  on:click={() => goToPage(i + 1)}
+                >
+                  {i + 1}
+                </button>
+              {/each}
+            {:else}
+              <!-- Simplified pagination with ellipsis -->
+              <button
+                class="px-3 py-1 rounded {currentPage === 1
+                  ? 'bg-eve-accent text-black'
+                  : 'bg-eve-secondary text-white'}"
+                on:click={() => goToPage(1)}
+              >
+                1
+              </button>
+
+              {#if currentPage > 3}
+                <span class="px-2 py-1 text-gray-400">...</span>
+              {/if}
+
+              {#each [-1, 0, 1] as offset}
+                {@const pageNum = currentPage + offset}
+                {#if pageNum > 1 && pageNum < totalPages}
+                  <button
+                    class="px-3 py-1 rounded {currentPage === pageNum
+                      ? 'bg-eve-accent text-black'
+                      : 'bg-eve-secondary text-white'}"
+                    on:click={() => goToPage(pageNum)}
+                  >
+                    {pageNum}
+                  </button>
+                {/if}
+              {/each}
+
+              {#if currentPage < totalPages - 2}
+                <span class="px-2 py-1 text-gray-400">...</span>
+              {/if}
+
+              <button
+                class="px-3 py-1 rounded {currentPage === totalPages
+                  ? 'bg-eve-accent text-black'
+                  : 'bg-eve-secondary text-white'}"
+                on:click={() => goToPage(totalPages)}
+              >
+                {totalPages}
+              </button>
+            {/if}
+
+            <button
+              class="px-3 py-1 bg-eve-secondary text-white rounded disabled:opacity-50 disabled:cursor-not-allowed"
+              disabled={currentPage === totalPages}
+              on:click={goToNextPage}
+            >
+              Next
+            </button>
+          </div>
+        </div>
+      </div>
+    {/if}
   </div>
 </div>
 
@@ -351,6 +551,22 @@
 />
 
 <style>
+  .new-killmails-alert {
+    animation: pulse 2s infinite;
+  }
+
+  @keyframes pulse {
+    0% {
+      opacity: 0.8;
+    }
+    50% {
+      opacity: 1;
+    }
+    100% {
+      opacity: 0.8;
+    }
+  }
+
   :global(.killmail-section) {
     height: calc(100vh - 150px);
     overflow-y: auto;
