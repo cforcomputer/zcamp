@@ -11,7 +11,7 @@ import fs from "fs";
 import session from "express-session";
 import RedisStore from "connect-redis";
 import { createClient as createRedisClient } from "redis";
-import { compare } from "bcrypt";
+import { hash, compare } from "bcrypt";
 import { THRESHOLDS } from "../src/constants";
 import pg from "pg";
 
@@ -2530,7 +2530,10 @@ io.on("connection", (socket) => {
   });
 
   socket.on("fetchFilterLists", async () => {
-    if (!socket.request.session?.user?.id) {
+    if (
+      !socket.request.session?.user?.id &&
+      !socket.request.session?.user?.character_id
+    ) {
       socket.emit("error", { message: "Not authenticated" });
       return;
     }
@@ -2689,14 +2692,19 @@ io.on("connection", (socket) => {
 
   // Filter list handling
   socket.on("createFilterList", async (data) => {
-    if (!socket.request.session?.user?.id) {
+    if (
+      !socket.request.session?.user?.id &&
+      !socket.request.session?.user?.character_id
+    ) {
       socket.emit("error", { message: "Not authenticated" });
       return;
     }
 
     try {
       const { name, ids, enabled, is_exclude, filter_type } = data;
-      const userId = socket.request.session.user.id;
+      const userId =
+        socket.request.session.user.id ||
+        socket.request.session.user.character_id;
 
       const processedIds = Array.isArray(ids)
         ? ids
@@ -2739,7 +2747,9 @@ io.on("connection", (socket) => {
     }
 
     try {
-      const userId = socket.request.session.user.id;
+      const userId =
+        socket.request.session.user.id ||
+        socket.request.session.user.character_id;
       const { name, settings, filterLists } = data;
 
       const serializedFilterLists = filterLists.map((list) => ({
