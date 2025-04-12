@@ -134,6 +134,7 @@ Tech stack:
 - Victims consistency duplication check for same is attackers for some reason? It is also skipping all consistency checks after one instance where they are all the same corp/alliance --> needs to just not apply for that specific one but allowed for later.
 - Threat ship limitation is no longer applied after the consistency check passes, this should probability be permanently limited to 50%
 - Smartbomb activity should be ignored if the kill is an awox kill.
+- Fix the error where audio alert triggers for every visible item if all items are visible. Should only be for each new received kill that is visible.
 
 #### Next thing
 

@@ -13,6 +13,52 @@
   let mounted = false;
   let isLoggedIn = false; // New state for login status
   let pinnedSystemsComponent;
+  let expandedCompositionCards = new Set();
+
+  function toggleCompositionExpansion(e, campId) {
+    e.stopPropagation();
+    if (expandedCompositionCards.has(campId)) {
+      expandedCompositionCards.delete(campId);
+    } else {
+      expandedCompositionCards.add(campId);
+    }
+    expandedCompositionCards = expandedCompositionCards; // Trigger reactivity
+  }
+
+  // Function to get accurate ship counts by counting unique pilot-ship combinations
+  function getAccurateShipCounts(camp) {
+    // Map to store unique character-ship combinations
+    const uniqueAttackerShips = new Map();
+
+    // Process all kills
+    camp.kills.forEach((kill) => {
+      kill.killmail.attackers.forEach((attacker) => {
+        if (
+          attacker.character_id &&
+          attacker.ship_type_id &&
+          attacker.ship_type_id !== CAPSULE_ID
+        ) {
+          // Create a unique key combining character and ship
+          const key = `${attacker.character_id}-${attacker.ship_type_id}`;
+
+          // Only count each character-ship combination once
+          uniqueAttackerShips.set(key, {
+            characterId: attacker.character_id,
+            shipTypeId: attacker.ship_type_id,
+          });
+        }
+      });
+    });
+
+    // Count unique ships by type
+    const shipCounts = {};
+
+    for (const { shipTypeId } of uniqueAttackerShips.values()) {
+      shipCounts[shipTypeId] = (shipCounts[shipTypeId] || 0) + 1;
+    }
+
+    return shipCounts;
+  }
 
   // Reactive statement to sort camps whenever the array is updated
   // Reactive subscription to activeCamps store
@@ -239,17 +285,6 @@
       .join("\n");
   }
 
-  let expandedCompositionCards = new Set();
-
-  function toggleCompositionExpansion(campId) {
-    if (expandedCompositionCards.has(campId)) {
-      expandedCompositionCards.delete(campId);
-    } else {
-      expandedCompositionCards.add(campId);
-    }
-    expandedCompositionCards = expandedCompositionCards; // Trigger reactivity
-  }
-
   function openCampHistory(camp) {
     const latestKill = camp.kills[camp.kills.length - 1];
     if (latestKill) {
@@ -318,9 +353,9 @@
                 : ''}"
               on:contextmenu|preventDefault={(e) => handleContextMenu(e, camp)}
             >
-              <!-- Title Bar -->
+              <!-- Title Bar - Improved contrast -->
               <div
-                class="bg-eve-secondary p-3 border-t-2"
+                class="bg-eve-dark/90 bg-gradient-to-r from-eve-secondary/90 to-eve-secondary/40 p-3 border-t-2"
                 style="border-color: {getProbabilityColor(camp.probability)}"
               >
                 <h3 class="text-white text-base font-bold truncate">
@@ -377,7 +412,7 @@
                   </button>
                 </div>
 
-                <!-- Camp Details -->
+                <!-- Camp Details - Reordered -->
                 <div class="space-y-1">
                   <div
                     class="flex justify-between py-0.5 border-b border-white/10"
@@ -410,6 +445,17 @@
                       {/if}
                     </span>
                   </div>
+
+                  <!-- Last Activity (moved up, blue text) -->
+                  <div
+                    class="flex justify-between py-0.5 border-b border-white/10"
+                  >
+                    <span class="text-gray-400">Last Activity:</span>
+                    <span class="text-eve-accent italic">
+                      {getTimeAgo(camp.lastKill)}
+                    </span>
+                  </div>
+
                   <div
                     class="flex justify-between py-0.5 border-b border-white/10"
                   >
@@ -439,10 +485,11 @@
                     >
                   </div>
 
+                  <!-- Moved to bottom of card -->
                   <div
                     class="flex justify-between py-0.5 border-b border-white/10"
                   >
-                    <span class="text-gray-400">Composition:</span>
+                    <span class="text-gray-400">Comp:</span>
                     <span class="text-white">
                       {#if camp.metrics?.partyMetrics}
                         {camp.metrics.partyMetrics.characters} pilots
@@ -466,104 +513,70 @@
                     </span>
                   </div>
 
-                  {#if camp.metrics?.shipCounts}
-                    <div class="mt-1 transition-all duration-300">
-                      {#if expandedCompositionCards.has(camp.id)}
-                        <!-- Expanded view with scrollable list -->
-                        <div
-                          class="bg-eve-secondary/80 rounded p-3 max-h-48 overflow-y-auto"
-                        >
-                          <div class="flex justify-between items-center mb-2">
-                            <h4 class="text-white font-semibold">
-                              Ship Composition
-                            </h4>
-                            <button
-                              class="text-gray-400 hover:text-white flex items-center gap-1"
-                              on:click|stopPropagation={() =>
-                                toggleCompositionExpansion(camp.id)}
-                              aria-label="Collapse"
-                            >
-                              <span>Close</span>
-                              <span class="text-xs">▲</span>
-                            </button>
-                          </div>
-                          <div class="flex flex-col gap-1">
-                            {#each Object.entries(camp.metrics.shipCounts) as [shipId, count]}
-                              {@const shipData = camp.kills
-                                .flatMap(
-                                  (k) => k.shipCategories?.attackers || []
-                                )
-                                .find((ship) => ship.shipTypeId == shipId)}
-                              <div
-                                class="flex justify-between items-center border-b border-eve-accent/10 py-1"
-                              >
-                                <span class="text-white"
-                                  >{shipData?.name || `Ship #${shipId}`}</span
-                                >
-                                <span class="text-eve-accent">×{count}</span>
-                              </div>
-                            {/each}
-                          </div>
-                        </div>
-                      {:else}
-                        <!-- Collapsed view with summary -->
-                        <div
-                          class="bg-eve-secondary/80 rounded p-2 flex justify-between items-center"
-                        >
-                          <div
-                            class="flex flex-wrap gap-1 flex-grow overflow-hidden mr-2"
-                          >
-                            {#each Object.entries(camp.metrics.shipCounts).slice(0, 2) as [shipId, count], i}
-                              {@const shipData = camp.kills
-                                .flatMap(
-                                  (k) => k.shipCategories?.attackers || []
-                                )
-                                .find((ship) => ship.shipTypeId == shipId)}
-                              <span
-                                class="px-2 py-1 bg-eve-dark/80 text-white text-sm rounded"
-                              >
-                                {shipData?.name || `Ship #${shipId}`} ×{count}
-                              </span>
-                            {/each}
-                            {#if Object.keys(camp.metrics.shipCounts).length > 2}
-                              <span
-                                class="px-2 py-1 bg-eve-dark/80 text-white text-sm rounded"
-                              >
-                                +{Object.keys(camp.metrics.shipCounts).length -
-                                  2} more
-                              </span>
-                            {/if}
-                          </div>
-                          <button
-                            class="text-eve-accent hover:text-eve-accent/80 px-3 py-1 bg-eve-dark/80 rounded flex items-center gap-1"
-                            on:click|stopPropagation={() =>
-                              toggleCompositionExpansion(camp.id)}
-                            aria-label="Expand ship details"
-                          >
-                            <span>View all</span>
-                            <span class="text-xs">▼</span>
-                          </button>
-                        </div>
-                      {/if}
-                    </div>
-                  {/if}
-
                   {#if camp.state === "CRASHED"}
                     <div class="text-center py-1 bg-eve-danger/50 rounded mt-1">
                       CRASHED
                     </div>
                   {/if}
-
-                  <div
-                    class="flex justify-between py-0.5 border-b border-white/10"
-                  >
-                    <span class="text-gray-400">Last Activity:</span>
-                    <span class="text-gray-400 italic"
-                      >{getTimeAgo(camp.lastKill)}</span
-                    >
-                  </div>
                 </div>
               </button>
+
+              <!-- Ships section - Always visible, changes between "Ships" and "Close" -->
+              {#if camp.metrics?.shipCounts}
+                <div class="mt-1 bg-eve-secondary/80 rounded">
+                  <!-- Button Bar - Always visible, left aligned -->
+                  <div class="flex items-center h-10 px-3">
+                    <button
+                      class="text-eve-accent hover:text-eve-accent/80 px-3 py-1 bg-eve-dark/80 rounded flex items-center gap-1"
+                      on:click={(e) => toggleCompositionExpansion(e, camp.id)}
+                      aria-label={expandedCompositionCards.has(camp.id)
+                        ? "Hide ship details"
+                        : "Show ship details"}
+                    >
+                      <span
+                        >{expandedCompositionCards.has(camp.id)
+                          ? "Close"
+                          : "Ships"}</span
+                      >
+                      <span class="text-xs"
+                        >{expandedCompositionCards.has(camp.id)
+                          ? "▲"
+                          : "▼"}</span
+                      >
+                      {#if !expandedCompositionCards.has(camp.id)}
+                        <span
+                          class="ml-1 px-1.5 py-0.5 bg-eve-accent/20 rounded-full text-xs"
+                        >
+                          {Object.keys(getAccurateShipCounts(camp)).length}
+                        </span>
+                      {/if}
+                    </button>
+                  </div>
+
+                  <!-- Expanded content shown below the button -->
+                  {#if expandedCompositionCards.has(camp.id)}
+                    <div
+                      class="p-3 max-h-48 overflow-y-auto border-t border-eve-accent/10"
+                    >
+                      <div class="flex flex-col gap-1">
+                        {#each Object.entries(getAccurateShipCounts(camp)) as [shipId, count]}
+                          {@const shipData = camp.kills
+                            .flatMap((k) => k.shipCategories?.attackers || [])
+                            .find((ship) => ship.shipTypeId == shipId)}
+                          <div
+                            class="flex justify-between items-center border-b border-eve-accent/10 py-1"
+                          >
+                            <span class="text-white"
+                              >{shipData?.name || `Ship #${shipId}`}</span
+                            >
+                            <span class="text-eve-accent">×{count}</span>
+                          </div>
+                        {/each}
+                      </div>
+                    </div>
+                  {/if}
+                </div>
+              {/if}
             </div>
 
             <!-- Probability Log Tooltip -->
@@ -639,7 +652,7 @@
                     Computing...
                   {/if}
                 </td>
-                <td class="px-4 py-2 text-gray-400">
+                <td class="px-4 py-2 text-eve-accent">
                   {getTimeAgo(camp.lastKill)}
                 </td>
               </tr>

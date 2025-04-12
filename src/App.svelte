@@ -27,6 +27,7 @@
   import LocationTracker from "./LocationTracker.svelte";
   import MapVisualization from "./MapVisualization.svelte";
   import WreckFieldDialog from "./WreckFieldDialog.svelte";
+  import NPCPage from "./NPCPage.svelte";
   import { slide } from "svelte/transition";
   import { writable, get } from "svelte/store";
   import {
@@ -384,6 +385,14 @@
                 Salvage Fields
               </button>
               <button
+                class="eve-nav-item {currentPage === 'npcs'
+                  ? 'bg-eve-accent/20 text-eve-accent'
+                  : ''}"
+                on:click={() => (currentPage = "npcs")}
+              >
+                NPCs
+              </button>
+              <button
                 class="eve-nav-item {currentPage === 'bountyboard'
                   ? 'bg-eve-accent/20 text-eve-accent'
                   : ''}"
@@ -471,6 +480,10 @@
       {:else if currentPage === "salvage"}
         <div class="eve-card">
           <SalvageFields on:openWreckField={handleOpenWreckField} />
+        </div>
+      {:else if currentPage === "npcs"}
+        <div class="eve-card">
+          <NPCPage />
         </div>
       {:else if currentPage === "bountyboard"}
         <div class="eve-card">

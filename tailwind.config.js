@@ -13,7 +13,7 @@ export default {
       },
       backgroundColor: {
         "eve-dark": "rgba(26, 26, 26, 0.95)",
-        "eve-card": "rgba(45, 45, 45, 0.85)",
+        "eve-card": "rgba(35, 35, 35, 0.85)",
         "eve-overlay": "rgba(0, 0, 0, 0.75)",
       },
       backdropFilter: {
