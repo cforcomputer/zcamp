@@ -195,6 +195,13 @@ export const CAMP_PROBABILITY_FACTORS = {
   },
 };
 
+const SHIP_CATEGORIES = {
+  AT_SHIP_IDS: [
+    2836, 74316, 42246, 32788, 33675, 33397, 32790, 35781, 32207, 74141, 35779,
+    60764, 3516, 32209, 33395, 42245, 60765, 26842, 2834, 3518, 33673,
+  ],
+};
+
 export const DEFAULT_SETTINGS = {
   dropped_value_enabled: false,
   total_value_enabled: false,

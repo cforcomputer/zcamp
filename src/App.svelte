@@ -27,6 +27,7 @@
   import LocationTracker from "./LocationTracker.svelte";
   import MapVisualization from "./MapVisualization.svelte";
   import WreckFieldDialog from "./WreckFieldDialog.svelte";
+  import UniverseMap from "./UniverseMap.svelte";
   import NPCPage from "./NPCPage.svelte";
   import { slide } from "svelte/transition";
   import { writable, get } from "svelte/store";
@@ -377,6 +378,14 @@
                 Gangs
               </button>
               <button
+                class="eve-nav-item {currentPage === 'map'
+                  ? 'bg-eve-accent/20 text-eve-accent'
+                  : ''}"
+                on:click={() => (currentPage = "map")}
+              >
+                Map
+              </button>
+              <button
                 class="eve-nav-item {currentPage === 'salvage'
                   ? 'bg-eve-accent/20 text-eve-accent'
                   : ''}"
@@ -476,6 +485,10 @@
       {:else if currentPage === "gangs"}
         <div class="eve-card">
           <ActiveRoams />
+        </div>
+      {:else if currentPage === "map"}
+        <div class="eve-card" style="height: calc(100vh - 100px);">
+          <UniverseMap />
         </div>
       {:else if currentPage === "salvage"}
         <div class="eve-card">

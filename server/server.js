@@ -374,6 +374,122 @@ async function initializeDatabase() {
   }
 }
 
+async function initializeMapData() {
+  try {
+    console.log("Initializing map data...");
+
+    // Create table if it doesn't exist
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS map_denormalize (
+        itemID INTEGER PRIMARY KEY,
+        typeID INTEGER,
+        groupID INTEGER,
+        solarSystemID INTEGER,
+        constellationID INTEGER,
+        regionID INTEGER,
+        orbitID INTEGER,
+        x DOUBLE PRECISION,
+        y DOUBLE PRECISION,
+        z DOUBLE PRECISION,
+        radius DOUBLE PRECISION,
+        itemName TEXT,
+        security DOUBLE PRECISION,
+        celestialIndex INTEGER,
+        orbitIndex INTEGER
+      )
+    `);
+
+    // Fetch the JSON data from the external source
+    console.log(
+      "Fetching map data from https://sde.zzeve.com/mapDenormalize.json"
+    );
+    const response = await axios.get(
+      "https://sde.zzeve.com/mapDenormalize.json"
+    );
+
+    if (!response.data || !Array.isArray(response.data)) {
+      throw new Error("Invalid data format received from the source");
+    }
+
+    const mapData = response.data;
+    console.log(`Fetched ${mapData.length} map entries`);
+
+    // Process in batches for better performance
+    const BATCH_SIZE = 500;
+    for (let i = 0; i < mapData.length; i += BATCH_SIZE) {
+      const batch = mapData.slice(i, i + BATCH_SIZE);
+
+      // Build placeholders for batch insert
+      const placeholders = batch
+        .map((_, idx) => {
+          const base = idx * 15 + 1;
+          return `($${base}, $${base + 1}, $${base + 2}, $${base + 3}, $${
+            base + 4
+          }, $${base + 5}, $${base + 6}, $${base + 7}, $${base + 8}, $${
+            base + 9
+          }, $${base + 10}, $${base + 11}, $${base + 12}, $${base + 13}, $${
+            base + 14
+          })`;
+        })
+        .join(", ");
+
+      const params = batch.flatMap((item) => [
+        item.itemID,
+        item.typeID,
+        item.groupID,
+        item.solarSystemID,
+        item.constellationID,
+        item.regionID,
+        item.orbitID,
+        item.x,
+        item.y,
+        item.z,
+        item.radius,
+        item.itemName,
+        item.security,
+        item.celestialIndex,
+        item.orbitIndex,
+      ]);
+
+      await pool.query(
+        `
+        INSERT INTO map_denormalize (
+          itemID, typeID, groupID, solarSystemID, constellationID, regionID, orbitID,
+          x, y, z, radius, itemName, security, celestialIndex, orbitIndex
+        ) VALUES ${placeholders}
+        ON CONFLICT (itemID) DO UPDATE SET
+          typeID = EXCLUDED.typeID,
+          groupID = EXCLUDED.groupID,
+          solarSystemID = EXCLUDED.solarSystemID,
+          constellationID = EXCLUDED.constellationID,
+          regionID = EXCLUDED.regionID,
+          orbitID = EXCLUDED.orbitID,
+          x = EXCLUDED.x,
+          y = EXCLUDED.y,
+          z = EXCLUDED.z,
+          radius = EXCLUDED.radius,
+          itemName = EXCLUDED.itemName,
+          security = EXCLUDED.security,
+          celestialIndex = EXCLUDED.celestialIndex,
+          orbitIndex = EXCLUDED.orbitIndex
+      `,
+        params
+      );
+
+      console.log(
+        `Processed batch ${Math.floor(i / BATCH_SIZE) + 1}/${Math.ceil(
+          mapData.length / BATCH_SIZE
+        )}`
+      );
+    }
+
+    console.log("Map data initialization complete");
+  } catch (error) {
+    console.error("Error initializing map data:", error);
+    throw error;
+  }
+}
+
 // CLOUDFLARE
 app.get("/api/turnstile-config", (req, res) => {
   res.json({ siteKey: process.env.TURNSTILE_SITE_KEY });
@@ -407,6 +523,40 @@ app.post("/api/verify-turnstile", async (req, res) => {
   }
 
   res.json(data);
+});
+
+// universe map data
+// This endpoint fetches map data from the database and returns it to the client
+app.get("/api/map-data", async (req, res) => {
+  try {
+    console.log("API: Received request for map data");
+
+    // Only fetch relevant data (regions, systems, stargates)
+    const { rows } = await pool.query(`
+      SELECT * FROM map_denormalize 
+      WHERE typeID IN (3, 5) OR groupID = 10
+    `);
+
+    console.log(`API: Found ${rows.length} total map entries`);
+    console.log(
+      `API: Regions: ${rows.filter((item) => item.typeid === 3).length}`
+    );
+    console.log(
+      `API: Solar Systems: ${rows.filter((item) => item.typeid === 5).length}`
+    );
+    console.log(
+      `API: Stargates: ${rows.filter((item) => item.groupid === 10).length}`
+    );
+
+    if (rows.length > 0) {
+      console.log("API: Sample entry:", rows[0]);
+    }
+
+    res.json(rows);
+  } catch (error) {
+    console.error("Error fetching map data:", error);
+    res.status(500).json({ error: "Failed to fetch map data" });
+  }
 });
 
 // Get pinned systems for the current user
@@ -724,13 +874,6 @@ app.get("/health", async (_, res) => {
     });
   }
 });
-
-const SHIP_CATEGORIES = {
-  AT_SHIP_IDS: [
-    2836, 74316, 42246, 32788, 33675, 33397, 32790, 35781, 32207, 74141, 35779,
-    60764, 3516, 32209, 33395, 42245, 60765, 26842, 2834, 3518, 33673,
-  ],
-};
 
 // Parent market group IDs for ship categories
 const PARENT_MARKET_GROUPS = {
@@ -2979,6 +3122,7 @@ function cleanKillmailsCache(killmails) {
 async function startServer() {
   try {
     await initializeDatabase();
+    await initializeMapData();
     isDatabaseInitialized = true;
 
     console.log("Starting server...");
