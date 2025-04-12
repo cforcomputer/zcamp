@@ -22,6 +22,9 @@
   let isUserScrolling = false;
   let shouldAutoScroll = false; // set to bottom of window if true
 
+  // Add this to track initial load state
+  let initialLoadComplete = false;
+
   // Context menu state
   let contextMenu = {
     show: false,
@@ -87,23 +90,31 @@
   }
 
   // alert sounds for new killmails
-  $: if ($settings.audio_alerts_enabled && $filteredKillmails?.length > 0) {
+  $: if (
+    initialLoadComplete &&
+    $settings.audio_alerts_enabled &&
+    $filteredKillmails?.length > 0
+  ) {
     const currentKillmailIds = new Set(
       $filteredKillmails.map((km) => km.killID)
     );
 
-    $filteredKillmails.forEach((killmail) => {
-      if (!previousKillmailIds.has(killmail.killID)) {
-        // Different alerts based on value
-        if (killmail.zkb.totalValue >= 1000000000) {
-          // 1B+
-          audioManager.playAlert("orange");
-        } else if (killmail.zkb.totalValue >= 100000000) {
-          // 100M+
-          audioManager.playAlert("blue");
-        } else {
-          audioManager.playAlert("default");
-        }
+    // Find killmails that weren't in the previous set
+    const newKillmails = $filteredKillmails.filter(
+      (km) => !previousKillmailIds.has(km.killID)
+    );
+
+    // Play audio alerts only for new killmails
+    newKillmails.forEach((killmail) => {
+      // Different alerts based on value
+      if (killmail.zkb.totalValue >= 1000000000) {
+        // 1B+
+        audioManager.playAlert("orange");
+      } else if (killmail.zkb.totalValue >= 100000000) {
+        // 100M+
+        audioManager.playAlert("blue");
+      } else {
+        audioManager.playAlert("default");
       }
     });
 
@@ -339,6 +350,14 @@
     // Set initial auto-scroll behavior
     shouldAutoScroll = true;
     audioManager.init();
+
+    // Initialize previousKillmailIds with current IDs to avoid playing sounds for existing killmails
+    if ($filteredKillmails?.length > 0) {
+      previousKillmailIds = new Set($filteredKillmails.map((km) => km.killID));
+    }
+
+    // Mark initial load as complete
+    initialLoadComplete = true;
   });
 </script>
 
