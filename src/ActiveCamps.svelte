@@ -217,18 +217,6 @@
     );
   }
 
-  function getShipIcon(category) {
-    const icons = {
-      dictor: "🔲",
-      hic: "⬛",
-      ewar: "📡",
-      tackle: "🔗",
-      dps: "⚔️",
-      smartbomb: "⚡",
-    };
-    return icons[category] || "🚀";
-  }
-
   function getShipThreatColor(weight) {
     if (weight >= 40) return "#ff4444";
     if (weight >= 30) return "#ff8c00";
@@ -471,17 +459,18 @@
                     <div class="mt-1 p-2 bg-eve-secondary rounded">
                       <div class="flex flex-wrap gap-1">
                         {#each Object.entries(camp.metrics.shipCounts) as [shipId, count]}
-                          {#if THREAT_SHIPS[shipId]}
-                            <span
-                              class="px-2 py-1 rounded text-sm"
-                              style="background-color: {getShipThreatColor(
-                                THREAT_SHIPS[shipId].weight
-                              )}"
-                              title="Threat Ship x{count}"
-                            >
-                              {getShipIcon(THREAT_SHIPS[shipId].category)}
-                            </span>
-                          {/if}
+                          <!-- Look for this ship in the killmail data -->
+                          {@const shipData = camp.kills
+                            .flatMap((k) => k.shipCategories?.attackers || [])
+                            .find((ship) => ship.shipTypeId == shipId)}
+                          <span
+                            class="px-2 py-1 rounded text-sm"
+                            style="background-color: {getShipThreatColor(
+                              THREAT_SHIPS[shipId]?.weight || 0
+                            )}"
+                          >
+                            {shipData?.name || `Ship #${shipId}`} x{count}
+                          </span>
                         {/each}
                       </div>
                     </div>

@@ -474,7 +474,7 @@
               Previous
             </button>
 
-            {#if totalPages <= 7}
+            {#if totalPages <= 5}
               {#each Array(totalPages) as _, i}
                 <button
                   class="px-3 py-1 rounded {currentPage === i + 1
@@ -486,7 +486,7 @@
                 </button>
               {/each}
             {:else}
-              <!-- Simplified pagination with ellipsis -->
+              <!-- Show first page button -->
               <button
                 class="px-3 py-1 rounded {currentPage === 1
                   ? 'bg-eve-accent text-black'
@@ -496,10 +496,12 @@
                 1
               </button>
 
+              <!-- Show ellipsis if needed -->
               {#if currentPage > 3}
                 <span class="px-2 py-1 text-gray-400">...</span>
               {/if}
 
+              <!-- Pages around current page -->
               {#each [-1, 0, 1] as offset}
                 {@const pageNum = currentPage + offset}
                 {#if pageNum > 1 && pageNum < totalPages}
@@ -514,10 +516,12 @@
                 {/if}
               {/each}
 
+              <!-- Show ellipsis if needed -->
               {#if currentPage < totalPages - 2}
                 <span class="px-2 py-1 text-gray-400">...</span>
               {/if}
 
+              <!-- Show last page button -->
               <button
                 class="px-3 py-1 rounded {currentPage === totalPages
                   ? 'bg-eve-accent text-black'
@@ -527,7 +531,6 @@
                 {totalPages}
               </button>
             {/if}
-
             <button
               class="px-3 py-1 bg-eve-secondary text-white rounded disabled:opacity-50 disabled:cursor-not-allowed"
               disabled={currentPage === totalPages}

@@ -159,7 +159,6 @@ export function initializeSocketStore() {
   });
 }
 
-// Cleanup all socket listeners
 function cleanupSocket() {
   const events = [
     "connect",

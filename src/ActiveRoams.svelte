@@ -6,8 +6,14 @@
   import socket from "./socket.js";
 
   let viewMode = "cards"; // "cards" or "chart"
+  let showOnlyRoaming = true; // Default to showing only roaming gangs
 
   $: roams = $activeRoams;
+
+  // Filter roams based on showOnlyRoaming setting
+  $: filteredRoams = showOnlyRoaming
+    ? roams.filter((roam) => getSystemCount(roam) > 1)
+    : roams;
 
   let isLoading = true;
   let mounted = false;
@@ -124,8 +130,6 @@
     }
   }
 
-  // Component: ActiveRoams.svelte
-
   function handleContextMenu(event, roam) {
     event.preventDefault();
 
@@ -202,6 +206,7 @@
       document.addEventListener("click", handleClickOutside);
     }, 0);
   }
+
   function handleMenuSelect(event) {
     const option = event.detail;
     option.action();
@@ -217,35 +222,46 @@
   {:else if mounted}
     <div class="flex justify-between items-center mb-4">
       <h2 class="text-2xl font-bold text-eve-accent">Active Gangs</h2>
-      <div class="flex gap-2">
-        <button
-          class="px-4 py-2 bg-eve-secondary rounded {viewMode === 'cards'
-            ? 'text-eve-accent'
-            : 'text-gray-400'}"
-          on:click={() => (viewMode = "cards")}
-        >
-          Card View
-        </button>
-        <button
-          class="px-4 py-2 bg-eve-secondary rounded {viewMode === 'chart'
-            ? 'text-eve-accent'
-            : 'text-gray-400'}"
-          on:click={() => (viewMode = "chart")}
-        >
-          Chart View
-        </button>
+      <div class="flex items-center gap-4">
+        <!-- Add checkbox for roaming gangs filter -->
+        <label class="flex items-center gap-2 text-white">
+          <input
+            type="checkbox"
+            bind:checked={showOnlyRoaming}
+            class="form-checkbox"
+          />
+          <span>Show only roaming gangs</span>
+        </label>
+        <div class="flex gap-2">
+          <button
+            class="px-4 py-2 bg-eve-secondary rounded {viewMode === 'cards'
+              ? 'text-eve-accent'
+              : 'text-gray-400'}"
+            on:click={() => (viewMode = "cards")}
+          >
+            Card View
+          </button>
+          <button
+            class="px-4 py-2 bg-eve-secondary rounded {viewMode === 'chart'
+              ? 'text-eve-accent'
+              : 'text-gray-400'}"
+            on:click={() => (viewMode = "chart")}
+          >
+            Chart View
+          </button>
+        </div>
       </div>
     </div>
 
-    {#if roams.length === 0}
+    {#if filteredRoams.length === 0}
       <p class="col-span-full text-center py-8 text-gray-400 italic">
-        Syncing roams...
+        {roams.length > 0 ? "No roaming gangs found" : "Syncing roams..."}
       </p>
     {:else if viewMode === "cards"}
       <div
         class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4"
       >
-        {#each roams as roam (roam.id)}
+        {#each filteredRoams as roam (roam.id)}
           <button
             class="eve-card hover:scale-102 transition-transform duration-200 text-left w-full cursor-pointer"
             type="button"
@@ -337,7 +353,7 @@
             </tr>
           </thead>
           <tbody>
-            {#each roams as roam}
+            {#each filteredRoams as roam}
               <tr
                 class="border-b border-eve-secondary/30 hover:bg-eve-secondary/20 cursor-pointer"
                 on:click={() => {
@@ -402,3 +418,9 @@
   options={contextMenu.options}
   on:select={handleMenuSelect}
 />
+
+<style>
+  .form-checkbox {
+    @apply rounded border-eve-accent/50 text-eve-accent focus:ring-eve-accent;
+  }
+</style>

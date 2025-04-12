@@ -14,6 +14,8 @@ import { createClient as createRedisClient } from "redis";
 import { hash, compare } from "bcrypt";
 import { THRESHOLDS } from "../src/constants";
 import pg from "pg";
+import { ServerCampManager } from "./serverCampManager.js";
+import { ServerRoamManager } from "./serverRoamManager.js";
 
 const { Pool } = pg;
 
@@ -90,6 +92,13 @@ const io = new Server(server, {
     sameSite: "lax",
   },
 });
+
+const serverCampManager = new ServerCampManager(io);
+const serverRoamManager = new ServerRoamManager(io);
+
+// Start the manager update intervals
+serverCampManager.startUpdates();
+serverRoamManager.startUpdates();
 
 // Make sure these are set before creating the server
 app.set("trust proxy", true);
@@ -2482,6 +2491,9 @@ async function processKillmailData(killmail) {
     // Add the celestial data to the killmail object
     killmail.pinpoints = pinpointData;
 
+    serverCampManager.processCamp(killmail);
+    serverRoamManager.updateRoamingGangs(killmail);
+
     return killmail;
   } catch (error) {
     console.error("Fatal error in processKillmailData:", error);
@@ -2521,6 +2533,16 @@ io.on("connection", (socket) => {
       console.error("Error sending initial cache:", error);
       socket.emit("error", { message: "Failed to initialize cache" });
     }
+  });
+
+  socket.on("requestCamps", () => {
+    const activeCamps = serverCampManager.getActiveCamps();
+    socket.emit("campUpdate", activeCamps);
+  });
+
+  socket.on("requestRoams", () => {
+    const activeRoams = serverRoamManager.getRoams();
+    socket.emit("roamUpdate", activeRoams);
   });
 
   socket.on("cacheSyncComplete", () => {
@@ -3029,6 +3051,8 @@ app.get("*", (_, res) => {
 
 process.on("SIGTERM", async () => {
   console.log("SIGTERM received. Cleaning up...");
+  serverCampManager.cleanup();
+  serverRoamManager.cleanup();
   await redisClient.quit();
   process.exit(0);
 });
