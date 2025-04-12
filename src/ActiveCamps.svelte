@@ -239,6 +239,17 @@
       .join("\n");
   }
 
+  let expandedCompositionCards = new Set();
+
+  function toggleCompositionExpansion(campId) {
+    if (expandedCompositionCards.has(campId)) {
+      expandedCompositionCards.delete(campId);
+    } else {
+      expandedCompositionCards.add(campId);
+    }
+    expandedCompositionCards = expandedCompositionCards; // Trigger reactivity
+  }
+
   function openCampHistory(camp) {
     const latestKill = camp.kills[camp.kills.length - 1];
     if (latestKill) {
@@ -456,23 +467,84 @@
                   </div>
 
                   {#if camp.metrics?.shipCounts}
-                    <div class="mt-1 p-2 bg-eve-secondary rounded">
-                      <div class="flex flex-wrap gap-1">
-                        {#each Object.entries(camp.metrics.shipCounts) as [shipId, count]}
-                          <!-- Look for this ship in the killmail data -->
-                          {@const shipData = camp.kills
-                            .flatMap((k) => k.shipCategories?.attackers || [])
-                            .find((ship) => ship.shipTypeId == shipId)}
-                          <span
-                            class="px-2 py-1 rounded text-sm"
-                            style="background-color: {getShipThreatColor(
-                              THREAT_SHIPS[shipId]?.weight || 0
-                            )}"
+                    <div class="mt-1 transition-all duration-300">
+                      {#if expandedCompositionCards.has(camp.id)}
+                        <!-- Expanded view with scrollable list -->
+                        <div
+                          class="bg-eve-secondary/80 rounded p-3 max-h-48 overflow-y-auto"
+                        >
+                          <div class="flex justify-between items-center mb-2">
+                            <h4 class="text-white font-semibold">
+                              Ship Composition
+                            </h4>
+                            <button
+                              class="text-gray-400 hover:text-white flex items-center gap-1"
+                              on:click|stopPropagation={() =>
+                                toggleCompositionExpansion(camp.id)}
+                              aria-label="Collapse"
+                            >
+                              <span>Close</span>
+                              <span class="text-xs">▲</span>
+                            </button>
+                          </div>
+                          <div class="flex flex-col gap-1">
+                            {#each Object.entries(camp.metrics.shipCounts) as [shipId, count]}
+                              {@const shipData = camp.kills
+                                .flatMap(
+                                  (k) => k.shipCategories?.attackers || []
+                                )
+                                .find((ship) => ship.shipTypeId == shipId)}
+                              <div
+                                class="flex justify-between items-center border-b border-eve-accent/10 py-1"
+                              >
+                                <span class="text-white"
+                                  >{shipData?.name || `Ship #${shipId}`}</span
+                                >
+                                <span class="text-eve-accent">×{count}</span>
+                              </div>
+                            {/each}
+                          </div>
+                        </div>
+                      {:else}
+                        <!-- Collapsed view with summary -->
+                        <div
+                          class="bg-eve-secondary/80 rounded p-2 flex justify-between items-center"
+                        >
+                          <div
+                            class="flex flex-wrap gap-1 flex-grow overflow-hidden mr-2"
                           >
-                            {shipData?.name || `Ship #${shipId}`} x{count}
-                          </span>
-                        {/each}
-                      </div>
+                            {#each Object.entries(camp.metrics.shipCounts).slice(0, 2) as [shipId, count], i}
+                              {@const shipData = camp.kills
+                                .flatMap(
+                                  (k) => k.shipCategories?.attackers || []
+                                )
+                                .find((ship) => ship.shipTypeId == shipId)}
+                              <span
+                                class="px-2 py-1 bg-eve-dark/80 text-white text-sm rounded"
+                              >
+                                {shipData?.name || `Ship #${shipId}`} ×{count}
+                              </span>
+                            {/each}
+                            {#if Object.keys(camp.metrics.shipCounts).length > 2}
+                              <span
+                                class="px-2 py-1 bg-eve-dark/80 text-white text-sm rounded"
+                              >
+                                +{Object.keys(camp.metrics.shipCounts).length -
+                                  2} more
+                              </span>
+                            {/if}
+                          </div>
+                          <button
+                            class="text-eve-accent hover:text-eve-accent/80 px-3 py-1 bg-eve-dark/80 rounded flex items-center gap-1"
+                            on:click|stopPropagation={() =>
+                              toggleCompositionExpansion(camp.id)}
+                            aria-label="Expand ship details"
+                          >
+                            <span>View all</span>
+                            <span class="text-xs">▼</span>
+                          </button>
+                        </div>
+                      {/if}
                     </div>
                   {/if}
 
