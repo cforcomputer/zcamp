@@ -525,6 +525,78 @@ app.post("/api/verify-turnstile", async (req, res) => {
   res.json(data);
 });
 
+app.get("/api/route/:origin/:destination", async (req, res) => {
+  const { origin, destination } = req.params;
+  const flag = req.query.flag || "shortest"; // Default to shortest route
+
+  // Validate IDs (simple integer check)
+  const originId = parseInt(origin);
+  const destinationId = parseInt(destination);
+
+  if (isNaN(originId) || isNaN(destinationId)) {
+    console.error(
+      `[API Route] Invalid system IDs: origin=${origin}, destination=${destination}`
+    );
+    return res
+      .status(400)
+      .json({ error: "Invalid origin or destination system ID." });
+  }
+
+  const esiUrl = `https://esi.evetech.net/latest/route/${originId}/${destinationId}/`;
+  const params = {
+    datasource: "tranquility",
+    flag: flag,
+  };
+
+  console.log(
+    `[API Route] Proxying request to ESI: ${esiUrl} with params:`,
+    params
+  );
+
+  try {
+    // Use axios (already imported) for server-side request
+    const esiResponse = await axios.get(esiUrl, {
+      params: params,
+      headers: {
+        Accept: "application/json",
+        "Cache-Control": "no-cache", // Request fresh data from ESI
+        // ESI doesn't typically require User-Agent, but good practice
+        "User-Agent": "KM-Hunter Application (Server Proxy)",
+      },
+      timeout: 15000, // Add a timeout (e.g., 15 seconds)
+    });
+
+    console.log(
+      `[API Route] ESI responded with status ${esiResponse.status} for route ${originId}->${destinationId}`
+    );
+    // Axios puts data directly in response.data
+    res.json(esiResponse.data);
+  } catch (error) {
+    const status = error.response?.status || 500;
+    // Axios puts error details in error.response.data
+    const message =
+      error.response?.data?.error ||
+      error.message ||
+      "Failed to fetch route from ESI";
+    console.error(
+      `[API Route] Error fetching route from ESI (${status}): ${message}`
+    );
+    console.error(`[API Route] ESI URL was: ${esiUrl}`);
+    console.error(`[API Route] ESI Params were:`, params);
+    if (error.response) {
+      console.error(`[API Route] ESI Response Data:`, error.response.data);
+    } else {
+      console.error(
+        `[API Route] Axios error details:`,
+        error.toJSON ? error.toJSON() : error
+      );
+    }
+
+    // Send specific error status back to client
+    res.status(status).json({ error: message });
+  }
+});
+
 // universe map data
 // This endpoint fetches map data from the database and returns it to the client
 app.get("/api/map-data", async (req, res) => {
