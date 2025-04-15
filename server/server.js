@@ -1554,78 +1554,143 @@ app.post("/api/register", async (req, res) => {
   }
 });
 
-// Modify in server.js
 app.post("/api/filter-list", async (req, res) => {
-  console.log("Received filter list creation request:", req.body);
+  // ADDED: Log entry into the route handler *before* any checks
+  console.log(
+    `[API /api/filter-list POST] Request received for path: ${req.path}`
+  );
 
+  // Check for user authentication in the session
   if (!req.session?.user?.id) {
-    console.log("User not authenticated");
+    console.log("[API /api/filter-list POST] User not authenticated");
     return res
       .status(401)
       .json({ success: false, message: "Not authenticated" });
   }
 
+  // ADDED: Log user ID after authentication check
+  const userId = req.session.user.id;
+  console.log(`[API /api/filter-list POST] Authenticated User ID: ${userId}`);
+
   try {
+    // Destructure request body
     const { name, ids, enabled, isExclude, filterType } = req.body;
-    const userId = req.session.user.id;
 
-    console.log("Processing filter list creation:", {
-      userId,
-      name,
-      idsLength: ids?.length,
-      enabled,
-      isExclude,
-      filterType,
-    });
-
-    // Process IDs based on filter type
-    let processedIds;
-    if (filterType === "region") {
-      processedIds = Array.isArray(ids) ? ids : ids.split(",");
-      processedIds = processedIds.map((id) => id.trim());
-    } else {
-      processedIds = Array.isArray(ids)
-        ? ids
-        : ids.split(",").map((id) => id.trim());
-    }
-
-    console.log("Processed IDs:", processedIds);
-
-    // Insert into database
-    const result = await pool.query(
-      "INSERT INTO filter_lists (user_id, name, ids, enabled, is_exclude, filter_type) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id",
-      [
+    // Log processing details
+    console.log(
+      "[API /api/filter-list POST] Processing filter list creation:",
+      {
+        // <-- Original log location
         userId,
         name,
-        JSON.stringify(processedIds),
-        enabled ? 1 : 0,
-        isExclude ? 1 : 0,
-        filterType || null,
+        idsLength: ids?.length,
+        enabled,
+        isExclude,
+        filterType,
+      }
+    );
+
+    // Process IDs: Ensure it's an array of strings, trim whitespace.
+    let processedIds;
+    if (Array.isArray(ids)) {
+      processedIds = ids.map((id) => String(id).trim()); // Ensure strings and trim
+    } else if (typeof ids === "string") {
+      processedIds = ids
+        .split(",")
+        .map((id) => id.trim())
+        .filter((id) => id); // Split, trim, remove empty strings
+    } else {
+      console.warn(
+        "[API /api/filter-list POST] Invalid 'ids' format received:",
+        ids
+      );
+      processedIds = []; // Default to empty array if format is unexpected
+    }
+
+    console.log("[API /api/filter-list POST] Processed IDs:", processedIds);
+
+    // Insert the new filter list into the database
+    console.log("[API /api/filter-list POST] Attempting database insert...");
+    const result = await pool.query(
+      `INSERT INTO filter_lists (user_id, name, ids, enabled, is_exclude, filter_type)
+       VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+      [
+        userId, // User ID from session
+        name, // Name of the filter list
+        JSON.stringify(processedIds), // Store processed IDs as a JSON string
+        enabled ? 1 : 0, // Convert boolean to integer (1 for true, 0 for false)
+        isExclude ? 1 : 0, // Convert boolean to integer
+        filterType || null, // Use provided filter type or null if none
       ]
     );
 
-    console.log("Database insert result:", result);
+    // Log database insertion result
+    console.log(
+      "[API /api/filter-list POST] Database insert result:",
+      result.rows
+    );
 
-    // Convert BigInt to string for the ID
+    // Check if insertion was successful
+    if (!result.rows || result.rows.length === 0) {
+      console.error(
+        "[API /api/filter-list POST] Failed to insert filter list into database."
+      );
+      return res.status(500).json({
+        success: false,
+        message: "Database error: Failed to create filter list.",
+      });
+    }
+    console.log(
+      "[API /api/filter-list POST] Database insert successful. New ID:",
+      result.rows[0].id
+    );
+
+    // Prepare the new filter list object for response and socket emission
+    // Ensure IDs are numbers where appropriate
     const newFilterList = {
-      id: result.rows[0].id.toString(),
-      user_id: userId.toString(),
-      name,
-      ids: processedIds,
-      enabled: Boolean(enabled),
-      is_exclude: Boolean(isExclude),
-      filter_type: filterType || null,
+      id: result.rows[0].id.toString(), // Convert BigInt ID to string
+      user_id: userId.toString(), // User ID as string
+      name, // Name as provided
+      ids: processedIds, // Use the processed array of IDs
+      enabled: Boolean(enabled), // Ensure boolean value
+      is_exclude: Boolean(isExclude), // Ensure boolean value
+      filter_type: filterType || null, // Use provided type or null
     };
 
-    console.log("Emitting new filter list to clients:", newFilterList);
+    // Log the filter list object being emitted
+    console.log(
+      "[API /api/filter-list POST] Emitting 'filterListCreated' to user room:",
+      userId.toString(),
+      newFilterList
+    );
 
-    // Emit to connected clients
-    io.to(userId.toString()).emit("filterListCreated", newFilterList);
+    // Emit the 'filterListCreated' event to the specific user's room via socket.io
+    // This notifies the client-side application in real-time
+    // Ensure 'io' is correctly defined and accessible here
+    if (io && typeof io.to === "function") {
+      io.to(userId.toString()).emit("filterListCreated", newFilterList);
+      console.log(
+        "[API /api/filter-list POST] 'filterListCreated' event emitted successfully."
+      );
+    } else {
+      console.error(
+        "[API /api/filter-list POST] 'io' object is not available or 'to' is not a function. Cannot emit socket event."
+      );
+    }
 
-    res.json({ success: true, filterList: newFilterList });
+    // Send a success response back to the client
+    res.status(201).json({ success: true, filterList: newFilterList }); // Use 201 Created status
   } catch (error) {
-    console.error("Error creating filter list:", error);
-    res.status(500).json({ success: false, message: "Server error" });
+    // Log any errors that occur during the process
+    console.error(
+      "[API /api/filter-list POST] Error creating filter list:",
+      error
+    );
+    // Send a generic server error response
+    res.status(500).json({
+      success: false,
+      message: "Server error while creating filter list.",
+    });
   }
 });
 
