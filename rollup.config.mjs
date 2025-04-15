@@ -35,11 +35,12 @@ export default [
       }),
 
       postcss({
+        // This extracts CSS for the main bundle
         config: {
           path: "./postcss.config.cjs",
         },
         extensions: [".css"],
-        extract: "bundle.css",
+        extract: "bundle.css", // Main CSS output
         minimize: production,
       }),
 
@@ -52,6 +53,7 @@ export default [
       commonjs(),
 
       copy({
+        // Copy assets once during the main build
         targets: [
           {
             src: ["public/audio_files/*.wav", "public/audio_files/**/*.wav"],
@@ -68,7 +70,43 @@ export default [
     ],
   },
 
-  // Server-side bundle - with new changes
+  // *** NEW CONFIGURATION FOR TROPHY PAGE ***
+  {
+    input: "src/trophy_main.js", // <--- Input for trophy page
+    output: {
+      sourcemap: true,
+      format: "iife", // Use 'iife' for direct browser execution
+      name: "trophyApp", // A different name for this bundle
+      file: "public/build/trophy_bundle.js", // <--- Output for trophy page
+    },
+    plugins: [
+      // Use similar plugins as the main client bundle
+      svelte({
+        compilerOptions: {
+          dev: !production,
+        },
+        // Include preprocessing if TrophyPage.svelte uses Tailwind/SCSS etc.
+        preprocess: sveltePreprocess({
+          postcss: {
+            plugins: [tailwindcss, autoprefixer],
+          },
+        }),
+      }),
+      // NOTE: We assume trophy.html also links to the main bundle.css.
+      // If it needs its own separate CSS, add a postcss plugin here with extract: 'trophy_bundle.css'
+      // Otherwise, the postcss processing happens via sveltePreprocess above.
+      resolve({
+        browser: true,
+        dedupe: ["svelte"],
+        exportConditions: ["svelte", "browser", "import"],
+      }),
+      commonjs(),
+      production && terser(), // Minify in production
+    ],
+  },
+  // *** END OF NEW TROPHY PAGE CONFIGURATION ***
+
+  // Server-side bundle - no changes here
   {
     input: "./server/server.js",
     output: {
@@ -85,11 +123,9 @@ export default [
         exportConditions: ["node"],
       }),
       commonjs({
-        // Add these options to handle CommonJS better
         transformMixedEsModules: true,
         esmExternals: true,
       }),
-      // Add this new plugin to inject globals at the top of the bundle
       {
         name: "inject-globals",
         renderChunk(code) {
@@ -113,7 +149,7 @@ export default [
       "events",
       "zlib",
       "pg",
-      "pg-native", // Add pg-native to externals as suggested earlier
+      "pg-native",
     ],
   },
 ];

@@ -51,24 +51,24 @@
       );
 
       // Apply security status filter if enabled
-      if ($settings.location_type_filter_enabled) {
-        const locationTypes = $settings.location_types;
-        const hasEnabledTypes = Object.values(locationTypes).some(
-          (enabled) => enabled
-        );
+      // if ($settings.location_type_filter_enabled) {
+      //   const locationTypes = $settings.location_types;
+      //   const hasEnabledTypes = Object.values(locationTypes).some(
+      //     (enabled) => enabled
+      //   );
 
-        if (hasEnabledTypes) {
-          const selectedTypes = Object.entries(locationTypes)
-            .filter(([_, enabled]) => enabled)
-            .map(([type, _]) => `loc:${type}`);
+      //   if (hasEnabledTypes) {
+      //     const selectedTypes = Object.entries(locationTypes)
+      //       .filter(([_, enabled]) => enabled)
+      //       .map(([type, _]) => `loc:${type}`);
 
-          const hasLocationLabel = killmail.zkb.labels.some((label) =>
-            selectedTypes.includes(label)
-          );
+      //     const hasLocationLabel = killmail.zkb.labels.some((label) =>
+      //       selectedTypes.includes(label)
+      //     );
 
-          if (!hasLocationLabel) return false;
-        }
-      }
+      //     if (!hasLocationLabel) return false;
+      //   }
+      // }
 
       return hasNpcAttacker;
     });
@@ -295,7 +295,7 @@
           <span class="text-eve-accent">Audio Alerts</span>
         </label>
         <!-- Security status dropdown -->
-        <button
+        <!-- <button
           class="px-3 py-1.5 bg-eve-dark border border-eve-secondary/30 text-white rounded flex items-center gap-2"
           on:click={() => (showSecurityDropdown = !showSecurityDropdown)}
         >
@@ -321,7 +321,7 @@
               </label>
             {/each}
           </div>
-        {/if}
+        {/if} -->
       </div>
 
       <div class="flex gap-2">
@@ -343,7 +343,9 @@
   </div>
 
   {#if filteredKillmails.length === 0}
-    <div class="text-gray-400 text-center py-4">No NPC kills found</div>
+    <div class="text-gray-400 text-center py-4">
+      No rare NPC kills found in the past 6 hours...
+    </div>
   {:else}
     <div class="overflow-x-auto rounded-lg border border-eve-secondary/30">
       <table class="w-full">

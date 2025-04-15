@@ -597,6 +597,66 @@ app.get("/api/route/:origin/:destination", async (req, res) => {
   }
 });
 
+// Fetch trophy page data
+app.get("/api/trophy/:characterId", async (req, res) => {
+  const characterId = req.params.characterId;
+
+  if (!characterId || isNaN(parseInt(characterId))) {
+    // Basic validation
+    return res.status(400).json({ error: "Invalid Character ID" });
+  }
+
+  try {
+    // Fetch Character Name and Bashbucks from camp_crushers
+    const crusherQuery = `
+      SELECT character_name, bashbucks
+      FROM camp_crushers
+      WHERE character_id = $1
+    `;
+    const crusherResult = await pool.query(crusherQuery, [characterId]); // [cite: 508]
+
+    if (crusherResult.rows.length === 0) {
+      // Optionally check the main users table if not found in camp_crushers
+      const userQuery = `SELECT character_name FROM users WHERE character_id = $1`; // [cite: 503]
+      const userResult = await pool.query(userQuery, [characterId]);
+      if (userResult.rows.length === 0) {
+        return res.status(404).json({ error: "Character not found" });
+      }
+      // If found in users but not crushers, assume 0 bashbucks/attacks
+      return res.json({
+        characterName: userResult.rows[0].character_name,
+        bashbucks: 0,
+        successfulAttacks: 0,
+      });
+    }
+
+    const crusherData = crusherResult.rows[0];
+
+    // Fetch count of successful attacks (completed camp targets)
+    const attacksQuery = `
+      SELECT COUNT(*) as successfulAttacks
+      FROM camp_crusher_targets
+      WHERE character_id = $1 AND completed = TRUE
+    `; // [cite: 509]
+    const attacksResult = await pool.query(attacksQuery, [characterId]);
+    const successfulAttacks = parseInt(
+      attacksResult.rows[0].successfulattacks || 0
+    );
+
+    res.json({
+      characterName: crusherData.character_name,
+      bashbucks: crusherData.bashbucks || 0,
+      successfulAttacks: successfulAttacks,
+    });
+  } catch (error) {
+    console.error(
+      `[API Trophy] Error fetching data for character ${characterId}:`,
+      error
+    );
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 // universe map data
 // This endpoint fetches map data from the database and returns it to the client
 app.get("/api/map-data", async (req, res) => {
@@ -3325,8 +3385,15 @@ app.use((err, req, res, next) => {
   next(err);
 });
 
+app.get("/trophy-page/:characterId", (req, res) => {
+  // We'll create trophy.html later
+  res.sendFile(path.join(__dirname, "../public/trophy.html"));
+});
+
 // SPA fallback - must be last
-app.get("*", (_, res) => {
+app.get(/^(?!\/(api|trophy|trophy-page)\/).*/, (_, res) => {
+  // <-- Modified regex
+  // Exclude /api/, /trophy/, and /trophy-page/ routes from SPA fallback
   res.sendFile(path.join(__dirname, "../public/index.html"));
 });
 

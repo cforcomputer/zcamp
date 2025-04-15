@@ -54,6 +54,7 @@
   let showWreckFieldDialog = false;
   let selectedWreckData = null;
   let isTrackingEnabled = false;
+  let currentUser = null;
 
   $: userSettings = $settings;
   $: kills = $killmails;
@@ -107,6 +108,7 @@
       } else if (event.detail.type === "eve") {
         loggedIn = true;
       }
+      currentUser = data.user;
 
       showLoginModal = false;
       showWelcome = false;
@@ -156,6 +158,7 @@
         killmails.set([]);
         cleanup();
         loggedIn = false;
+        currentUser = null;
         username = "";
         showWelcome = true;
         trackingStore.set(false);
@@ -185,6 +188,7 @@
       if (data.validSession && data.user) {
         loggedIn = true;
         showWelcome = false;
+        currentUser = data.user;
 
         try {
           const filterListsResponse = await fetch(
@@ -431,6 +435,18 @@
                     >
                   </label>
                 </div>
+
+                {#if currentUser?.character_id}
+                  <a
+                    href="/trophy-page/{currentUser.character_id}"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    class="eve-nav-item ml-4 text-eve-accent hover:bg-eve-accent/20"
+                    title="View Your Trophy Page"
+                  >
+                    {currentUser.character_name || "Profile"}
+                  </a>
+                {/if}
 
                 <button
                   class="eve-nav-item ml-4 text-eve-danger hover:bg-eve-danger/20"
