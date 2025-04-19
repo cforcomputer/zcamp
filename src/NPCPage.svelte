@@ -39,86 +39,80 @@
 
   // Filter killmails for NPCs
   $: {
-    // Get all selected NPC IDs
-    const selectedNpcIds = Object.entries(selectedCategories)
-      .filter(([_, selected]) => selected)
-      .flatMap(([key, _]) => NPC_CATEGORIES[key].ids);
+    // Get all selected NPC IDs (which are actually Ship Type IDs)
+    const selectedNpcShipTypeIds = Object.entries(selectedCategories) //
+      .filter(([_, selected]) => selected) //
+      .flatMap(([key, _]) => NPC_CATEGORIES[key].ids); //
 
     const newFilteredKillmails = $killmails.filter((killmail) => {
-      // Check if any attacker's character_id is in our NPC list
-      const hasNpcAttacker = killmail.killmail.attackers.some((attacker) =>
-        selectedNpcIds.includes(attacker.character_id)
+      // Check if any attacker's SHIP TYPE ID is in our list
+      const hasNpcAttackerShip = killmail.killmail.attackers.some(
+        (
+          attacker //
+        ) =>
+          // Compare selected IDs against the attacker's ship_type_id
+          selectedNpcShipTypeIds.includes(attacker.ship_type_id) // <-- FIX: Check ship_type_id
       );
 
-      // Apply security status filter if enabled
-      // if ($settings.location_type_filter_enabled) {
-      //   const locationTypes = $settings.location_types;
-      //   const hasEnabledTypes = Object.values(locationTypes).some(
-      //     (enabled) => enabled
-      //   );
-
-      //   if (hasEnabledTypes) {
-      //     const selectedTypes = Object.entries(locationTypes)
-      //       .filter(([_, enabled]) => enabled)
-      //       .map(([type, _]) => `loc:${type}`);
-
-      //     const hasLocationLabel = killmail.zkb.labels.some((label) =>
-      //       selectedTypes.includes(label)
-      //     );
-
-      //     if (!hasLocationLabel) return false;
-      //   }
-      // }
-
-      return hasNpcAttacker;
+      return hasNpcAttackerShip; //
     });
 
     // Sort by most recent first
     newFilteredKillmails.sort((a, b) => {
+      //
       return (
-        new Date(b.killmail.killmail_time) - new Date(a.killmail.killmail_time)
+        //
+        new Date(b.killmail.killmail_time) - new Date(a.killmail.killmail_time) //
       );
     });
 
-    // Check for new killmails to play alerts
+    // Check for new killmails to play alerts (existing logic)
     if (enableAudioAlerts && newFilteredKillmails.length > 0) {
-      const currentIds = new Set(newFilteredKillmails.map((km) => km.killID));
-
+      //
+      const currentIds = new Set(newFilteredKillmails.map((km) => km.killID)); //
       // Find killmails that weren't in the previous set
       const newKillmails = newFilteredKillmails.filter(
-        (km) => !previousKillmailIds.has(km.killID)
+        //
+        (km) => !previousKillmailIds.has(km.killID) //
       );
-
       // Play audio alerts for new killmails
       newKillmails.forEach((killmail) => {
-        // Find NPC type for this killmail
-        const npcAttackers = killmail.killmail.attackers.filter((attacker) =>
-          ALL_NPC_IDS.includes(attacker.character_id)
+        //
+        // Find NPC type for this killmail (still using character_id here might be okay if constants map ship->category, but check consistency)
+        const npcAttackers = killmail.killmail.attackers.filter(
+          (
+            attacker // Check attacker's SHIP TYPE ID against ALL known NPC ship type IDs
+          ) => ALL_NPC_IDS.includes(attacker.ship_type_id) // <-- Check if this needs adjustment based on how SOUND_SETTINGS work
         );
 
         if (npcAttackers.length > 0) {
-          // Get the primary NPC's category
-          let alertType = "default";
-
-          for (const [categoryKey, category] of Object.entries(
-            NPC_CATEGORIES
-          )) {
-            if (category.ids.includes(npcAttackers[0].character_id)) {
-              alertType = SOUND_SETTINGS[categoryKey];
-              break;
+          //
+          // Find the category based on the FIRST matching NPC attacker's SHIP TYPE ID
+          let alertType = "default"; //
+          let foundCategory = false; //
+          for (const attacker of npcAttackers) {
+            //
+            for (const [categoryKey, category] of Object.entries(
+              //
+              NPC_CATEGORIES //
+            )) {
+              if (category.ids.includes(attacker.ship_type_id)) {
+                // Match category by ship ID
+                alertType = SOUND_SETTINGS[categoryKey]; //
+                foundCategory = true; //
+                break; // Exit inner loop once category found for this attacker
+              }
             }
+            if (foundCategory) break; // Exit outer loop if category found for any attacker
           }
-
-          // Play appropriate alert
-          audioManager.playAlert(alertType);
+          audioManager.playAlert(alertType); //
         }
       });
-
       // Update previous killmail IDs
-      previousKillmailIds = currentIds;
+      previousKillmailIds = currentIds; //
     }
 
-    filteredKillmails = newFilteredKillmails;
+    filteredKillmails = newFilteredKillmails; //
   }
 
   // Context menu state

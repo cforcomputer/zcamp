@@ -1,4 +1,6 @@
 # camp_classifier.py
+# Uses a random forest approach, taking manual classification into account
+# to classify camps as either "true" or "false" based on their details and kill data.
 
 import streamlit as st
 import pandas as pd

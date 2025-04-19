@@ -1,3 +1,5 @@
-Run using: `streamlit run .\camp_classifier.py`
+Run scripts using: `streamlit run .\camp_classifier.py`
 
-Access at: localhost browser
+1. Find recurring groups of camps using the clustering classifier
+
+2. Then apply manual classification using the random forest classifier for fine tuning.

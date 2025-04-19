@@ -7,11 +7,18 @@ import {
 } from "../src/constants.js";
 
 export class ServerCampManager {
-  constructor(io) {
+  constructor(io, pool) {
+    // Add pool parameter
     this._camps = [];
     this.lastUpdate = Date.now();
     this.updateInterval = null;
-    this.io = io; // Store io instance for emitting events
+    this.io = io;
+    this.pool = pool; // Store the database pool
+    if (!pool) {
+      console.error(
+        "ERROR: ServerCampManager requires a database pool instance!"
+      );
+    }
   }
 
   startUpdates(interval = 30000) {
@@ -38,38 +45,58 @@ export class ServerCampManager {
       .sort((a, b) => b.probability - a.probability);
   }
 
-  updateAllProbabilities() {
+  async updateAllProbabilities() {
     const now = Date.now();
+    const expiringCampsData = []; // Store { camp, isStargateCamp }
+    const activeCamps = [];
 
-    this._camps = this._camps
-      .filter((camp) => {
-        const timeSinceLastKill = now - new Date(camp.lastKill).getTime();
-        const minutesSinceLastKill = timeSinceLastKill / (60 * 1000);
+    for (const camp of this._camps) {
+      const timeSinceLastKill = now - new Date(camp.lastKill).getTime();
 
-        // Hard cutoff at 40 minutes regardless of probability
-        if (minutesSinceLastKill > 40) {
-          return false;
-        }
+      // Calculate current probability first to update maxProbability
+      camp.probability = this.calculateCampProbability(camp);
 
-        return timeSinceLastKill <= CAMP_TIMEOUT;
-      })
-      .map((camp) => ({
-        ...camp,
-        probability: this.calculateCampProbability(camp),
-      }))
-      .filter((camp) => camp.probability > 0); // Only keep camps with probability > 0
+      if (timeSinceLastKill > CAMP_TIMEOUT || camp.probability <= 0) {
+        // Mark camp for potential expiration and determine if it's a stargate camp
+        const isStargateCamp = camp.kills.some((kill) => this.isGateCamp(kill));
+        expiringCampsData.push({ camp, isStargateCamp }); // Store camp and its status
+      } else {
+        // Keep the camp active
+        activeCamps.push(camp);
+      }
+    }
 
-    // Sort camps by probability (descending order) after updating
-    this._camps.sort((a, b) => b.probability - a.probability);
+    // Filter out non-stargate camps *before* saving
+    const campsToSave = expiringCampsData
+      .filter((item) => item.isStargateCamp)
+      .map((item) => item.camp);
+    const nonStargateExpiredCount =
+      expiringCampsData.length - campsToSave.length;
+
+    // Save expired camps to the database *asynchronously*
+    for (const expiredCamp of campsToSave) {
+      // Only iterate camps marked for saving
+      try {
+        // No need to pass isStargateCamp status anymore, it's already filtered
+        await this.saveExpiredCamp(expiredCamp);
+      } catch (error) {
+        console.error(`Failed to save expired camp ${expiredCamp.id}:`, error);
+      }
+    }
+
+    // Update the active camps list
+    this._camps = activeCamps.sort((a, b) => b.probability - a.probability);
 
     this.lastUpdate = now;
     console.log(
-      `[${new Date().toISOString()}] Updated camp probabilities for ${
+      `[${new Date().toISOString()}] Updated probabilities. Active: ${
         this._camps.length
-      } active camps`
+      }, Expired & Saved (Stargate): ${
+        campsToSave.length
+      }, Expired & Discarded (Non-Stargate): ${nonStargateExpiredCount}`
     );
 
-    // Emit updated camps to all connected clients in the live-updates room
+    // Emit updated *active* camps to clients
     this.io.to("live-updates").emit("campUpdate", this.getActiveCamps());
   }
 
@@ -159,6 +186,8 @@ export class ServerCampManager {
     log.push(
       `--- Starting probability calculation for camp: ${camp.systemId}-${camp.stargateName} ---`
     );
+
+    const initialMaxProbability = camp.maxProbability || 0;
 
     // Early validation
     if (
@@ -476,6 +505,11 @@ export class ServerCampManager {
       // Apply the decay
       finalProbability = rawProbability * (1 - timeDecayPercent);
 
+      camp.maxProbability = Math.max(
+        initialMaxProbability,
+        Math.round(finalProbability * 100) // Use the calculated probability before setting to 0
+      );
+
       log.push(
         `Applying decay for ${decayMinutes.toFixed(
           1
@@ -490,6 +524,11 @@ export class ServerCampManager {
       // ADDED: Hard timeout after 30 minutes since decay start
       if (decayMinutes > CAMP_TIMEOUT) {
         log.push(`Camp expired: More than 30 minutes since activity`);
+
+        camp.maxProbability = Math.max(
+          initialMaxProbability,
+          Math.round(finalProbability * 100) // Use the decayed probability before setting to 0
+        );
         return 0;
       }
     }
@@ -505,6 +544,11 @@ export class ServerCampManager {
           1
         )}% → 0%`
       );
+
+      camp.maxProbability = Math.max(
+        initialMaxProbability,
+        Math.round(finalProbability * 100) // Use the calculated probability before setting to 0
+      );
       return 0;
     }
 
@@ -512,7 +556,62 @@ export class ServerCampManager {
     log.push(`Final normalized probability: ${percentProbability}%`);
 
     camp.probabilityLog = log;
+
+    camp.maxProbability = Math.max(initialMaxProbability, percentProbability);
+
     return percentProbability;
+  }
+
+  // Inside ServerCampManager class in serverCampManager.js
+
+  async saveExpiredCamp(camp) {
+    if (!this.pool) {
+      console.error("Cannot save expired camp: Database pool not available.");
+      return;
+    }
+
+    try {
+      const campDetails = {
+        kills: camp.kills, // Store the full killmail array
+        composition: camp.composition,
+        metrics: camp.metrics,
+        probabilityLog: camp.probabilityLog,
+      };
+
+      // Calculate estimated end time
+      const campEndTime = new Date(
+        new Date(camp.lastKill).getTime() + CAMP_TIMEOUT
+      );
+
+      const query = `
+        INSERT INTO expired_camps (
+          camp_unique_id, system_id, stargate_name, max_probability,
+          camp_start_time, last_kill_time, camp_end_time, processing_time,
+          total_value, camp_type, final_kill_count, camp_details, classifier
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, DEFAULT, $8, $9, $10, $11, DEFAULT)
+        ON CONFLICT (camp_unique_id) DO NOTHING;
+      `;
+
+      const values = [
+        camp.id, // Use the unique ID (systemId-stargateName-firstKillTimestamp)
+        camp.systemId,
+        camp.stargateName,
+        camp.maxProbability, // Use the tracked max probability
+        new Date(camp.firstKillTime), // Camp start time
+        new Date(camp.lastKill), // Last kill time
+        campEndTime, // Estimated camp end time
+        // processing_time uses DEFAULT NOW()
+        camp.totalValue,
+        camp.type,
+        camp.kills.length,
+        JSON.stringify(campDetails), // Serialize complex data
+      ];
+
+      await this.pool.query(query, values);
+      console.log(`Saved expired camp ${camp.id} to database.`);
+    } catch (error) {
+      console.error(`Error saving expired camp ${camp.id}:`, error);
+    }
   }
 
   isGateCamp(killmail) {

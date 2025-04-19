@@ -93,13 +93,6 @@ const io = new Server(server, {
   },
 });
 
-const serverCampManager = new ServerCampManager(io);
-const serverRoamManager = new ServerRoamManager(io);
-
-// Start the manager update intervals
-serverCampManager.startUpdates();
-serverRoamManager.startUpdates();
-
 // Make sure these are set before creating the server
 app.set("trust proxy", true);
 app.enable("trust proxy");
@@ -201,6 +194,13 @@ const pool = new Pool({
   connectionString: process.env.POSTGRES_URL,
   native: false,
 });
+
+const serverCampManager = new ServerCampManager(io, pool);
+const serverRoamManager = new ServerRoamManager(io);
+
+// Start the manager update intervals
+serverCampManager.startUpdates();
+serverRoamManager.startUpdates();
 
 // Initialize Redis store
 const redisStore = new RedisStore({
@@ -363,6 +363,26 @@ async function initializeDatabase() {
         created_at TIMESTAMP DEFAULT NOW(),
         FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
         UNIQUE(user_id, system_id, stargate_name)
+      )
+    `);
+
+    // For ML processing
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS expired_camps (
+        id SERIAL PRIMARY KEY,
+        camp_unique_id TEXT UNIQUE NOT NULL,
+        system_id INTEGER NOT NULL,
+        stargate_name TEXT NOT NULL,
+        max_probability INTEGER,
+        camp_start_time TIMESTAMP,
+        last_kill_time TIMESTAMP NOT NULL,
+        camp_end_time TIMESTAMP, 
+        processing_time TIMESTAMP DEFAULT NOW(), 
+        total_value NUMERIC,
+        camp_type TEXT,
+        final_kill_count INTEGER,
+        camp_details JSONB, 
+        classifier INTEGER DEFAULT NULL
       )
     `);
 

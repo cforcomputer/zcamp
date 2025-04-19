@@ -141,3 +141,9 @@ Tech stack:
 - Model complex relationships for camps over 7 days. If a system is repeatedly marked as a camp, record the time of day it first appears, and record when it ends. Create a graph that shows when that system is likely to be camped, and then feed this into the probability calculation. If there is a camp there, it immediately jumps to 95% probability and takes longer to degrade (20 minutes instead of 10). It also has a special mark to show it is a regularly camped system.
 - The tables stores the  frequency of camps for the system over time, but we only fetch the last 7 days. This way we continue to accumulate data over time and can use it to visualize popular camp locations over time by specific groups (should also record the corp/alliance name of the campers and the ship types)
 - If recording the ship types (We want to show this anyways in the composition instead of probability debug), then we can use the composition to better model against other camps to increase accuracy.
+- 50% probability restriction should always be applied to ships even if there are consecutive kills
+- 50% of the pre-time decay probability prediction should be ML 
+- Add an additional score that is recalculated once per day at downtime. This score should check for the frequency + probability > 50% (combined max score) for different systems and groups to identify most camped systems. This score should be used in ML.
+- There should be two ML models, one does clustering for a cluster score, and the other is a manual random forest classifier.
+- Fix the error where a camp is ignored if any one of the consecutive kills is an npc kill
+- Fix the error when combining multiple lists (NPCs page and filter lists manager) where it won't combine all the ids from the lists, only showing matching results from a single list.
