@@ -189,51 +189,76 @@ export class ServerCampManager {
 
     const initialMaxProbability = camp.maxProbability || 0;
 
-    // Early validation
-    if (
-      camp.kills.some(
-        (kill) =>
-          kill.zkb?.labels?.includes("npc") ||
-          kill.shipCategories?.victim === "structure" ||
-          kill.shipCategories?.victim?.category === "structure" ||
-          kill.killmail.victim.ship_type_id === 35834 ||
-          (kill.killmail.victim.corporation_id &&
-            !kill.killmail.victim.character_id)
-      )
-    ) {
-      log.push("Camp excluded: NPC kill or structure detected");
-      camp.probabilityLog = log;
-      return 0;
-    }
-
-    // Check if this is a standalone capsule kill (not part of an existing ship kill)
-    const isStandaloneCapsule =
-      camp.kills.length === 1 &&
-      camp.kills[0].killmail.victim.ship_type_id === CAPSULE_ID;
-
-    // Filter out pods and structures, but keep standalone capsule kills
-    const validKills = camp.kills.filter((kill) => {
-      if (kill.shipCategories?.victim === "structure") return false;
-      if (kill.killmail.victim.ship_type_id === CAPSULE_ID) {
-        // Only keep capsule if it's a standalone kill
-        return isStandaloneCapsule;
+    // --- CHANGE 2: Filter out irrelevant kills instead of excluding the whole camp ---
+    // Filter out kills that shouldn't contribute to camp probability (NPCs, structures, MTUs, AWOX)
+    // but keep the camp itself active if there are other valid player kills.
+    const killsForProbability = camp.kills.filter((kill) => {
+      // Ignore AWOX kills for probability scoring
+      if (kill.zkb?.awox) {
+        log.push(`Ignoring AWOX kill ${kill.killID} for probability scoring.`);
+        return false;
       }
-      return true;
+
+      // Ignore NPC kills (victim has corp but no char ID, or NPC label)
+      if (
+        (kill.killmail.victim.corporation_id &&
+          !kill.killmail.victim.character_id) ||
+        kill.zkb?.labels?.includes("npc")
+      ) {
+        log.push(`Ignoring NPC victim kill ${kill.killID} for probability.`);
+        return false;
+      }
+
+      // Ignore structure kills
+      if (
+        kill.shipCategories?.victim === "structure" ||
+        kill.shipCategories?.victim?.category === "structure"
+      ) {
+        log.push(`Ignoring structure kill ${kill.killID} for probability.`);
+        return false;
+      }
+
+      // Ignore MTU kills
+      if (kill.killmail.victim.ship_type_id === 35834) {
+        log.push(`Ignoring MTU kill ${kill.killID} for probability.`);
+        return false;
+      }
+
+      // Ignore pod kills unless it's the *only* kill in the camp
+      if (kill.killmail.victim.ship_type_id === CAPSULE_ID) {
+        if (camp.kills.length > 1) {
+          log.push(
+            `Ignoring secondary pod kill ${kill.killID} for probability.`
+          );
+          return false;
+        } else {
+          log.push(`Including standalone pod kill ${kill.killID}.`);
+          // Keep standalone pod kills for now, they might still indicate activity
+        }
+      }
+
+      return true; // Keep this kill for probability calculation
     });
 
-    if (validKills.length === 0) {
+    // If no valid kills remain after filtering, the camp has 0 probability
+    if (killsForProbability.length === 0) {
       log.push(
-        "Camp excluded: No valid kills (non-structure) or secondary pod kills"
+        "Camp probability 0: No valid player kills remain after filtering NPC/Structure/AWOX/Pods."
       );
       camp.probabilityLog = log;
+      camp.maxProbability = Math.max(initialMaxProbability, 0); // Update max probability
       return 0;
     }
+    // --- End CHANGE 2 ---
 
-    // Ensure kills are at gates
-    const gateKills = validKills.filter((kill) => this.isGateCamp(kill));
+    // Ensure remaining kills are at gates
+    const gateKills = killsForProbability.filter((kill) =>
+      this.isGateCamp(kill)
+    );
     if (gateKills.length === 0) {
-      log.push("Camp excluded: No kills at a stargate");
+      log.push("Camp probability 0: No valid kills at a stargate");
       camp.probabilityLog = log;
+      camp.maxProbability = Math.max(initialMaxProbability, 0); // Update max probability
       return 0;
     }
 
@@ -246,26 +271,23 @@ export class ServerCampManager {
       (kill) =>
         now - new Date(kill.killmail.killmail_time).getTime() <= 60 * 60 * 1000
     ).length;
-    log.push(`Found ${recentKills} kills within the last hour`);
+    log.push(`Found ${recentKills} valid kills within the last hour`);
 
     const lastKillTime = new Date(camp.lastKill).getTime();
     const minutesSinceLastKill = (now - lastKillTime) / (60 * 1000);
 
-    // Get unique victim characters to check for real player-vs-player engagements
-    const uniqueVictimCharacters = new Set(
-      gateKills.map((kill) => kill.killmail.victim.character_id).filter(Boolean)
-    );
-
     // ======== STAGE 1: BASIC CLASSIFICATION FACTORS ========
 
-    // Initial burst penalty
-    if (camp.kills.length > 1) {
+    // Initial burst penalty (using gateKills)
+    if (gateKills.length > 1) {
       const killTimes = gateKills
         .map((k) => new Date(k.killmail.killmail_time).getTime())
         .sort();
       const firstKillTime = killTimes[0];
       const campAge = (now - firstKillTime) / (60 * 1000);
-      log.push(`Camp age: ${campAge.toFixed(1)} minutes`);
+      log.push(
+        `Camp age (based on valid kills): ${campAge.toFixed(1)} minutes`
+      );
 
       if (
         campAge <= 15 &&
@@ -281,6 +303,7 @@ export class ServerCampManager {
     let threatShipScore = 0;
     const threatShips = new Map();
 
+    // --- CHANGE 3: Use gateKills (already filtered for non-AWOX) ---
     gateKills.forEach((kill) => {
       kill.killmail.attackers.forEach((attacker) => {
         const shipType = attacker.ship_type_id;
@@ -292,6 +315,7 @@ export class ServerCampManager {
         }
       });
     });
+    // --- End CHANGE 3 ---
 
     if (threatShips.size > 0) {
       log.push("Threat ships detected:");
@@ -305,19 +329,18 @@ export class ServerCampManager {
       });
     }
 
-    // ======== STAGE 3: CAP THREAT SHIP SCORE FOR SINGLE KILLS ========
+    // ======== STAGE 3: CAP THREAT SHIP SCORE ========
 
-    let cappedThreatShipScore = threatShipScore;
-    if (isSingleKill) {
-      cappedThreatShipScore = Math.min(0.5, threatShipScore);
-      if (threatShipScore > 0.5) {
-        log.push(
-          `Threat ship score capped at 50% for single kill (was ${(
-            threatShipScore * 100
-          ).toFixed(1)}%)`
-        );
-      }
+    // --- CHANGE 1: Cap threat ship score contribution at 50% ---
+    const cappedThreatShipScore = Math.min(0.5, threatShipScore);
+    if (threatShipScore > 0.5) {
+      log.push(
+        `Threat ship score capped at 50% (was ${(threatShipScore * 100).toFixed(
+          1
+        )}%)`
+      );
     }
+    // --- End CHANGE 1 ---
 
     baseProbability += cappedThreatShipScore;
     log.push(
@@ -328,12 +351,12 @@ export class ServerCampManager {
 
     // ======== STAGE 4: ADDITIONAL IDENTIFICATION FACTORS ========
 
-    // General smartbomb activity check
+    // General smartbomb activity check (using original camp kills to detect SB type)
     if (camp.type === "smartbomb") {
       let smartbombBonus = 0.16; // Base 16% probability for smartbomb activity
       log.push("Smartbomb activity detected: +16%");
 
-      // Additional bonus for specific smartbomb ships
+      // Additional bonus for specific smartbomb ships (check original kills for this)
       const hasSmartbombShip = camp.kills.some((kill) =>
         kill.killmail.attackers.some(
           (attacker) =>
@@ -366,14 +389,16 @@ export class ServerCampManager {
       );
     }
 
-    // Vulnerable victim bonus - limited for single kills
-    const vulnerableKills = validKills.filter(
+    // Vulnerable victim bonus - limited for single kills (using gateKills)
+    // --- CHANGE 3: Use gateKills ---
+    const vulnerableKills = gateKills.filter(
       (kill) =>
-        kill.shipCategories?.victim ===
+        kill.shipCategories?.victim?.category ===
           CAMP_PROBABILITY_FACTORS.SHIP_CATEGORIES.INDUSTRIAL ||
-        kill.shipCategories?.victim ===
+        kill.shipCategories?.victim?.category ===
           CAMP_PROBABILITY_FACTORS.SHIP_CATEGORIES.MINING
     );
+    // --- End CHANGE 3 ---
 
     if (vulnerableKills.length > 0) {
       const vulnerableBonus = isSingleKill ? 0.2 : 0.4; // Reduced for single kill
@@ -389,9 +414,10 @@ export class ServerCampManager {
 
     let consistencyBonus = 0;
 
-    if (camp.kills.length >= 2) {
+    // --- CHANGE 3: Use gateKills for consistency check ---
+    if (gateKills.length >= 2) {
       const CONSISTENCY_BONUS = 0.15; // Each consistent kill adds 15%
-      const consistencyCheckKills = gateKills.slice(-3);
+      const consistencyCheckKills = gateKills.slice(-3); // Check last 3 valid kills
 
       if (consistencyCheckKills.length >= 2) {
         // Check if these kills were part of a burst
@@ -476,12 +502,14 @@ export class ServerCampManager {
         }
       } else {
         log.push(
-          "No consistency bonus: Need at least 2 kills to check consistency"
+          "No consistency bonus: Need at least 2 valid kills to check consistency"
         );
       }
     }
+    // --- End CHANGE 3 ---
 
     baseProbability += consistencyBonus;
+
     // ======== STAGE 6: FINAL PROBABILITY CALCULATION & CAPPING ========
 
     // Cap final probability at 95% before time decay
@@ -505,11 +533,6 @@ export class ServerCampManager {
       // Apply the decay
       finalProbability = rawProbability * (1 - timeDecayPercent);
 
-      camp.maxProbability = Math.max(
-        initialMaxProbability,
-        Math.round(finalProbability * 100) // Use the calculated probability before setting to 0
-      );
-
       log.push(
         `Applying decay for ${decayMinutes.toFixed(
           1
@@ -522,13 +545,17 @@ export class ServerCampManager {
       );
 
       // ADDED: Hard timeout after 30 minutes since decay start
-      if (decayMinutes > CAMP_TIMEOUT) {
-        log.push(`Camp expired: More than 30 minutes since activity`);
-
+      if (decayMinutes > CAMP_TIMEOUT / (60 * 1000)) {
+        log.push(
+          `Camp expired: More than ${
+            CAMP_TIMEOUT / (60 * 1000)
+          } minutes since activity`
+        );
         camp.maxProbability = Math.max(
           initialMaxProbability,
           Math.round(finalProbability * 100) // Use the decayed probability before setting to 0
         );
+        camp.probabilityLog = log;
         return 0;
       }
     }
@@ -544,11 +571,11 @@ export class ServerCampManager {
           1
         )}% → 0%`
       );
-
       camp.maxProbability = Math.max(
         initialMaxProbability,
         Math.round(finalProbability * 100) // Use the calculated probability before setting to 0
       );
+      camp.probabilityLog = log;
       return 0;
     }
 
