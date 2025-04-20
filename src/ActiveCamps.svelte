@@ -37,7 +37,7 @@
     camp: "⛺", // Tent for standard camp
     smartbomb: "⚡", // Lightning for smartbomb
     roaming_camp: "🏕️", // Tent with campfire for roaming camp
-    battle: "⚔️", // Crossed swords for battle
+    gate_battle: "⚔️", // Crossed swords for battle
     roam: "➡️", // Arrow for roam (though likely filtered out here)
     activity: "❓", // Question mark for unknown/default
   };
@@ -88,15 +88,23 @@
   $: activitiesToShow = ($activeActivities || [])
     .filter(
       (activity) =>
-        // Show camps, smartbombs, roaming camps, and battles on this page
-        ["camp", "smartbomb", "roaming_camp", "battle"].includes(
+        // --- MODIFIED filter ---
+        // Show standard camps, smartbombs, roaming camps (if they occur at gates),
+        // and the new gate_battles. Explicitly exclude 'roam' and 'activity'.
+        ["camp", "smartbomb", "roaming_camp", "gate_battle"].includes(
+          // Added gate_battle, removed battle
           activity.classification
         ) &&
+        // Ensure the activity has a stargate association, unless it's a battle
+        // (which we now know is specifically a gate_battle)
+        (activity.stargateName || activity.classification === "gate_battle") && // Keep gate_battle even if stargateName is briefly null? Or rely on classification? Let's rely on classification primarily.
+        // Keep battles only if they meet the new gate_battle criteria (handled by the inclusion above)
+        // Keep other camp types only if they have > 0 probability
         (activity.probability === undefined ||
           activity.probability > 0 ||
-          activity.classification === "battle") // Keep battles even if probability is 0
+          activity.classification === "gate_battle") // Keep gate_battle even if probability dips
     )
-    .sort((a, b) => (b.probability || 0) - (a.probability || 0)); // Keep sorting by probability
+    .sort((a, b) => (b.probability || 0) - (a.probability || 0)); // Sort by probability
 
   $: if (mounted && $activeActivities) isLoading = false;
 
@@ -471,9 +479,12 @@
                     class="flex justify-between py-0.5 border-b border-white/10"
                   >
                     <span class="text-gray-400">Location:</span>
-                    <span class="text-white"
-                      >{activity.stargateName || "Battle Zone"}</span
-                    >
+                    <span class="text-white">
+                      {activity.stargateName ||
+                        (activity.classification === "gate_battle"
+                          ? "Gate Battle"
+                          : "Unknown Gate")}
+                    </span>
                   </div>
                   <div
                     class="flex justify-between py-0.5 border-b border-white/10"

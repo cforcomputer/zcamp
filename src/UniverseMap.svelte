@@ -9,65 +9,65 @@
   // --- CHANGE: Import unified activity store ---
   import { activeActivities } from "./activityManager.js"; // Changed from camp/roam managers
   // --- END CHANGE ---
-  import { currentLocation, locationError } from "./locationStore.js";
-  import ContextMenu from "./ContextMenu.svelte";
-  import { getValidAccessToken } from "./tokenManager.js";
+  import { currentLocation, locationError } from "./locationStore.js"; //
+  import ContextMenu from "./ContextMenu.svelte"; //
+  import { getValidAccessToken } from "./tokenManager.js"; //
 
   // --- State Variables ---
-  let container;
-  let scene, camera, renderer, labelRenderer, controls;
+  let container; //
+  let scene, camera, renderer, labelRenderer, controls; //
   let solarSystems = new Map(); // Map: systemId -> { position, label, data, index, securityColor, regionColor, connections }
-  let stargateConnections = [];
-  let mapData = [];
-  let isLoading = true;
-  let isCalculatingRoute = false;
-  let error = null;
-  let errorTimeout = null;
-  let searchTerm = "";
+  let stargateConnections = []; //
+  let mapData = []; //
+  let isLoading = true; //
+  let isCalculatingRoute = false; // For specific route calculation loading state
+  let error = null; //
+  let errorTimeout = null; // Timeout ID for clearing error message
+  let searchTerm = ""; //
   let selectedSystem = null; // Holds system data object { itemid, itemname, ... }
-  let colorByRegion = false;
-  let regions = [];
-  let mounted = false;
-  let regionLabelCache = new Map(); // Map: regionId -> { label, center }
+  let colorByRegion = false; //
+  let regions = []; //
+  let mounted = false; //
+  let mapReady = false; // <<< *** ADDED: Flag to indicate base map is built ***
+  let regionLabelCache = new Map(); // Cache only for region labels now
 
   // Galaxy bounds tracking
-  let galaxyCenter = new THREE.Vector3();
-  let galaxySize = 0;
+  let galaxyCenter = new THREE.Vector3(); //
+  let galaxySize = 0; //
 
   // Interaction
-  let raycaster;
-  let mouse;
-  let clock = new THREE.Clock();
-  let lastClickTime = 0;
+  let raycaster; //
+  let mouse; //
+  let clock = new THREE.Clock(); //
+  let lastClickTime = 0; //
   let hoveredSystemData = null; // Holds system data object { itemid, itemname, ... }
   let hoverRing; // Mesh for hover effect
 
   // Context menu state
-  let contextMenu = { show: false, x: 0, y: 0, options: [] };
-
+  let contextMenu = { show: false, x: 0, y: 0, options: [] }; //
   // --- CHANGE: Unified activity marker storage ---
   let activityMarkers = new Map(); // Map: activity.id -> { group, activityData, mixer, flashEndTime, secondaryGlow, secondaryGlowFlashEndTime, type: 'camp' | 'roam' | 'battle' | 'smartbomb' | 'roaming_camp' }
   // --- END CHANGE ---
 
-  let userLocationMarker = { group: null, mixer: null };
-  let routeLines = null;
+  let userLocationMarker = { group: null, mixer: null }; //
+  let routeLines = null; //
   let currentRoute = []; // Stores the current full route (array of system IDs)
-  let dangerWarnings = [];
-  let dangerTooltip;
+  let dangerWarnings = []; //
+  let dangerTooltip; //
 
   // Animation properties
-  const PULSE_DURATION = 2.0;
-  const FLASH_DURATION = 0.5;
-  let lastAnimationTime = 0;
+  const PULSE_DURATION = 2.0; //
+  const FLASH_DURATION = 0.5; // Faster flash
+  let lastAnimationTime = 0; //
 
   // Fullscreen state
-  let isFullscreen = false;
+  let isFullscreen = false; //
 
   // --- Constants ---
-  const SCALE_FACTOR = 1e-14;
+  const SCALE_FACTOR = 1e-14; //
   const SYSTEM_SIZE = 7.0; // Slightly smaller base size
-  const CONNECTION_COLOR = 0x00ffff;
-  const DOUBLE_CLICK_TIME = 300;
+  const CONNECTION_COLOR = 0x00ffff; //
+  const DOUBLE_CLICK_TIME = 300; //
   const CAMP_COLOR = 0xff3333; // Red
   const SMARTBOMB_COLOR = 0xff9933; // Orange-Red for Smartbomb
   const ROAM_COLOR = 0x3333ff; // Blue
@@ -76,921 +76,2351 @@
   const USER_COLOR = 0x00ffff; // Cyan
   const ROUTE_COLOR = 0x00ff00; // Green
   const DANGER_ROUTE_COLOR = 0xff6600; // Orange
-  const FLASH_COLOR_CAMP = new THREE.Color(0xffdddd);
-  const FLASH_COLOR_SMARTBOMB = new THREE.Color(0xffccaa);
-  const FLASH_COLOR_ROAM = new THREE.Color(0xddddff);
-  const FLASH_COLOR_ROAMING_CAMP = new THREE.Color(0xffddaa);
-  const FLASH_COLOR_BATTLE = new THREE.Color(0xffaaff);
-  const SECONDARY_GLOW_COLOR_CAMP = 0xffaaaa;
-  const SECONDARY_GLOW_COLOR_SMARTBOMB = 0xffbb88;
-  const SECONDARY_GLOW_COLOR_ROAM = 0xaaaaff;
-  const SECONDARY_GLOW_COLOR_ROAMING_CAMP = 0xffcc88;
-  const SECONDARY_GLOW_COLOR_BATTLE = 0xee88ee;
-
+  const FLASH_COLOR_CAMP = new THREE.Color(0xffdddd); //
+  const FLASH_COLOR_SMARTBOMB = new THREE.Color(0xffccaa); //
+  const FLASH_COLOR_ROAM = new THREE.Color(0xddddff); //
+  const FLASH_COLOR_ROAMING_CAMP = new THREE.Color(0xffddaa); //
+  const FLASH_COLOR_BATTLE = new THREE.Color(0xffaaff); //
+  const SECONDARY_GLOW_COLOR_CAMP = 0xffaaaa; //
+  const SECONDARY_GLOW_COLOR_SMARTBOMB = 0xffbb88; //
+  const SECONDARY_GLOW_COLOR_ROAM = 0xaaaaff; //
+  const SECONDARY_GLOW_COLOR_ROAMING_CAMP = 0xffcc88; //
+  const SECONDARY_GLOW_COLOR_BATTLE = 0xee88ee; //
   // --- NEW: Classification Icons/Tooltips (used in info panel) ---
   const classificationIcons = {
-    camp: "⛺",
-    smartbomb: "⚡",
-    roaming_camp: "🏕️",
-    battle: "⚔️",
-    roam: "➡️",
-    activity: "❓",
+    //
+    camp: "⛺", //
+    smartbomb: "⚡", //
+    roaming_camp: "🏕️", //
+    battle: "⚔️", //
+    roam: "➡️", //
+    activity: "❓", //
   };
   const classificationTooltips = {
-    camp: "Standard Gate Camp",
-    smartbomb: "Smartbomb Camp",
-    roaming_camp: "Roaming Camp (Multi-System)",
-    battle: "Large Battle (>40 Pilots)",
-    roam: "Roaming Gang",
-    activity: "Unclassified Activity",
+    //
+    camp: "Standard Gate Camp", //
+    smartbomb: "Smartbomb Camp", //
+    roaming_camp: "Roaming Camp (Multi-System)", //
+    battle: "Large Battle (>40 Pilots)", //
+    roam: "Roaming Gang", //
+    activity: "Unclassified Activity", //
   };
   // --- END NEW ---
 
   // Region colors (remains the same)
   const regionColors = [
-    /* ... colors ... */
+    0x3498db, 0x9b59b6, 0x2ecc71, 0xe74c3c, 0xf1c40f, 0x1abc9c, 0xd35400,
+    0x34495e, 0x95a5a6, 0x16a085, 0x27ae60, 0x2980b9, 0x8e44ad, 0xe67e22,
+    0xc0392b, 0xf39c12, 0xd35400, 0x7f8c8d, 0xbdc3c7, 0x7d3c98, 0xb3b6b7,
+    0x2874a6, 0x138d75, 0xba4a00, 0x566573, 0xd4ac0d, 0xca6f1e, 0x48c9b0,
+    0xf5b041, 0xa569bd, 0x5d6d7e, 0x45b39d, 0xf4d03f, 0xaf7ac5, 0x5499c7,
+    0x48c9b0, 0xeb984e, 0xcd6155, 0x5d6d7e, 0xf7dc6f, 0x85c1e9, 0x73c6b6,
   ];
-
   // --- Reusable Textures ---
-  let circleTexture;
-  let glowTexture;
-
+  let circleTexture; //
+  let glowTexture; //
   // --- Resource Disposal Utility (remains the same) ---
   function disposeObject3D(obj) {
-    /* ... */
-  }
+    //
+    if (!obj) return; //
+    if (obj.geometry) obj.geometry.dispose(); //
+    if (obj.material) {
+      //
+      if (Array.isArray(obj.material)) {
+        //
+        obj.material.forEach((m) => {
+          //
+          if (m.map) m.map.dispose(); //
+          m.dispose(); //
+        });
+      } else {
+        //
+        if (obj.material.map) obj.material.map.dispose(); //
+        obj.material.dispose(); //
+      }
+    }
+    // Special handling for CSS2DObject labels
+    if (obj instanceof CSS2DObject && obj.element) {
+      //
+      obj.element.remove(); //
+    } else if (
+      //
+      obj.userData?.label instanceof CSS2DObject && //
+      obj.userData.label.element //
+    ) {
+      obj.userData.label.element.remove(); //
+      obj.userData.label = null; //
+    } else if (obj.label instanceof CSS2DObject && obj.label.element) {
+      //
+      obj.label.element.remove(); //
+      obj.label = null; //
+    }
+
+    while (obj.children.length > 0) {
+      //
+      disposeObject3D(obj.children[0]); //
+      obj.remove(obj.children[0]); //
+    }
+    if (obj.userData?.mixer) {
+      //
+      obj.userData.mixer.stopAllAction(); //
+      obj.userData.mixer = null; //
+    }
+  } //
 
   // --- Reactive Subscriptions & Updates ---
   // --- CHANGE: Subscribe to unified activities ---
-  $: activities = $activeActivities || [];
+  $: activities = $activeActivities || []; //
   // --- END CHANGE ---
-  $: userLocation = $currentLocation;
-
-  // --- CHANGE: Single reactive block for activities ---
-  $: if (mounted && activities !== undefined && scene) {
-    updateActivityVisualizations(activities);
+  $: userLocation = $currentLocation; //
+  // --- CHANGE: Single reactive block for activities with mapReady check ---
+  $: if (mounted && mapReady && activities !== undefined && scene) {
+    // <<< Added mapReady check
+    console.log(
+      "[UniverseMap] Map ready, updating activity visualizations...",
+      {
+        // <<< DEBUG
+        mounted, // <<< DEBUG
+        mapReady, // <<< DEBUG
+        activitiesDefined: activities !== undefined, // <<< DEBUG
+        activitiesLength: activities?.length, // <<< DEBUG
+        sceneExists: !!scene, // <<< DEBUG
+      }
+    );
+    updateActivityVisualizations(activities); //
   }
   // --- END CHANGE ---
-  $: if (mounted && userLocation !== undefined && scene) {
-    updateUserLocationMarker(userLocation);
-  }
 
   // Info panel reactive data
-  $: selectedActivityData = selectedSystem
+  $: selectedActivityData = selectedSystem //
     ? Array.from(activityMarkers.values()).find(
-        (marker) => marker.activityData.systemId === selectedSystem.itemid
-      )?.activityData
-    : null;
-  // Note: Finding roam data associated with a selected system is more complex now, might need adjustment if needed for panel.
-
-  // --- Texture Creation Functions (remain the same) ---
+        //
+        (marker) => marker.activityData.systemId === selectedSystem.itemid //
+      )?.activityData //
+    : null; //
+  // Note: Finding roam data associated with a selected system is more complex now, might need adjustment if needed for panel. //
   function createCircleTexture() {
-    /* ... */
+    const canvas = document.createElement("canvas");
+    const size = 64;
+    canvas.width = size;
+    canvas.height = size;
+    const context = canvas.getContext("2d");
+    context.beginPath();
+    context.arc(size / 2, size / 2, size / 2, 0, 2 * Math.PI);
+    context.fillStyle = "white";
+    context.fill();
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.needsUpdate = true;
+    return texture;
   }
   function createGlowTexture() {
-    /* ... */
+    const canvas = document.createElement("canvas");
+    const size = 128;
+    canvas.width = size;
+    canvas.height = size;
+    const context = canvas.getContext("2d");
+    const gradient = context.createRadialGradient(
+      size / 2,
+      size / 2,
+      size / 6,
+      size / 2,
+      size / 2,
+      size / 2
+    );
+    gradient.addColorStop(0, "rgba(255, 255, 255, 1)");
+    gradient.addColorStop(1, "rgba(255, 255, 255, 0)");
+    context.fillStyle = gradient;
+    context.fillRect(0, 0, size, size);
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.needsUpdate = true;
+    return texture;
   }
 
-  // --- Lifecycle Hooks (remain the same, just update cleanup) ---
+  // --- Lifecycle Hooks ---
   onMount(async () => {
+    //
     try {
-      console.log("Component mounting...");
-      circleTexture = createCircleTexture();
-      glowTexture = createGlowTexture();
+      console.log("[UniverseMap] Component mounting..."); // <<< DEBUG
+      circleTexture = createCircleTexture(); //
+      glowTexture = createGlowTexture(); //
 
-      await initializeMap();
+      await initializeMap(); //
 
-      window.addEventListener("resize", handleResize);
-      container.addEventListener("mousemove", onMouseMove);
-      container.addEventListener("click", onClick);
-      container.addEventListener("dblclick", onDoubleClick);
-      container.addEventListener("contextmenu", onContextMenu);
-      document.addEventListener("fullscreenchange", handleFullscreenChange);
+      window.addEventListener("resize", handleResize); //
+      container.addEventListener("mousemove", onMouseMove); //
+      container.addEventListener("click", onClick); //
+      container.addEventListener("dblclick", onDoubleClick); //
+      container.addEventListener("contextmenu", onContextMenu); //
+      document.addEventListener("fullscreenchange", handleFullscreenChange); //
 
-      dangerTooltip = document.createElement("div");
-      dangerTooltip.className = "danger-tooltip";
-      dangerTooltip.style.display = "none";
+      dangerTooltip = document.createElement("div"); //
+      dangerTooltip.className = "danger-tooltip"; //
+      dangerTooltip.style.display = "none"; //
 
-      mounted = true;
-      console.log("Map initialized.");
-      animate(performance.now());
+      mounted = true; //
+      console.log("[UniverseMap] Map initialized."); // <<< DEBUG
+      animate(performance.now()); //
     } catch (err) {
-      console.error("Error initializing map:", err);
-      error = err.message || "Failed to initialize map";
-      if (errorTimeout) clearTimeout(errorTimeout);
+      console.error("[UniverseMap] Error initializing map:", err); // <<< DEBUG
+      error = err.message || "Failed to initialize map"; //
+      if (errorTimeout) clearTimeout(errorTimeout); //
       errorTimeout = setTimeout(() => {
-        error = null;
-      }, 5000);
+        //
+        error = null; //
+      }, 5000); //
     } finally {
-      isLoading = false;
+      isLoading = false; //
     }
-  });
+  }); //
 
-  let frameId;
+  let frameId; //
   onDestroy(() => {
-    console.log("Component destroying...");
-    mounted = false;
-    if (frameId) cancelAnimationFrame(frameId);
-    window.removeEventListener("resize", handleResize);
-    document.removeEventListener("fullscreenchange", handleFullscreenChange);
+    //
+    console.log("[UniverseMap] Component destroying..."); // <<< DEBUG
+    mounted = false; //
+    if (frameId) cancelAnimationFrame(frameId); //
+    window.removeEventListener("resize", handleResize); //
+    document.removeEventListener("fullscreenchange", handleFullscreenChange); //
     if (container) {
-      container.removeEventListener("mousemove", onMouseMove);
-      container.removeEventListener("click", onClick);
-      container.removeEventListener("dblclick", onDoubleClick);
-      container.removeEventListener("contextmenu", onContextMenu);
+      //
+      container.removeEventListener("mousemove", onMouseMove); //
+      container.removeEventListener("click", onClick); //
+      container.removeEventListener("dblclick", onDoubleClick); //
+      container.removeEventListener("contextmenu", onContextMenu); //
     }
-    if (errorTimeout) clearTimeout(errorTimeout);
+    if (errorTimeout) clearTimeout(errorTimeout); //
 
-    console.log("Disposing scene objects...");
+    console.log("[UniverseMap] Disposing scene objects..."); // <<< DEBUG
     // --- CHANGE: Dispose unified markers ---
-    activityMarkers.forEach((markerObj) => disposeObject3D(markerObj.group));
-    activityMarkers.clear();
+    activityMarkers.forEach((markerObj) => disposeObject3D(markerObj.group)); //
+    activityMarkers.clear(); //
     // --- END CHANGE ---
-    if (userLocationMarker.group) disposeObject3D(userLocationMarker.group);
-    userLocationMarker = { group: null, mixer: null };
-    if (routeLines) disposeObject3D(routeLines);
-    routeLines = null;
+    if (userLocationMarker.group) disposeObject3D(userLocationMarker.group); //
+    userLocationMarker = { group: null, mixer: null }; //
+    if (routeLines) disposeObject3D(routeLines); //
+    routeLines = null; //
     regionLabelCache.forEach((cacheEntry) => {
-      disposeObject3D(cacheEntry.label);
+      //
+      disposeObject3D(cacheEntry.label); //
     });
-    regionLabelCache.clear();
-    stargateConnections.forEach((line) => disposeObject3D(line));
-    stargateConnections = [];
+    regionLabelCache.clear(); //
+    stargateConnections.forEach((line) => disposeObject3D(line)); //
+    stargateConnections = []; //
     const pointsObject = scene?.children.find(
-      (child) => child.userData?.isSystemPoints
+      //
+      (child) => child.userData?.isSystemPoints //
     );
-    if (pointsObject) disposeObject3D(pointsObject);
+    if (pointsObject) disposeObject3D(pointsObject); //
     solarSystems.forEach((sys) => {
-      if (sys.label) disposeObject3D(sys.label);
+      //
+      if (sys.label) disposeObject3D(sys.label); //
     });
-    solarSystems.clear();
-    if (hoverRing) disposeObject3D(hoverRing);
-    console.log("Dynamic objects disposed.");
-    if (renderer) renderer.dispose();
+    solarSystems.clear(); //
+    if (hoverRing) disposeObject3D(hoverRing); //
+    console.log("[UniverseMap] Dynamic objects disposed."); // <<< DEBUG
+    if (renderer) renderer.dispose(); //
     if (labelRenderer?.domElement?.parentElement)
-      labelRenderer.domElement.remove();
-    if (controls) controls.dispose();
-    if (circleTexture) circleTexture.dispose();
-    if (glowTexture) glowTexture.dispose();
-    console.log("Renderers, controls, textures disposed.");
-    if (dangerTooltip?.parentElement) dangerTooltip.remove();
-    console.log("Component destroyed.");
-  });
+      //
+      labelRenderer.domElement.remove(); //
+    if (controls) controls.dispose(); //
+    if (circleTexture) circleTexture.dispose(); //
+    if (glowTexture) glowTexture.dispose(); //
+    console.log("[UniverseMap] Renderers, controls, textures disposed."); // <<< DEBUG
+    if (dangerTooltip?.parentElement) dangerTooltip.remove(); //
+    console.log("[UniverseMap] Component destroyed."); // <<< DEBUG
+  }); //
 
-  // --- Fullscreen Handling (remains the same) ---
   async function toggleFullscreen() {
-    /* ... */
+    const mainContainer = container.closest(".universe-map-container");
+    if (!mainContainer) return;
+
+    if (!document.fullscreenElement) {
+      try {
+        await mainContainer.requestFullscreen();
+      } catch (err) {
+        console.error(`Error requesting fullscreen: ${err.message}`);
+        error = `Fullscreen not supported/denied.`;
+        if (errorTimeout) clearTimeout(errorTimeout);
+        errorTimeout = setTimeout(() => {
+          error = null;
+        }, 5000);
+      }
+    } else {
+      if (document.exitFullscreen) {
+        await document.exitFullscreen();
+      }
+    }
   }
   async function handleFullscreenChange() {
-    /* ... */
+    isFullscreen = !!document.fullscreenElement;
+    await tick();
+    if (mounted) handleResize();
   }
 
-  // --- Context Menu & ESI (remain the same, routing uses calculateRoute) ---
   function onContextMenu(event) {
-    /* ... */
-  }
+    //
+    // <<< DEBUG Add log
+    console.log("[UniverseMap] onContextMenu triggered."); //
+    event.preventDefault(); //
+    if (!selectedSystem) {
+      // <<< DEBUG Add check
+      console.log("[UniverseMap] Context menu prevented: No system selected."); //
+      return; //
+    }
+    const rect = container.getBoundingClientRect(); //
+    const x = event.clientX - rect.left; //
+    const y = event.clientY - rect.top; //
+    contextMenu = {
+      //
+      show: true, //
+      x, //
+      y, //
+      options: [
+        //
+        {
+          //
+          label: "Set Destination", //
+          action: () => calculateRoute(selectedSystem.itemid, true), // // Use new function
+        },
+        {
+          //
+          label: "Add Waypoint", //
+          action: () => calculateRoute(selectedSystem.itemid, false), // // Use new function
+        },
+        {
+          //
+          label: "View Activity", //
+          action: () => showSystemActivity(selectedSystem), //
+        },
+      ],
+    };
+    console.log("[UniverseMap] Context menu should show:", contextMenu); // <<< DEBUG
+  } //
   function handleMenuSelect(event) {
-    /* ... */
-  }
+    //
+    const option = event.detail; //
+    option.action(); //
+    contextMenu.show = false; //
+  } //
   async function setDestination(systemId, clearOthers = true) {
-    /* ... */
+    // This function is now only called by calculateRoute for ESI UI interaction
+    try {
+      const accessToken = await getValidAccessToken();
+      const result = await fetch(
+        `https://esi.evetech.net/latest/ui/autopilot/waypoint/?add_to_beginning=false&clear_other_waypoints=${clearOthers}&datasource=tranquility&destination_id=${systemId}`,
+        { method: "POST", headers: { Authorization: `Bearer ${accessToken}` } }
+      );
+      if (!result.ok) {
+        if (result.status === 401)
+          window.dispatchEvent(new CustomEvent("session-expired"));
+        throw new Error(`Failed to set destination: ${result.status}`);
+      }
+      console.log(
+        `[setDestination] ESI UI waypoint set for ${systemId}, clearOthers: ${clearOthers}`
+      );
+      return true;
+    } catch (error) {
+      console.error("Error setting destination via ESI UI:", error);
+      return false;
+    }
   }
   function showSystemActivity(system) {
-    /* ... */
+    const systemCamps = Array.from(campMarkers.values())
+      .filter((marker) => parseInt(marker.campData.systemId) === system.itemid)
+      .map((marker) => marker.campData);
+    const systemRoams = Array.from(roamPaths.values())
+      .filter((path) =>
+        path.roamData.systems?.some((s) => parseInt(s.id) === system.itemid)
+      )
+      .map((path) => path.roamData);
+    if (systemCamps.length > 0) {
+      const sortedCamps = [...systemCamps].sort(
+        (a, b) => b.probability - a.probability
+      );
+      const latestKill = sortedCamps[0].kills[sortedCamps[0].kills.length - 1];
+      if (latestKill)
+        window.open(
+          `https://zkillboard.com/kill/${latestKill.killID}/`,
+          "_blank"
+        );
+    } else if (systemRoams.length > 0) {
+      const sortedRoams = [...systemRoams].sort(
+        (a, b) => new Date(b.lastActivity) - new Date(a.lastActivity)
+      );
+      const latestKill = sortedRoams[0].kills[sortedRoams[0].kills.length - 1];
+      if (latestKill)
+        window.open(
+          `https://zkillboard.com/kill/${latestKill.killID}/`,
+          "_blank"
+        );
+    }
   }
 
-  // --- Map Initialization & Building (remain the same) ---
+  // --- Map Initialization & Building ---
   async function initializeMap() {
-    /* ... */
-  }
+    //
+    console.log("[UniverseMap] initializeMap started..."); // <<< DEBUG
+    initThreeJS(); //
+
+    try {
+      isLoading = true; //
+      error = null; //
+      mapReady = false; // <<< Ensure map is not ready initially
+      console.log("[UniverseMap] Fetching /api/map-data..."); // <<< DEBUG
+      const response = await fetch("/api/map-data"); // Fetch map data from API
+      if (!response.ok) {
+        //
+        throw new Error(`Failed to fetch map data: ${response.status}`); //
+      }
+      mapData = await response.json(); //
+      console.log(`[UniverseMap] Fetched ${mapData.length} map entries.`); // <<< DEBUG
+      if (mapData.length === 0) throw new Error("No map data received"); //
+      regions = mapData //
+        .filter((item) => item.typeid === 3) //
+        .map((region, index) => ({
+          //
+          id: region.itemid, //
+          name: region.itemname, //
+          x: region.x, //
+          y: region.y, //
+          z: region.z, //
+          color: regionColors[index % regionColors.length], //
+        }))
+        .sort((a, b) => a.name.localeCompare(b.name)); //
+      console.log(`[UniverseMap] Extracted ${regions.length} regions`); // <<< DEBUG
+
+      buildMap(mapData); // Call buildMap function here //
+    } catch (err) {
+      //
+      console.error("[UniverseMap] Error during initializeMap:", err); // <<< DEBUG
+      error = err.message || "Failed to initialize map"; //
+      if (errorTimeout) clearTimeout(errorTimeout); //
+      errorTimeout = setTimeout(() => {
+        //
+        error = null; //
+      }, 5000); //
+    } finally {
+      //
+      isLoading = false; //
+      console.log(
+        "[UniverseMap] initializeMap finished. isLoading:",
+        isLoading,
+        "mapReady:",
+        mapReady
+      ); // <<< DEBUG
+    }
+  } //
   function initThreeJS() {
-    console.log("Initializing Three.js...");
-    scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x000011);
-    camera = new THREE.PerspectiveCamera(
-      60,
-      container.clientWidth / container.clientHeight,
+    //
+    console.log("[UniverseMap] Initializing Three.js..."); // <<< DEBUG
+    scene = new THREE.Scene(); //
+    scene.background = new THREE.Color(0x000011); //
+    camera = new THREE.PerspectiveCamera( //
+      60, //
+      container.clientWidth / container.clientHeight, //
       0.1, // near plane
       1000000 // far plane (increased range)
     );
     camera.position.set(0, 0, 50); // Initial position
-    renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-    renderer.setSize(container.clientWidth, container.clientHeight);
-    renderer.setPixelRatio(window.devicePixelRatio);
-    container.appendChild(renderer.domElement);
+    renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true }); //
+    renderer.setSize(container.clientWidth, container.clientHeight); //
+    renderer.setPixelRatio(window.devicePixelRatio); //
+    container.appendChild(renderer.domElement); //
 
     // Label Renderer
-    labelRenderer = new CSS2DRenderer();
-    labelRenderer.setSize(container.clientWidth, container.clientHeight);
-    labelRenderer.domElement.style.position = "absolute";
-    labelRenderer.domElement.style.top = "0";
+    labelRenderer = new CSS2DRenderer(); //
+    labelRenderer.setSize(container.clientWidth, container.clientHeight); //
+    labelRenderer.domElement.style.position = "absolute"; //
+    labelRenderer.domElement.style.top = "0"; //
     labelRenderer.domElement.style.pointerEvents = "none"; // Allow clicks to pass through
-    container.appendChild(labelRenderer.domElement);
-
+    container.appendChild(labelRenderer.domElement); //
     // Controls
-    controls = new OrbitControls(camera, renderer.domElement);
-    controls.enableDamping = true;
-    controls.dampingFactor = 0.1;
+    controls = new OrbitControls(camera, renderer.domElement); //
+    controls.enableDamping = true; //
+    controls.dampingFactor = 0.1; //
     controls.rotateSpeed = 0; // Disable rotation
-    controls.panSpeed = 0.8;
-    controls.zoomSpeed = 1.2;
+    controls.panSpeed = 0.8; //
+    controls.zoomSpeed = 1.2; //
     controls.minDistance = 0.5; // Allow closer zoom
     controls.maxDistance = 2500; // Allow further zoom out
     controls.minPolarAngle = 0; // Lock vertical panning
     controls.maxPolarAngle = 0; // Lock vertical panning
-    controls.enableRotate = false;
+    controls.enableRotate = false; //
     controls.enablePan = true; // Enable panning
 
     // Lighting
     const ambientLight = new THREE.AmbientLight(0xffffff, 0.7); // Slightly brighter ambient
-    scene.add(ambientLight);
+    scene.add(ambientLight); //
 
     // Raycaster
-    raycaster = new THREE.Raycaster();
+    raycaster = new THREE.Raycaster(); //
     // --- CHANGE: Increase raycaster threshold for points ---
     raycaster.params.Points.threshold = 2.5; // Increased from 1.5
     // --- END CHANGE ---
-    mouse = new THREE.Vector2();
-
+    mouse = new THREE.Vector2(); //
     // Hover Ring
     // --- CHANGE: Slightly smaller hover ring ---
-    const ringGeometry = new THREE.RingGeometry(
+    const ringGeometry = new THREE.RingGeometry( //
       SYSTEM_SIZE * 0.7, // Slightly smaller inner radius
       SYSTEM_SIZE * 0.8, // Slightly smaller outer radius
-      32
+      32 //
     );
     // --- END CHANGE ---
     const ringMaterial = new THREE.MeshBasicMaterial({
+      //
       color: 0x00ffff, // Cyan
-      side: THREE.DoubleSide,
-      transparent: true,
-      opacity: 0.7,
+      side: THREE.DoubleSide, //
+      transparent: true, //
+      opacity: 0.7, //
     });
-    hoverRing = new THREE.Mesh(ringGeometry, ringMaterial);
+    hoverRing = new THREE.Mesh(ringGeometry, ringMaterial); //
     // hoverRing.rotation.x = -Math.PI / 2; // Keep it flat on the XZ plane
-    hoverRing.visible = false;
-    scene.add(hoverRing);
+    hoverRing.visible = false; //
+    scene.add(hoverRing); //
 
-    console.log("Three.js initialized successfully");
-  }
-  function buildMap() {
-    /* ... */
-  }
+    console.log("[UniverseMap] Three.js initialized successfully"); // <<< DEBUG
+  } //
+  function buildMap(systemsData) {
+    //
+    console.log(
+      `[UniverseMap] Building map with ${systemsData?.length ?? 0} entries...`
+    ); // <<< DEBUG
+    if (!scene) {
+      //
+      console.error(
+        "[UniverseMap] buildMap called but scene is not initialized."
+      ); // <<< DEBUG
+      return; //
+    }
+    // Clear previous points/lines (important for re-builds, e.g., search/color change)
+    const oldPointsObject = scene?.children.find(
+      //
+      (child) => child.userData?.isSystemPoints //
+    );
+    if (oldPointsObject) {
+      //
+      console.log("[UniverseMap] Removing old system points..."); // <<< DEBUG
+      scene.remove(oldPointsObject); //
+      disposeObject3D(oldPointsObject); //
+    }
+    stargateConnections.forEach((line) => {
+      //
+      scene.remove(line); //
+      disposeObject3D(line); //
+    });
+    stargateConnections = []; //
+    solarSystems.forEach((sys) => {
+      // Clear old label references if any //
+      if (sys.label && sys.label.parent) scene.remove(sys.label); //
+    });
+    solarSystems.clear(); // Clear the system map //
+
+    // Filter data
+    const solarSystemsData = systemsData.filter((item) => item.typeid === 5); //
+    const stargatesData = systemsData.filter((item) => item.groupid === 10); //
+    console.log(
+      `[UniverseMap] Filtered data: ${solarSystemsData.length} systems, ${stargatesData.length} stargates.`
+    ); // <<< DEBUG
+    if (solarSystemsData.length === 0) {
+      //
+      console.warn("[UniverseMap] No solar system data found after filtering."); // <<< DEBUG
+      mapReady = true; // <<< SET FLAG even if empty
+      return; //
+    }
+    const processedConnections = new Set(); //
+    const connectedSystems = new Set(); //
+    stargatesData.forEach((sourceGate) => {
+      //
+      if (!sourceGate.solarsystemid || !sourceGate.itemname) return; //
+      const match = sourceGate.itemname.match(/Stargate \(([^)]+)\)/); //
+      if (!match) return; //
+      const destinationName = match[1]; //
+      const destinationSystem = solarSystemsData.find(
+        //
+        (sys) => sys.itemname === destinationName //
+      );
+      if (!destinationSystem) return; //
+      const sourceSystem = solarSystemsData.find(
+        //
+        (sys) => sys.itemid === sourceGate.solarsystemid //
+      );
+      if (!sourceSystem) return; //
+      // Skip C-R regions (remains same)
+      const sourceRegion = regions.find((r) => r.id === sourceSystem.regionid); //
+      const destRegion = regions.find(
+        //
+        (r) => r.id === destinationSystem.regionid //
+      );
+      if (
+        //
+        (sourceRegion && sourceRegion.name.startsWith("C-R")) || //
+        (destRegion && destRegion.name.startsWith("C-R")) //
+      )
+        return; //
+      const connectionId = [sourceSystem.itemid, destinationSystem.itemid] //
+        .sort() //
+        .join("-"); //
+      if (processedConnections.has(connectionId)) return; //
+      processedConnections.add(connectionId); //
+      connectedSystems.add(sourceSystem.itemid); //
+      connectedSystems.add(destinationSystem.itemid); //
+    });
+    const filteredSystems = solarSystemsData.filter(
+      (
+        system //
+      ) => connectedSystems.has(system.itemid) //
+    );
+    // Apply search term filtering (remains same)
+    const searchFilteredSystems = searchTerm //
+      ? filteredSystems.filter(
+          (
+            system //
+          ) => system.itemname.toLowerCase().includes(searchTerm.toLowerCase()) //
+        )
+      : filteredSystems; //
+    console.log(
+      `[UniverseMap] After connection/search filtering: ${searchFilteredSystems.length} systems`
+    ); // <<< DEBUG
+    if (searchFilteredSystems.length === 0) {
+      //
+      calculateGalaxyBounds(); //
+      setInitialCameraPosition(); //
+      mapReady = true; // <<< SET FLAG even if empty to allow activity updates
+      return; //
+    }
+
+    // Create System Points
+    const positions = []; //
+    const colors = []; //
+    searchFilteredSystems.forEach((system, idx) => {
+      //
+      if (system.x === null || system.z === null) {
+        // Check X and Z mainly for 2D map
+        console.warn(
+          `[UniverseMap] Skipping system ${system.itemname} due to null coordinates.`
+        ); // <<< DEBUG
+        return; //
+      }
+      const posX = system.x * SCALE_FACTOR; //
+      const posY = 0; // Keep Y=0 for 2D map
+      const posZ = system.z * SCALE_FACTOR; //
+      positions.push(posX, posY, posZ); //
+      let color; //
+      if (colorByRegion) {
+        //
+        const region = regions.find((r) => r.id === system.regionid); //
+        color = new THREE.Color(region ? region.color : 0xffffff); //
+      } else {
+        //
+        color = new THREE.Color(getSecurityColor(system.security)); //
+      }
+      colors.push(color.r, color.g, color.b); //
+      const labelDiv = document.createElement("div"); //
+      labelDiv.className = "system-label"; //
+      labelDiv.textContent = system.itemname; //
+      const label = new CSS2DObject(labelDiv); //
+      label.position.set(posX, posY, posZ); //
+      label.visible = false; // Initially hidden
+      scene.add(label); //
+      solarSystems.set(system.itemid, {
+        //
+        position: new THREE.Vector3(posX, posY, posZ), //
+        label, //
+        data: system, //
+        index: idx, //
+        securityColor: getSecurityColor(system.security), // Store hex value //
+        //
+        regionColor:
+          regions.find((r) => r.id === system.regionid)?.color || 0xffffff, //
+        connections: new Set(), //
+      });
+    });
+    if (positions.length === 0) {
+      //
+      console.warn("[UniverseMap] No valid system positions after processing."); // <<< DEBUG
+      mapReady = true; // <<< SET FLAG
+      return; //
+    }
+    const geometry = new THREE.BufferGeometry(); //
+    geometry.setAttribute(
+      //
+      "position", //
+      new THREE.Float32BufferAttribute(positions, 3) //
+    );
+    geometry.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3)); //
+    const pointsMaterial = new THREE.PointsMaterial({
+      //
+      size: SYSTEM_SIZE, //
+      vertexColors: true, //
+      sizeAttenuation: true, //
+      map: circleTexture, //
+      alphaTest: 0.5, //
+      transparent: true, //
+    });
+    const points = new THREE.Points(geometry, pointsMaterial); //
+    points.userData.isSystemPoints = true; //
+    scene.add(points); //
+    console.log(`[UniverseMap] Added ${solarSystems.size} system points.`); // <<< DEBUG
+
+    // Create Connections
+    let connectionCount = 0; //
+    processedConnections.clear(); //
+    stargatesData.forEach((sourceGate) => {
+      //
+      if (!sourceGate.solarsystemid || !sourceGate.itemname) return; //
+      const match = sourceGate.itemname.match(/Stargate \(([^)]+)\)/); //
+      if (!match) return; //
+      const destinationName = match[1]; //
+      const destinationSystem = solarSystemsData.find(
+        //
+        (sys) => sys.itemname === destinationName //
+      );
+      if (!destinationSystem) return; //
+      const sourceSystem = solarSystemsData.find(
+        //
+        (sys) => sys.itemid === sourceGate.solarsystemid //
+      );
+      if (!sourceSystem) return; //
+      // Skip C-R regions (remains same)
+      const sourceRegion = regions.find((r) => r.id === sourceSystem.regionid); //
+      const destRegion = regions.find(
+        //
+        (r) => r.id === destinationSystem.regionid //
+      );
+      if (
+        //
+        (sourceRegion && sourceRegion.name.startsWith("C-R")) || //
+        (destRegion && destRegion.name.startsWith("C-R")) //
+      )
+        return; //
+      const connectionId = [sourceSystem.itemid, destinationSystem.itemid] //
+        .sort() //
+        .join("-"); //
+      if (processedConnections.has(connectionId)) return; //
+      processedConnections.add(connectionId); //
+      // Ensure *both* systems exist in the *rendered* solarSystems map
+      if (
+        //
+        solarSystems.has(sourceSystem.itemid) && // Use the rendered map //
+        solarSystems.has(destinationSystem.itemid) // Use the rendered map //
+      ) {
+        const connection = createConnectionLine(
+          //
+          sourceSystem, //
+          destinationSystem //
+        );
+        if (connection) {
+          //
+          scene.add(connection); //
+          stargateConnections.push(connection); //
+          connectionCount++; //
+        }
+      }
+    });
+    console.log(
+      `[UniverseMap] Created ${connectionCount} stargate connections`
+    ); // <<< DEBUG
+
+    // Create or show Region Labels (Backgrounds removed)
+    createRegionLabels(searchFilteredSystems); //
+
+    // Final steps
+    calculateGalaxyBounds(); //
+    setInitialCameraPosition(); //
+    mapReady = true; // <<< *** SET FLAG HERE ***
+    console.log("[UniverseMap] Base map build complete and ready."); // <<< DEBUG
+  } //
   function createConnectionLine(sourceSystem, destinationSystem) {
-    /* ... */
+    if (
+      sourceSystem.x === null ||
+      sourceSystem.y === null ||
+      sourceSystem.z === null ||
+      destinationSystem.x === null ||
+      destinationSystem.y === null ||
+      destinationSystem.z === null
+    ) {
+      return null;
+    }
+    const startPoint = new THREE.Vector3(
+      sourceSystem.x * SCALE_FACTOR,
+      0,
+      sourceSystem.z * SCALE_FACTOR
+    );
+    const endPoint = new THREE.Vector3(
+      destinationSystem.x * SCALE_FACTOR,
+      0,
+      destinationSystem.z * SCALE_FACTOR
+    );
+    let lineColor;
+    if (colorByRegion) {
+      if (sourceSystem.regionid === destinationSystem.regionid) {
+        const region = regions.find((r) => r.id === sourceSystem.regionid);
+        lineColor = region ? region.color : CONNECTION_COLOR;
+      } else {
+        lineColor = CONNECTION_COLOR;
+      }
+    } else {
+      const sourceSec = sourceSystem.security ?? 0;
+      const destSec = destinationSystem.security ?? 0;
+      lineColor =
+        sourceSec < destSec
+          ? getSecurityColor(sourceSystem.security)
+          : getSecurityColor(destinationSystem.security);
+    }
+    const geometry = new THREE.BufferGeometry().setFromPoints([
+      startPoint,
+      endPoint,
+    ]);
+    const material = new THREE.LineBasicMaterial({
+      color: lineColor,
+      opacity: 0.4,
+      transparent: true,
+      linewidth: 1,
+    });
+    return new THREE.Line(geometry, material);
   }
   function createRegionLabels(systemsInMap) {
-    /* ... */
+    console.log("Creating/Updating region labels...");
+
+    // Ensure all cached region labels are added to the scene if not already present
+    regionLabelCache.forEach((cacheEntry) => {
+      if (!cacheEntry.label.parent) scene.add(cacheEntry.label);
+      cacheEntry.label.visible = true; // Labels are always visible
+    });
+
+    const regionSystems = new Map();
+    systemsInMap.forEach((systemData) => {
+      const regionId = systemData.regionid;
+      if (!regionSystems.has(regionId)) regionSystems.set(regionId, []);
+      regionSystems.get(regionId).push({
+        x: systemData.x * SCALE_FACTOR,
+        y: 0,
+        z: systemData.z * SCALE_FACTOR,
+      });
+    });
+
+    regionSystems.forEach((positions, regionId) => {
+      if (positions.length < 1) return; // Need at least one system
+      const region = regions.find((r) => r.id === regionId);
+      if (!region) return;
+
+      if (!regionLabelCache.has(regionId)) {
+        console.log(`Creating label for region ${region.name} (${regionId})`);
+        const cacheEntry = {};
+
+        // --- Create Label ---
+        const avgPosition = new THREE.Vector3();
+        positions.forEach((p) => avgPosition.add(p));
+        avgPosition.divideScalar(positions.length);
+        const labelDiv = document.createElement("div");
+        labelDiv.className = "region-label";
+        labelDiv.textContent = region.name;
+        labelDiv.style.color = `#${new THREE.Color(region.color).getHexString()}`;
+        const label = new CSS2DObject(labelDiv);
+        label.position.set(avgPosition.x, 0.1, avgPosition.z); // Position slightly above systems
+        label.userData.regionId = regionId;
+        label.visible = true; // Always visible
+        cacheEntry.label = label;
+        cacheEntry.center = new THREE.Vector3(
+          avgPosition.x,
+          0.1,
+          avgPosition.z
+        );
+        scene.add(label);
+
+        regionLabelCache.set(regionId, cacheEntry);
+        console.log(`Created and cached label for region ${region.name}`);
+      } else {
+        // Ensure cached label is visible
+        const cacheEntry = regionLabelCache.get(regionId);
+        cacheEntry.label.visible = true;
+      }
+    });
+    console.log(`Region labels update complete.`);
   }
 
   // --- CHANGE: Unified Activity Visualization Update ---
   function updateActivityVisualizations(newActivities) {
-    if (!scene || !mounted) return;
-    const now = clock.getElapsedTime();
-    const currentActivityIds = new Set(newActivities.map((a) => a.id));
-
+    //
+    if (!scene || !mounted || !mapReady) {
+      // <<< Add mapReady check
+      console.log(
+        "[UniverseMap] updateActivityVisualizations skipped: Scene/Mount/Map not ready."
+      ); // <<< DEBUG
+      return; //
+    }
+    console.log(
+      `[UniverseMap] Updating ${newActivities?.length ?? 0} activity visualizations...`
+    ); // <<< DEBUG
+    const now = clock.getElapsedTime(); //
+    const currentActivityIds = new Set(newActivities.map((a) => a.id)); //
     // Remove markers for activities that no longer exist
     activityMarkers.forEach((markerObj, activityId) => {
+      //
       if (!currentActivityIds.has(activityId)) {
-        scene.remove(markerObj.group);
-        disposeObject3D(markerObj.group);
-        activityMarkers.delete(activityId);
+        //
+        console.log(
+          `[UniverseMap] Removing stale activity marker: ${activityId}`
+        ); // <<< DEBUG
+        scene.remove(markerObj.group); //
+        disposeObject3D(markerObj.group); //
+        activityMarkers.delete(activityId); //
       }
     });
-
     // Add/Update markers for current activities
     newActivities.forEach((activity) => {
-      const existingMarker = activityMarkers.get(activity.id);
-      const latestKillId = activity.kills[activity.kills.length - 1]?.killID;
+      //
+      if (!activity?.id) {
+        // <<< DEBUG Add check
+        console.warn(
+          "[UniverseMap] Skipping activity with missing ID:",
+          activity
+        ); //
+        return; //
+      }
+      const existingMarker = activityMarkers.get(activity.id); //
+      const latestKillId = activity.kills?.[activity.kills.length - 1]?.killID; // Safely access kills //
 
       if (existingMarker) {
+        //
         // Update existing marker
-        const markerObj = existingMarker;
-        const oldClassification = markerObj.activityData.classification;
+        const markerObj = existingMarker; //
+        const oldClassification = markerObj.activityData?.classification; // Safely access old data //
         markerObj.activityData = activity; // Update data
 
         // Check if classification changed, requires recreating visual
         if (activity.classification !== oldClassification) {
+          //
           console.log(
-            `Activity ${activity.id} classification changed from ${oldClassification} to ${activity.classification}. Recreating visual.`
+            // <<< DEBUG
+            `[UniverseMap] Activity ${activity.id} classification changed from ${oldClassification} to ${activity.classification}. Recreating visual.` //
           );
-          scene.remove(markerObj.group);
-          disposeObject3D(markerObj.group);
+          scene.remove(markerObj.group); //
+          disposeObject3D(markerObj.group); //
           activityMarkers.delete(activity.id); // Remove old entry
           createOrUpdateActivityMarker(activity, now, latestKillId); // Create new one
         } else {
+          //
           // Only update properties if classification is the same
-          updateMarkerProperties(markerObj, activity, now, latestKillId);
+          updateMarkerProperties(markerObj, activity, now, latestKillId); //
         }
       } else {
+        //
         // Create new marker
-        createOrUpdateActivityMarker(activity, now, latestKillId);
+        createOrUpdateActivityMarker(activity, now, latestKillId); //
       }
     });
-  }
+  } //
 
   // --- NEW: Helper to create or update a marker based on classification ---
   function createOrUpdateActivityMarker(activity, now, latestKillId) {
-    let markerObj;
-    switch (activity.classification) {
-      case "camp":
-      case "smartbomb":
+    //
+    console.log(
+      `[UniverseMap] Creating/Updating marker for activity ${activity.id}, classification: ${activity.classification}`
+    ); // <<< DEBUG
+    let markerObj; //
+    switch (
+      activity.classification //
+    ) {
+      case "camp": //
+      case "smartbomb": //
       case "roaming_camp": // Use camp-style marker for roaming camps too
       case "battle": // Use camp-style marker for battles
-        markerObj = createOrUpdateCampStyleMarker(activity, now, latestKillId);
-        break;
-      case "roam":
-        markerObj = createOrUpdateRoamStyleMarker(activity, now, latestKillId);
-        break;
+        markerObj = createOrUpdateCampStyleMarker(activity, now, latestKillId); //
+        break; //
+      case "roam": //
+        markerObj = createOrUpdateRoamStyleMarker(activity, now, latestKillId); //
+        break; //
       case "activity": // Decide how to represent 'activity' - maybe a smaller grey glow?
-        // markerObj = createOrUpdateActivityStyleMarker(activity, now, latestKillId);
+        // markerObj = createOrUpdateActivityStyleMarker(activity, now, latestKillId); //
         console.log(
-          `Skipping visualization for unclassified activity: ${activity.id}`
+          // <<< DEBUG
+          `[UniverseMap] Skipping visualization for unclassified activity: ${activity.id}` //
         );
         return; // Don't visualize 'activity' for now
-      default:
+      default: //
         console.warn(
-          `Unknown activity classification: ${activity.classification}`
+          // <<< DEBUG
+          `[UniverseMap] Unknown activity classification: ${activity.classification}` //
         );
-        return;
+        return; //
     }
 
     if (markerObj) {
-      activityMarkers.set(activity.id, markerObj);
-      scene.add(markerObj.group);
+      //
+      activityMarkers.set(activity.id, markerObj); //
+      scene.add(markerObj.group); //
+      console.log(
+        `[UniverseMap] Added/Updated marker group to scene for activity ${activity.id}`
+      ); // <<< DEBUG
+    } else {
+      console.warn(
+        `[UniverseMap] Failed to create marker object for activity ${activity.id}`
+      ); // <<< DEBUG
     }
-  }
+  } //
 
   // --- NEW: Helper to update existing marker properties (if classification hasn't changed) ---
   function updateMarkerProperties(markerObj, activity, now, latestKillId) {
+    //
     // Update shared data
-    markerObj.activityData = activity;
-
+    markerObj.activityData = activity; //
     // Trigger flash if needed
     if (latestKillId && markerObj.lastKillId !== latestKillId) {
-      markerObj.flashEndTime = now + FLASH_DURATION;
-      markerObj.lastKillId = latestKillId;
+      //
+      markerObj.flashEndTime = now + FLASH_DURATION; //
+      markerObj.lastKillId = latestKillId; //
       if (markerObj.secondaryGlow) {
-        markerObj.secondaryGlowFlashEndTime = now + FLASH_DURATION;
+        //
+        markerObj.secondaryGlowFlashEndTime = now + FLASH_DURATION; //
       }
-      // console.log(`Flash triggered for activity ${activity.id}`);
+      console.log(`[UniverseMap] Flash triggered for activity ${activity.id}`); // <<< DEBUG
     }
 
     // Update specific visuals based on type stored in markerObj
     if (
-      markerObj.type === "camp" ||
-      markerObj.type === "smartbomb" ||
-      markerObj.type === "roaming_camp" ||
-      markerObj.type === "battle"
+      //
+      markerObj.type === "camp" || //
+      markerObj.type === "smartbomb" || //
+      markerObj.type === "roaming_camp" || //
+      markerObj.type === "battle" //
     ) {
       // Update glow size/opacity based on probability for camp-like markers
       const glowSprite = markerObj.group?.children.find(
-        (c) =>
-          c.isSprite &&
-          c.material.map === glowTexture &&
-          c !== markerObj.secondaryGlow
+        //
+        (
+          c //
+        ) =>
+          c.isSprite && //
+          c.material.map === glowTexture && //
+          c !== markerObj.secondaryGlow //
       );
       if (glowSprite) {
-        const baseSize = (activity.probability / 100) * 20 + 5;
-        if (markerObj.flashEndTime <= 0) {
+        //
+        const baseSize = ((activity.probability || 0) / 100) * 20 + 5; // Use default 0 if undefined //
+        if (markerObj.flashEndTime <= 0 || markerObj.flashEndTime < now) {
+          // Ensure flash check considers 'now' //
           // Only update size if not flashing
-          glowSprite.scale.set(baseSize, baseSize, 1);
+          glowSprite.scale.set(baseSize, baseSize, 1); //
           glowSprite.material.opacity = Math.min(
-            0.8,
-            activity.probability / 100
+            //
+            0.8, //
+            (activity.probability || 0) / 100 //
           );
-        }
+        } //
       }
       // Update secondary glow position for roaming camps/battles if needed
       if (
-        (activity.classification === "roaming_camp" ||
-          activity.classification === "battle") &&
-        markerObj.secondaryGlow &&
-        activity.lastSystem
+        //
+        (activity.classification === "roaming_camp" || //
+          activity.classification === "battle") && //
+        markerObj.secondaryGlow && //
+        activity.lastSystem //
       ) {
-        const system = solarSystems.get(parseInt(activity.lastSystem.id));
-        if (system) markerObj.secondaryGlow.position.copy(system.position);
+        const systemIdInt = parseInt(activity.lastSystem.id); //
+        if (!isNaN(systemIdInt)) {
+          // <<< DEBUG Check if ID is valid number
+          const system = solarSystems.get(systemIdInt); //
+          if (system)
+            markerObj.secondaryGlow.position.copy(system.position); //
+          else
+            console.warn(
+              `[UniverseMap] System ${systemIdInt} not found for secondary glow.`
+            ); // <<< DEBUG
+        } else {
+          console.warn(
+            `[UniverseMap] Invalid lastSystem ID for secondary glow: ${activity.lastSystem.id}`
+          ); // <<< DEBUG
+        }
       }
     } else if (markerObj.type === "roam") {
-      // Update roam path if systems changed? (More complex, might require redraw)
+      //
+      // Update roam path if systems changed? // (More complex, might require redraw)
       // For now, just update secondary glow position
       if (markerObj.secondaryGlow && activity.lastSystem) {
-        const system = solarSystems.get(parseInt(activity.lastSystem.id));
-        if (system) markerObj.secondaryGlow.position.copy(system.position);
+        //
+        const systemIdInt = parseInt(activity.lastSystem.id); //
+        if (!isNaN(systemIdInt)) {
+          // <<< DEBUG Check if ID is valid number
+          const system = solarSystems.get(systemIdInt); //
+          if (system)
+            markerObj.secondaryGlow.position.copy(system.position); //
+          else
+            console.warn(
+              `[UniverseMap] System ${systemIdInt} not found for roam secondary glow.`
+            ); // <<< DEBUG
+        } else {
+          console.warn(
+            `[UniverseMap] Invalid lastSystem ID for roam secondary glow: ${activity.lastSystem.id}`
+          ); // <<< DEBUG
+        }
       }
     }
-  }
+  } //
 
   // --- NEW: Function to create/update Camp, Smartbomb, Roaming Camp, Battle markers ---
   function createOrUpdateCampStyleMarker(activity, now, latestKillId) {
-    const systemId = parseInt(activity.systemId); // Camp-like activities have a primary systemId
-    const system = solarSystems.get(systemId);
-    if (!system) return null; // Cannot place marker if system isn't rendered
+    //
+    const systemId = parseInt(activity.systemId); // // Camp-like activities have a primary systemId
+    if (isNaN(systemId)) {
+      // <<< DEBUG Check ID
+      console.warn(
+        `[UniverseMap] Invalid systemId for camp-style marker: ${activity.systemId}`
+      ); //
+      return null; //
+    }
+    const system = solarSystems.get(systemId); //
+    if (!system) {
+      //
+      console.warn(
+        `[UniverseMap] System ${systemId} not found for camp-style marker ${activity.id}`
+      ); // <<< DEBUG
+      return null; // // Cannot place marker if system isn't rendered
+    }
 
-    const group = new THREE.Group();
-    group.position.copy(system.position);
+    const group = new THREE.Group(); //
+    group.position.copy(system.position); //
+    let primaryColor, secondaryColor, flashColor; //
+    let baseGlowSize = ((activity.probability || 0) / 100) * 20 + 5; // Use default 0 if undefined // Base size on probability
 
-    let primaryColor, secondaryColor, flashColor;
-    let baseGlowSize = (activity.probability / 100) * 20 + 5; // Base size on probability
-
-    switch (activity.classification) {
-      case "camp":
-        primaryColor = CAMP_COLOR;
-        secondaryColor = SECONDARY_GLOW_COLOR_CAMP;
-        flashColor = FLASH_COLOR_CAMP;
-        break;
-      case "smartbomb":
-        primaryColor = SMARTBOMB_COLOR;
-        secondaryColor = SECONDARY_GLOW_COLOR_SMARTBOMB;
-        flashColor = FLASH_COLOR_SMARTBOMB;
+    switch (
+      activity.classification //
+    ) {
+      case "camp": //
+        primaryColor = CAMP_COLOR; //
+        secondaryColor = SECONDARY_GLOW_COLOR_CAMP; //
+        flashColor = FLASH_COLOR_CAMP; //
+        break; //
+      case "smartbomb": //
+        primaryColor = SMARTBOMB_COLOR; //
+        secondaryColor = SECONDARY_GLOW_COLOR_SMARTBOMB; //
+        flashColor = FLASH_COLOR_SMARTBOMB; //
         baseGlowSize *= 1.1; // Slightly larger for smartbombs
-        break;
-      case "roaming_camp":
-        primaryColor = ROAMING_CAMP_COLOR;
-        secondaryColor = SECONDARY_GLOW_COLOR_ROAMING_CAMP;
-        flashColor = FLASH_COLOR_ROAMING_CAMP;
+        break; //
+      case "roaming_camp": //
+        primaryColor = ROAMING_CAMP_COLOR; //
+        secondaryColor = SECONDARY_GLOW_COLOR_ROAMING_CAMP; //
+        flashColor = FLASH_COLOR_ROAMING_CAMP; //
         baseGlowSize *= 1.2; // Larger for roaming camps
-        break;
-      case "battle":
-        primaryColor = BATTLE_COLOR;
-        secondaryColor = SECONDARY_GLOW_COLOR_BATTLE;
-        flashColor = FLASH_COLOR_BATTLE;
-        baseGlowSize =
-          30 +
-          (Math.min(activity.metrics?.partyMetrics?.characters || 0, 100) /
-            100) *
+        break; //
+      case "battle": //
+        primaryColor = BATTLE_COLOR; //
+        secondaryColor = SECONDARY_GLOW_COLOR_BATTLE; //
+        flashColor = FLASH_COLOR_BATTLE; //
+        baseGlowSize = //
+          30 + //
+          (Math.min(activity.metrics?.partyMetrics?.characters || 0, 100) / //
+            100) * //
             30; // Size based on participants for battles
-        break;
+        break; //
       default: // Fallback, should not happen if called correctly
-        primaryColor = CAMP_COLOR;
-        secondaryColor = SECONDARY_GLOW_COLOR_CAMP;
-        flashColor = FLASH_COLOR_CAMP;
+        primaryColor = CAMP_COLOR; //
+        secondaryColor = SECONDARY_GLOW_COLOR_CAMP; //
+        flashColor = FLASH_COLOR_CAMP; //
     }
 
     // Primary Glow
     const glowMaterial = new THREE.SpriteMaterial({
-      map: glowTexture,
-      color: new THREE.Color(primaryColor),
-      transparent: true,
-      opacity: Math.min(0.8, activity.probability / 100),
-      depthWrite: false,
-      sizeAttenuation: true,
+      //
+      map: glowTexture, //
+      color: new THREE.Color(primaryColor), //
+      transparent: true, //
+      opacity: Math.min(0.8, (activity.probability || 0) / 100), //
+      depthWrite: false, //
+      sizeAttenuation: true, //
     });
-    const glowSprite = new THREE.Sprite(glowMaterial);
-    glowSprite.scale.set(baseGlowSize, baseGlowSize, 1);
-    group.add(glowSprite);
+    const glowSprite = new THREE.Sprite(glowMaterial); //
+    glowSprite.scale.set(baseGlowSize, baseGlowSize, 1); //
+    group.add(glowSprite); //
 
     // Secondary Glow (Positioned at the primary system for camps/SB, last system for roaming/battle)
+    const lastSystemIdInt = parseInt(activity.lastSystem?.id); // <<< DEBUG Check ID parsing
+    const secondaryGlowTargetSystem =
+      (activity.classification === "roaming_camp" || //
+        activity.classification === "battle") && //
+      activity.lastSystem &&
+      !isNaN(lastSystemIdInt) // <<< DEBUG Check ID is valid
+        ? solarSystems.get(lastSystemIdInt) //
+        : system; // Fallback to primary system //
     const secondaryGlowPosition =
-      (activity.classification === "roaming_camp" ||
-        activity.classification === "battle") &&
-      activity.lastSystem
-        ? solarSystems.get(parseInt(activity.lastSystem.id))?.position ||
-          system.position // Fallback to primary system
-        : system.position;
+      secondaryGlowTargetSystem?.position || system.position; // Use primary if lookup fails //
 
-    const secondaryGlowSize = baseGlowSize * 10.0;
+    const secondaryGlowSize = baseGlowSize * 10.0; //
     const secondaryGlowMaterial = new THREE.SpriteMaterial({
-      map: glowTexture,
-      color: new THREE.Color(secondaryColor),
-      transparent: true,
-      opacity: 0.1,
-      depthWrite: false,
-      sizeAttenuation: true,
+      //
+      map: glowTexture, //
+      color: new THREE.Color(secondaryColor), //
+      transparent: true, //
+      opacity: 0.1, //
+      depthWrite: false, //
+      sizeAttenuation: true, //
     });
-    const secondaryGlowSprite = new THREE.Sprite(secondaryGlowMaterial);
-    secondaryGlowSprite.scale.set(secondaryGlowSize, secondaryGlowSize, 1);
-    secondaryGlowSprite.position.copy(secondaryGlowPosition); // Set position
-    secondaryGlowSprite.renderOrder = -1;
+    const secondaryGlowSprite = new THREE.Sprite(secondaryGlowMaterial); //
+    secondaryGlowSprite.scale.set(secondaryGlowSize, secondaryGlowSize, 1); //
+    secondaryGlowSprite.renderOrder = -1; //
     group.add(secondaryGlowSprite); // Add to the main group
 
     // Animation Mixer
-    const mixer = new THREE.AnimationMixer(glowSprite);
-    const track = new THREE.KeyframeTrack(
-      ".scale",
-      [0, PULSE_DURATION / 2, PULSE_DURATION],
+    const mixer = new THREE.AnimationMixer(glowSprite); //
+    const track = new THREE.KeyframeTrack( //
+      ".scale", //
+      [0, PULSE_DURATION / 2, PULSE_DURATION], //
       [
-        baseGlowSize,
-        baseGlowSize,
-        baseGlowSize,
-        baseGlowSize * 1.3,
-        baseGlowSize * 1.3,
-        baseGlowSize,
-        baseGlowSize,
-        baseGlowSize,
-        baseGlowSize,
-      ]
+        //
+        baseGlowSize, //
+        baseGlowSize, //
+        baseGlowSize, //
+        baseGlowSize * 1.3, //
+        baseGlowSize * 1.3, //
+        baseGlowSize, //
+        baseGlowSize, //
+        baseGlowSize, //
+        baseGlowSize, //
+      ] //
     );
-    const clip = new THREE.AnimationClip("pulse", PULSE_DURATION, [track]);
-    const action = mixer.clipAction(clip);
-    action.setLoop(THREE.LoopRepeat);
-    action.play();
+    const clip = new THREE.AnimationClip("pulse", PULSE_DURATION, [track]); //
+    const action = mixer.clipAction(clip); //
+    action.setLoop(THREE.LoopRepeat); //
+    action.play(); //
 
     group.userData = {
+      //
       type: activity.classification, // Store the specific classification
-      activityData: activity,
-      name: system.data.itemname,
-      probability: activity.probability,
+      activityData: activity, //
+      name: system.data.itemname, //
+      probability: activity.probability, //
       flashColor: flashColor, // Store flash color for animation loop
       baseColor: primaryColor, // Store base color
-      baseGlowSize: baseGlowSize,
+      baseGlowSize: baseGlowSize, //
     };
-
     return {
-      group: group,
-      activityData: activity,
-      mixer: mixer,
-      lastKillId: latestKillId,
-      flashEndTime: 0,
-      secondaryGlow: secondaryGlowSprite,
-      secondaryGlowFlashEndTime: 0,
+      //
+      group: group, //
+      activityData: activity, //
+      mixer: mixer, //
+      lastKillId: latestKillId, //
+      flashEndTime: 0, //
+      secondaryGlow: secondaryGlowSprite, //
+      secondaryGlowFlashEndTime: 0, //
       type: activity.classification, // Store type for update logic
-    };
-  }
+    }; //
+  } //
 
   // --- NEW: Function to create/update Roam markers ---
   function createOrUpdateRoamStyleMarker(activity, now, latestKillId) {
-    if (!activity.systems || activity.systems.length < 1) return null; // Need at least one system for last known location
+    //
+    if (!activity.systems || activity.systems.length < 1) {
+      //
+      console.warn(
+        `[UniverseMap] Skipping roam marker ${activity.id}: No system data.`
+      ); // <<< DEBUG
+      return null; //
+    }
 
     const sortedSystems = [...activity.systems].sort(
-      (a, b) => new Date(a.time) - new Date(b.time)
+      //
+      (a, b) => new Date(a.time) - new Date(b.time) //
     );
-    const points = [];
-    const systemOrder = [];
+    const points = []; //
+    const systemOrder = []; //
     for (const system of sortedSystems) {
-      const systemObj = solarSystems.get(parseInt(system.id));
+      //
+      const systemIdInt = parseInt(system.id); //
+      if (isNaN(systemIdInt)) {
+        // <<< DEBUG Check ID
+        console.warn(
+          `[UniverseMap] Skipping system in roam ${activity.id}: Invalid system ID ${system.id}`
+        ); //
+        continue; //
+      }
+      const systemObj = solarSystems.get(systemIdInt); //
       if (systemObj) {
-        points.push(systemObj.position.clone());
-        systemOrder.push(system);
+        //
+        points.push(systemObj.position.clone()); //
+        systemOrder.push(system); //
+      } else {
+        console.warn(
+          `[UniverseMap] System ${systemIdInt} not found for roam ${activity.id}`
+        ); // <<< DEBUG
       }
     }
 
-    if (points.length < 1) return null; // Need at least one valid point
+    if (points.length < 1) {
+      //
+      console.warn(
+        `[UniverseMap] Skipping roam marker ${activity.id}: No valid points found.`
+      ); // <<< DEBUG
+      return null; // // Need at least one valid point
+    }
 
-    const roamGroup = new THREE.Group();
-    let lineObject = null;
-    let secondaryGlowSprite = null;
+    const roamGroup = new THREE.Group(); //
+    let lineObject = null; //
+    let secondaryGlowSprite = null; //
 
     // Create path line if more than one point
     if (points.length >= 2) {
+      //
       try {
-        const curve = new THREE.CatmullRomCurve3(points);
+        const curve = new THREE.CatmullRomCurve3(points); //
         const geometry = new THREE.BufferGeometry().setFromPoints(
-          curve.getPoints(Math.max(64, points.length * 8))
+          //
+          curve.getPoints(Math.max(64, points.length * 8)) //
         );
         const material = new THREE.LineBasicMaterial({
-          color: new THREE.Color(ROAM_COLOR).multiplyScalar(1.5),
-          linewidth: 2,
-          transparent: true,
-          opacity: 0.7,
+          //
+          color: new THREE.Color(ROAM_COLOR).multiplyScalar(1.5), //
+          linewidth: 2, //
+          transparent: true, //
+          opacity: 0.7, //
         });
         material.userData = { baseColor: new THREE.Color(ROAM_COLOR) }; // Store base color
-        lineObject = new THREE.Line(geometry, material);
-        roamGroup.add(lineObject);
+        lineObject = new THREE.Line(geometry, material); //
+        roamGroup.add(lineObject); //
       } catch (e) {
-        console.error("Error creating roam path line:", e);
+        console.error("Error creating roam path line:", e); //
         // Continue without the line if curve creation fails
       }
     }
 
     // Secondary Glow at the last known system
-    const lastSystemPos = points[points.length - 1];
+    const lastSystemPos = points[points.length - 1]; //
     if (lastSystemPos) {
+      //
       const secondaryGlowMaterial = new THREE.SpriteMaterial({
-        map: glowTexture,
-        color: new THREE.Color(SECONDARY_GLOW_COLOR_ROAM),
-        transparent: true,
-        opacity: 0.1,
-        depthWrite: false,
-        sizeAttenuation: true,
+        //
+        map: glowTexture, //
+        color: new THREE.Color(SECONDARY_GLOW_COLOR_ROAM), //
+        transparent: true, //
+        opacity: 0.1, //
+        depthWrite: false, //
+        sizeAttenuation: true, //
       });
-      secondaryGlowSprite = new THREE.Sprite(secondaryGlowMaterial);
-      secondaryGlowSprite.scale.set(60, 60, 1);
-      secondaryGlowSprite.position.copy(lastSystemPos);
-      secondaryGlowSprite.renderOrder = -1;
-      roamGroup.add(secondaryGlowSprite);
+      secondaryGlowSprite = new THREE.Sprite(secondaryGlowMaterial); //
+      secondaryGlowSprite.scale.set(60, 60, 1); //
+      secondaryGlowSprite.position.copy(lastSystemPos); //
+      secondaryGlowSprite.renderOrder = -1; //
+      roamGroup.add(secondaryGlowSprite); //
     }
 
     // Add system glow markers for visited systems (excluding camp systems)
     systemOrder.forEach((system) => {
-      const systemIdInt = parseInt(system.id);
-      const systemObj = solarSystems.get(systemIdInt);
+      //
+      const systemIdInt = parseInt(system.id); //
+      if (isNaN(systemIdInt)) return; // <<< DEBUG Skip if invalid
+      const systemObj = solarSystems.get(systemIdInt); //
       // Check if this system also hosts a camp-like activity marker
       const hasCampMarker = Array.from(activityMarkers.values()).some(
-        (m) =>
-          m.activityData.systemId === systemIdInt &&
+        //
+        (
+          m //
+        ) =>
+          m.activityData.systemId === systemIdInt && //
           ["camp", "smartbomb", "roaming_camp", "battle"].includes(
-            m.activityData.classification
+            //
+            m.activityData.classification //
           )
       );
 
       if (systemObj && !hasCampMarker) {
+        //
         // Only add roam glow if no camp marker exists
         const glowMaterial = new THREE.SpriteMaterial({
-          map: glowTexture,
-          color: new THREE.Color(ROAM_COLOR),
-          transparent: true,
-          opacity: 0.6,
-          depthWrite: false,
+          //
+          map: glowTexture, //
+          color: new THREE.Color(ROAM_COLOR), //
+          transparent: true, //
+          opacity: 0.6, //
+          depthWrite: false, //
         });
-        const glowSprite = new THREE.Sprite(glowMaterial);
-        glowSprite.position.copy(systemObj.position);
+        const glowSprite = new THREE.Sprite(glowMaterial); //
+        glowSprite.position.copy(systemObj.position); //
         glowSprite.scale.set(8, 8, 1); // Roam system marker size
-        roamGroup.add(glowSprite);
+        roamGroup.add(glowSprite); //
       }
     });
 
     roamGroup.userData = {
-      type: "roam",
-      activityData: activity,
+      //
+      type: "roam", //
+      activityData: activity, //
       systems: systemOrder, // Store the ordered systems
       flashColor: FLASH_COLOR_ROAM, // Store flash color
       baseColor: ROAM_COLOR, // Store base color
     };
-
     return {
-      group: roamGroup,
-      activityData: activity,
+      //
+      group: roamGroup, //
+      activityData: activity, //
       mixer: null, // Roams don't use mixer currently
       lineMaterial: lineObject?.material, // Store material for animation
-      lastKillId: latestKillId,
-      flashEndTime: 0,
-      secondaryGlow: secondaryGlowSprite,
-      secondaryGlowFlashEndTime: 0,
+      lastKillId: latestKillId, //
+      flashEndTime: 0, //
+      secondaryGlow: secondaryGlowSprite, //
+      secondaryGlowFlashEndTime: 0, //
       type: "roam", // Store type for update logic
-    };
-  }
+    }; //
+  } //
 
-  // --- Route Calculation & Visualization (remain the same, uses calculateRoute) ---
+  // --- User Location Marker (remains mostly same) ---
+  function updateUserLocationMarker(newUserLocation) {
+    //
+    if (!scene || !mounted || !mapReady) {
+      // <<< Add mapReady check
+      console.log(
+        "[UniverseMap] updateUserLocationMarker skipped: Scene/Mount/Map not ready."
+      ); // <<< DEBUG
+      return;
+    }
+    console.log("[UniverseMap] Updating user location marker..."); // <<< DEBUG
+    if (userLocationMarker.group) {
+      //
+      scene.remove(userLocationMarker.group); //
+      disposeObject3D(userLocationMarker.group); //
+      userLocationMarker = { group: null, mixer: null }; //
+    }
+    if (!newUserLocation || !newUserLocation.solar_system_id) {
+      //
+      console.log("[UniverseMap] No user location data provided."); // <<< DEBUG
+      return;
+    }
+    const systemId = parseInt(newUserLocation.solar_system_id); //
+    if (isNaN(systemId)) {
+      // <<< DEBUG Check ID
+      console.warn(
+        `[UniverseMap] Invalid user location systemId: ${newUserLocation.solar_system_id}`
+      );
+      return;
+    }
+    const system = solarSystems.get(systemId); //
+    if (!system) {
+      //
+      console.warn(
+        `[UniverseMap] User location system ${systemId} not found in rendered map.`
+      ); // <<< DEBUG
+      return;
+    }
+    console.log(
+      `[UniverseMap] User located in system: <span class="math-inline">\{system\.data\.itemname\} \(</span>{systemId})`
+    ); // <<< DEBUG
+    const markerGroup = new THREE.Group(); //
+    markerGroup.position.copy(system.position); //
+    const glowMaterial = new THREE.SpriteMaterial({
+      //
+      map: glowTexture, //
+      color: new THREE.Color(USER_COLOR), //
+      transparent: true, //
+      opacity: 0.8, //
+      depthWrite: false, //
+    });
+    const glowSprite = new THREE.Sprite(glowMaterial); //
+    glowSprite.scale.set(15, 15, 1); //
+    const ringGeometry = new THREE.RingGeometry(
+      SYSTEM_SIZE * 0.4,
+      SYSTEM_SIZE * 0.5,
+      32
+    ); // Adjusted size //
+    const ringMaterial = new THREE.MeshBasicMaterial({
+      //
+      color: USER_COLOR, //
+      side: THREE.DoubleSide, //
+      transparent: true, //
+      opacity: 0.8, //
+    });
+    const ring = new THREE.Mesh(ringGeometry, ringMaterial); //
+    ring.rotation.x = Math.PI / 2; // Rotate to be flat //
+    const mixer = new THREE.AnimationMixer(glowSprite); //
+    const initialScaleVal = glowSprite.scale.x; //
+    const track = new THREE.KeyframeTrack( //
+      ".scale", //
+      [0, PULSE_DURATION / 2, PULSE_DURATION], //
+      [
+        //
+        initialScaleVal, //
+        initialScaleVal, //
+        initialScaleVal, //
+        initialScaleVal * 1.2, //
+        initialScaleVal * 1.2, //
+        initialScaleVal, //
+        initialScaleVal, //
+        initialScaleVal, //
+        initialScaleVal, //
+      ] //
+    );
+    const clip = new THREE.AnimationClip("userPulse", PULSE_DURATION, [track]); //
+    const action = mixer.clipAction(clip); //
+    action.setLoop(THREE.LoopRepeat); //
+    action.play(); //
+    markerGroup.add(glowSprite); //
+    markerGroup.add(ring); //
+    markerGroup.userData = {
+      //
+      type: "userLocation", //
+      name: newUserLocation.systemName || system.data.itemname, //
+      systemId: systemId, //
+      mixer: mixer, //
+    };
+    scene.add(markerGroup); //
+    userLocationMarker = { group: markerGroup, mixer: mixer }; //
+  } //
+
+  // --- Route Calculation & Visualization ---
   async function fetchEsiRoute(originId, destinationId) {
-    /* ... */
-  }
+    //
+    // **MODIFIED:** Use the server-side proxy
+    console.log(
+      //
+      `[fetchEsiRoute] Fetching route via SERVER PROXY from ${originId} to ${destinationId}` //
+    );
+    // Construct the relative URL for the server proxy
+    const url = `/api/route/<span class="math-inline">\{originId\}/</span>{destinationId}?flag=shortest`; //
+    console.log(`[fetchEsiRoute] Request URL (proxy): ${url}`); //
+    try {
+      // Use fetch to call the local server endpoint
+      const response = await fetch(url, {
+        //
+        method: "GET", //
+        headers: {
+          //
+          Accept: "application/json", //
+          // No need for Cache-Control here, let the server handle it
+        },
+      });
+      console.log(`[fetchEsiRoute] Proxy response status: ${response.status}`); //
+      if (!response.ok) {
+        //
+        const errorText = await response.text(); //
+        console.error(
+          //
+          `[fetchEsiRoute] Proxy route error ${response.status}: ${errorText} for URL: ${url}` //
+        );
+        // Try to parse the error from the server
+        let serverError = `Failed to fetch route via proxy (${response.status})`; //
+        try {
+          const jsonError = JSON.parse(errorText); //
+          serverError = jsonError.error || serverError; //
+        } catch (e) {
+          //
+          /* ignore json parse error */
+        }
+        throw new Error(serverError); //
+      }
+      const routeData = await response.json(); //
+      console.log(
+        //
+        `[fetchEsiRoute] Proxy route received: ${routeData.length} jumps`, //
+        JSON.stringify(routeData) //
+      );
+      return routeData; //
+    } catch (error) {
+      //
+      // Catch errors from the fetch call itself (e.g., server down)
+      console.error(`[fetchEsiRoute] Error fetching route via proxy: ${error}`); //
+      // Re-throw the error so calculateRoute can handle it
+      throw new Error( //
+        `Network error fetching route via proxy: ${error.message}` //
+      );
+    }
+  } //
+
   async function calculateRoute(destinationId, isNewRoute) {
-    /* ... */
+    console.log(
+      `[calculateRoute] Calculating route to ${destinationId}, isNewRoute: ${isNewRoute}`
+    );
+
+    if (routeLines) {
+      scene.remove(routeLines);
+      disposeObject3D(routeLines);
+      routeLines = null;
+      console.log("[calculateRoute] Cleared previous route lines.");
+    }
+    dangerWarnings = [];
+    if (dangerTooltip?.parentElement) dangerTooltip.remove();
+
+    let originId;
+    if (isNewRoute || currentRoute.length === 0) {
+      if (!userLocationMarker.group?.userData?.systemId) {
+        console.error(
+          "[calculateRoute] User location unknown, cannot calculate new route."
+        );
+        error = "Your location is unknown. Cannot calculate route.";
+        if (errorTimeout) clearTimeout(errorTimeout);
+        errorTimeout = setTimeout(() => {
+          error = null;
+        }, 5000);
+        return;
+      }
+      originId = userLocationMarker.group.userData.systemId;
+      currentRoute = []; // Clear waypoints for a new route
+      console.log(
+        `[calculateRoute] Starting new route from user location: ${originId}`
+      );
+    } else {
+      originId = currentRoute[currentRoute.length - 1];
+      console.log(
+        `[calculateRoute] Adding waypoint from last system: ${originId}`
+      );
+    }
+
+    if (originId === destinationId) {
+      console.log("[calculateRoute] Origin and destination are the same.");
+      return;
+    }
+
+    isCalculatingRoute = true; // Show "Setting route..."
+    isLoading = false; // Hide general loading
+    error = null;
+    if (errorTimeout) clearTimeout(errorTimeout);
+    await tick();
+
+    try {
+      // This now calls the modified fetchEsiRoute which uses the proxy
+      const routeSegment = await fetchEsiRoute(originId, destinationId);
+
+      if (routeSegment && routeSegment.length > 0) {
+        console.log(
+          `[calculateRoute] Route segment found: ${routeSegment.length} systems.`
+        );
+
+        if (isNewRoute) {
+          currentRoute = routeSegment;
+        } else {
+          if (
+            currentRoute.length > 0 &&
+            routeSegment[0] === currentRoute[currentRoute.length - 1]
+          ) {
+            currentRoute = [...currentRoute, ...routeSegment.slice(1)];
+          } else if (
+            currentRoute.length === 0 &&
+            routeSegment[0] === originId
+          ) {
+            // If starting a waypoint route from user location
+            currentRoute = routeSegment;
+          } else {
+            console.warn(
+              "[calculateRoute] Route segment start doesn't match current end. Appending anyway."
+            );
+            currentRoute = [...currentRoute, ...routeSegment];
+          }
+        }
+
+        console.log(
+          `[calculateRoute] Updated full route: ${currentRoute.length} systems`
+        );
+        createRouteVisualization(currentRoute);
+        checkRouteForDangers(currentRoute);
+        // Also set ESI UI waypoint
+        await setDestination(destinationId, isNewRoute); // Use isNewRoute to determine clear_other_waypoints
+      } else {
+        console.warn("[calculateRoute] No route segment returned from proxy.");
+        error = "Could not calculate route."; // Simplified error message
+        if (errorTimeout) clearTimeout(errorTimeout);
+        errorTimeout = setTimeout(() => {
+          error = null;
+        }, 5000);
+      }
+    } catch (err) {
+      console.error("[calculateRoute] Error:", err);
+      error = `Route calculation failed: ${err.message}`;
+      if (errorTimeout) clearTimeout(errorTimeout);
+      errorTimeout = setTimeout(() => {
+        error = null;
+      }, 5000);
+    } finally {
+      isCalculatingRoute = false;
+      await tick();
+    }
+  }
+  function findSystemByPosition(x, y, z, tolerance = 0.0001) {
+    for (const system of solarSystems.values()) {
+      const dx = Math.abs(system.position.x - x);
+      const dy = Math.abs(system.position.y - y);
+      const dz = Math.abs(system.position.z - z);
+      if (dx < tolerance && dy < tolerance && dz < tolerance) return system;
+    }
+    return null;
   }
   function createRouteVisualization(route) {
-    /* ... */
+    // Accepts array of system IDs
+    if (routeLines) {
+      scene.remove(routeLines);
+      disposeObject3D(routeLines);
+      routeLines = null;
+    }
+
+    const group = new THREE.Group();
+    const points = [];
+    const dangerSegmentsIndices = [];
+    for (let i = 0; i < route.length; i++) {
+      const system = solarSystems.get(route[i]);
+      if (system) {
+        points.push(system.position.clone());
+        let isDangerous = false;
+        if (campMarkers.has(route[i])) isDangerous = true;
+        else {
+          for (const pathObj of roamPaths.values()) {
+            if (
+              pathObj.roamData.systems?.some((s) => parseInt(s.id) === route[i])
+            ) {
+              isDangerous = true;
+              break;
+            }
+          }
+        }
+        if (isDangerous && i < route.length - 1) dangerSegmentsIndices.push(i);
+      } else {
+        console.warn(
+          `System ID ${route[i]} not found in rendered map for route.`
+        );
+      }
+    }
+    if (points.length < 2) {
+      console.warn("Not enough points to draw route visualization.");
+      return;
+    }
+    const routeGeometry = new THREE.BufferGeometry().setFromPoints(points);
+    const routeMaterial = new THREE.LineBasicMaterial({
+      color: ROUTE_COLOR,
+      linewidth: 2,
+      transparent: true,
+      opacity: 0.7,
+    });
+    const routeLine = new THREE.Line(routeGeometry, routeMaterial);
+    group.add(routeLine);
+    dangerSegmentsIndices.forEach((i) => {
+      if (i + 1 < points.length) {
+        const dangerPoints = [points[i], points[i + 1]];
+        const dangerGeometry = new THREE.BufferGeometry().setFromPoints(
+          dangerPoints
+        );
+        const dangerMaterial = new THREE.LineBasicMaterial({
+          color: DANGER_ROUTE_COLOR,
+          linewidth: 3,
+          transparent: true,
+          opacity: 0.9,
+        });
+        const dangerLine = new THREE.Line(dangerGeometry, dangerMaterial);
+        group.add(dangerLine);
+      }
+    });
+    if (points.length > 0) {
+      const startMarker = createRouteMarker(points[0], 0x00ff00);
+      const endMarker = createRouteMarker(points[points.length - 1], 0xff0000);
+      group.add(startMarker);
+      group.add(endMarker);
+    }
+    scene.add(group);
+    routeLines = group; // Assign the new group
   }
   function createRouteMarker(position, color) {
-    /* ... */
+    const markerGeometry = new THREE.SphereGeometry(SYSTEM_SIZE * 0.5);
+    const markerMaterial = new THREE.MeshBasicMaterial({ color });
+    const marker = new THREE.Mesh(markerGeometry, markerMaterial);
+    marker.position.copy(position);
+    return marker;
   }
-  // --- CHANGE: Update Route Danger Check ---
+  // --- CHANGE: Update Route Danger Check to use unified activities ---
   function checkRouteForDangers(route) {
-    dangerWarnings = [];
-    let tooltipHtml = "";
+    //
+    dangerWarnings = []; //
+    let tooltipHtml = ""; //
     for (let i = 0; i < route.length; i++) {
-      const systemId = route[i];
-      const system = solarSystems.get(systemId);
-      if (!system) continue;
+      //
+      const systemId = route[i]; //
+      const system = solarSystems.get(systemId); //
+      if (!system) continue; //
 
-      let systemMarkedDangerous = false;
+      let systemMarkedDangerous = false; //
       // Check unified activity markers
       for (const markerObj of activityMarkers.values()) {
-        const activity = markerObj.activityData;
+        //
+        const activity = markerObj.activityData; //
         // Check if activity is in the current route system
         if (
-          activity.systemId === systemId ||
-          activity.lastSystem?.id === systemId ||
-          activity.systems?.some((s) => s.id === systemId)
+          //
+          activity.systemId === systemId || //
+          activity.lastSystem?.id === systemId || //
+          activity.systems?.some((s) => s.id === systemId) //
         ) {
           // Check if it's a dangerous classification
           if (
+            //
             ["camp", "smartbomb", "roaming_camp", "battle"].includes(
-              activity.classification
+              //
+              activity.classification //
             )
           ) {
-            let warningText = "";
+            let warningText = ""; //
             if (
-              activity.classification === "camp" ||
-              activity.classification === "smartbomb" ||
-              activity.classification === "roaming_camp"
+              //
+              activity.classification === "camp" || //
+              activity.classification === "smartbomb" || //
+              activity.classification === "roaming_camp" //
             ) {
-              warningText = `${activity.classification.replace("_", " ")} (${Math.round(activity.probability)}% confidence)`;
+              warningText = `<span class="math-inline">\{activity\.classification\.replace\("\_", " "\)\} \(</span>{Math.round(activity.probability || 0)}% confidence)`; // Use default 0 //
             } else if (activity.classification === "battle") {
-              warningText = `Battle (${activity.metrics?.partyMetrics?.characters || 0} pilots)`;
+              //
+              warningText = `Battle (${activity.metrics?.partyMetrics?.characters || 0} pilots)`; //
             }
 
             const warning = {
-              type: activity.classification,
-              systemName: system.data.itemname || `System ${systemId}`,
-              details: warningText,
-              systemId: systemId,
+              //
+              type: activity.classification, //
+              systemName: system.data.itemname || `System ${systemId}`, //
+              details: warningText, //
+              systemId: systemId, //
             };
-            dangerWarnings.push(warning);
-            systemMarkedDangerous = true;
-            tooltipHtml += `<li class="${warning.type}-warning" title="ID: ${warning.systemId}"><strong>${warning.systemName}</strong>: ${warning.details}</li>`;
+            dangerWarnings.push(warning); //
+            systemMarkedDangerous = true; //
+            tooltipHtml += `<li class="${warning.type}-warning" title="ID: <span class="math-inline">\{warning\.systemId\}"\><strong\></span>{warning.systemName}</strong>: ${warning.details}</li>`; //
             break; // Mark system as dangerous and move to next system in route
           }
           // Check if a 'roam' is currently in this system
           else if (
-            activity.classification === "roam" &&
-            activity.lastSystem?.id === systemId
+            //
+            activity.classification === "roam" && //
+            activity.lastSystem?.id === systemId //
           ) {
             const warning = {
-              type: "roam",
-              systemName: system.data.itemname || `System ${systemId}`,
-              details: `Roaming gang (${activity.members?.size || 0} pilots)`,
-              systemId: systemId,
+              //
+              type: "roam", //
+              systemName: system.data.itemname || `System ${systemId}`, //
+              details: `Roaming gang (${activity.members?.size || 0} pilots)`, //
+              systemId: systemId, //
             };
-            dangerWarnings.push(warning);
-            systemMarkedDangerous = true;
-            tooltipHtml += `<li class="roam-warning" title="ID: ${warning.systemId}"><strong>${warning.systemName}</strong>: ${warning.details}</li>`;
+            dangerWarnings.push(warning); //
+            systemMarkedDangerous = true; //
+            tooltipHtml += `<li class="roam-warning" title="ID: <span class="math-inline">\{warning\.systemId\}"\><strong\></span>{warning.systemName}</strong>: ${warning.details}</li>`; //
             break; // Mark system as dangerous and move to next system in route
           }
         }
       }
     }
-    if (dangerWarnings.length > 0) showDangerWarnings(tooltipHtml);
-    else if (dangerTooltip?.parentElement) dangerTooltip.remove();
-  }
+    if (dangerWarnings.length > 0)
+      showDangerWarnings(tooltipHtml); //
+    else if (dangerTooltip?.parentElement) dangerTooltip.remove(); //
+  } //
   // --- END CHANGE ---
   function showDangerWarnings(warningsHtmlList) {
-    /* ... */
+    if (!dangerTooltip) return;
+    dangerTooltip.innerHTML = `<div class="danger-header">⚠️ Route Dangers</div><ul class="danger-list">${warningsHtmlList}</ul>`;
+    if (!dangerTooltip.parentElement) container.appendChild(dangerTooltip);
+    dangerTooltip.style.display = "block";
+    setTimeout(() => {
+      if (dangerTooltip) dangerTooltip.style.display = "none";
+    }, 10000);
   }
 
   // --- UI Interaction & View Helpers (remain mostly the same) ---
   function handleResize() {
-    /* ... */
+    if (camera && renderer && labelRenderer) {
+      camera.aspect = container.clientWidth / container.clientHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(container.clientWidth, container.clientHeight);
+      labelRenderer.setSize(container.clientWidth, container.clientHeight);
+    }
   }
   function calculateGalaxyBounds() {
-    /* ... */
+    if (solarSystems.size === 0) return;
+    const positions = [];
+    solarSystems.forEach((system) => {
+      positions.push(system.position);
+    });
+    const boundingBox = new THREE.Box3().setFromPoints(positions);
+    boundingBox.getCenter(galaxyCenter);
+    galaxySize = boundingBox.getSize(new THREE.Vector3()).length();
+    console.log("Galaxy bounds:", { center: galaxyCenter, size: galaxySize });
   }
   function setInitialCameraPosition() {
-    /* ... */
-  }
+    //
+    console.log("[UniverseMap] Setting initial camera position..."); // <<< DEBUG
+    if (galaxySize === 0 || !galaxyCenter) {
+      //
+      console.warn(
+        "[UniverseMap] Cannot set initial camera: Galaxy bounds not calculated."
+      ); // <<< DEBUG
+      camera.position.set(0, 50, 0); // Sensible default fallback
+      controls.target.set(0, 0, 0);
+      controls.update();
+      return;
+    }
+    const distance = galaxySize * 1.5; //
+    camera.position.set(
+      //
+      galaxyCenter.x, //
+      distance, // Position camera directly above center along Y
+      galaxyCenter.z //
+    );
+    camera.lookAt(galaxyCenter); //
+    controls.target.copy(galaxyCenter); //
+    controls.update(); //
+    console.log(
+      "[UniverseMap] Camera positioned at:",
+      camera.position,
+      "Target:",
+      controls.target
+    ); // <<< DEBUG
+  } //
   function getSecurityColor(security) {
-    /* ... */
+    if (security === null || security === undefined) return 0xffffff; // White for unknown
+
+    const sec = Math.round(security * 10) / 10; // Round to one decimal place
+
+    const red = new THREE.Color(0xff0000);
+    const darkOrange = new THREE.Color(0xff8c00);
+    const brightOrange = new THREE.Color(0xffa500); // Brighter orange for 0.4
+    const yellow = new THREE.Color(0xffff00);
+    const limeGreen = new THREE.Color(0x32cd32); // Lime Green (brighter)
+    const cyanBlue = new THREE.Color(0x00ffff); // Cyan/Aqua (very bright blue)
+
+    if (sec < 0.0) {
+      return red.getHex();
+    } else if (sec < 0.4) {
+      // 0.0 to 0.3
+      const t = sec / 0.4;
+      return new THREE.Color().lerpColors(darkOrange, brightOrange, t).getHex();
+    } else if (sec < 0.5) {
+      // 0.4
+      // Lerp between brightOrange and yellow, making 0.4 mostly orange
+      const t = (sec - 0.4) / 0.1;
+      return new THREE.Color()
+        .lerpColors(brightOrange, yellow, t * 0.5)
+        .getHex(); // Bias heavily to orange
+    } else if (sec === 0.5) {
+      return yellow.getHex(); // Exactly 0.5 is yellow
+    } else if (sec <= 0.8) {
+      // Lerp between Yellow and Bright Green (Lime)
+      const t = (sec - 0.5) / (0.8 - 0.5);
+      return new THREE.Color().lerpColors(yellow, limeGreen, t).getHex();
+    } else {
+      // sec > 0.8
+      // Lerp between Bright Green (Lime) and Cyan Blue for > 0.8 to 1.0
+      const t = Math.min(1.0, (sec - 0.8) / 0.2);
+      return new THREE.Color().lerpColors(limeGreen, cyanBlue, t).getHex();
+    }
   }
   function getSecurityDescription(security) {
-    /* ... */
+    if (security === null || security === undefined) return "Unknown";
+    if (security >= 0.5) return "High Security";
+    if (security > 0.0) return "Low Security";
+    return "Null Security";
   }
   function toggleColorMode() {
-    /* ... */
+    colorByRegion = !colorByRegion;
+    // Update system point colors
+    const pointsObject = scene?.children.find(
+      (child) => child.userData?.isSystemPoints
+    );
+    if (pointsObject && pointsObject.geometry.attributes.color) {
+      const colors = pointsObject.geometry.attributes.color;
+      solarSystems.forEach((system, systemId) => {
+        const color = colorByRegion
+          ? new THREE.Color(system.regionColor)
+          : new THREE.Color(system.securityColor);
+        colors.setXYZ(system.index, color.r, color.g, color.b);
+      });
+      colors.needsUpdate = true;
+    }
+    // Update connection colors
+    stargateConnections.forEach((line) => {
+      scene.remove(line);
+      disposeObject3D(line);
+    });
+    stargateConnections = [];
+    const solarSystemsData = mapData.filter((item) => item.typeid === 5);
+    const stargatesData = mapData.filter((item) => item.groupid === 10);
+    const processedConnections = new Set();
+    stargatesData.forEach((sourceGate) => {
+      if (!sourceGate.solarsystemid || !sourceGate.itemname) return;
+      const match = sourceGate.itemname.match(/Stargate \(([^)]+)\)/);
+      if (!match) return;
+      const destinationName = match[1];
+      const destinationSystem = solarSystemsData.find(
+        (sys) => sys.itemname === destinationName
+      );
+      if (!destinationSystem) return;
+      const sourceSystem = solarSystemsData.find(
+        (sys) => sys.itemid === sourceGate.solarsystemid
+      );
+      if (!sourceSystem) return;
+      const connectionId = [sourceSystem.itemid, destinationSystem.itemid]
+        .sort()
+        .join("-");
+      if (processedConnections.has(connectionId)) return;
+      processedConnections.add(connectionId);
+      if (
+        solarSystems.has(sourceSystem.itemid) &&
+        solarSystems.has(destinationSystem.itemid)
+      ) {
+        const connection = createConnectionLine(
+          sourceSystem,
+          destinationSystem
+        );
+        if (connection) {
+          scene.add(connection);
+          stargateConnections.push(connection);
+        }
+      }
+    });
+
+    // Region labels are always visible, no toggling needed
+    // Region backgrounds removed, no toggling needed
+
+    // Re-evaluate route colors if a route is active
+    if (routeLines && currentRoute.length > 0) {
+      createRouteVisualization(currentRoute); // Redraw with potentially new connection colors
+      checkRouteForDangers(currentRoute);
+    }
   }
+
   function onMouseMove(event) {
-    /* ... */
+    if (!renderer || !mounted || !scene) return;
+    const rect = renderer.domElement.getBoundingClientRect();
+    mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+    mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+    raycaster.setFromCamera(mouse, camera);
+    const pointObjects = scene.children.filter(
+      (c) => c.userData?.isSystemPoints
+    );
+    if (pointObjects.length === 0) {
+      hoverRing.visible = false;
+      return;
+    }
+    const intersects = raycaster.intersectObjects(pointObjects);
+    let newlyHoveredSystem = null;
+    if (intersects.length > 0) {
+      const index = intersects[0].index;
+      const systemsArray = Array.from(solarSystems.values());
+      if (systemsArray[index]) {
+        newlyHoveredSystem = systemsArray[index];
+        hoverRing.position.copy(newlyHoveredSystem.position);
+        hoverRing.visible = true;
+      } else {
+        hoverRing.visible = false;
+      }
+    } else {
+      hoverRing.visible = false;
+    }
+
+    hoveredSystemData = newlyHoveredSystem?.data ?? null;
+
+    // Update system labels based on hover and selection
+    solarSystems.forEach((system) => {
+      const isSelected =
+        selectedSystem && system.data.itemid === selectedSystem.itemid;
+      const isHovered = newlyHoveredSystem === system;
+      system.label.visible = isSelected || isHovered;
+    });
+
+    // Region labels are always visible
+
+    container.style.cursor = hoveredSystemData ? "pointer" : "auto";
   }
   function onClick(event) {
-    /* ... */
+    if (!renderer || !mounted) return;
+    const currentTime = clock.getElapsedTime() * 1000;
+    if (currentTime - lastClickTime < DOUBLE_CLICK_TIME) return;
+    lastClickTime = currentTime;
+    if (contextMenu.show) contextMenu.show = false;
+    const rect = renderer.domElement.getBoundingClientRect();
+    mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+    mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+    raycaster.setFromCamera(mouse, camera);
+    const pointObjects = scene.children.filter(
+      (c) => c.userData?.isSystemPoints
+    );
+    let clickedSystem = null;
+    if (pointObjects.length > 0) {
+      const intersects = raycaster.intersectObjects(pointObjects);
+      if (intersects.length > 0) {
+        const index = intersects[0].index;
+        const systemsArray = Array.from(solarSystems.values());
+        if (systemsArray[index]) clickedSystem = systemsArray[index];
+      }
+    }
+    if (selectedSystem?.itemid !== clickedSystem?.data?.itemid) {
+      if (selectedSystem) {
+        const prevSystem = solarSystems.get(selectedSystem.itemid);
+        if (prevSystem && prevSystem.data.itemid !== hoveredSystemData?.itemid)
+          prevSystem.label.visible = false;
+      }
+      selectedSystem = clickedSystem?.data ?? null;
+      if (selectedSystem) {
+        const newSys = solarSystems.get(selectedSystem.itemid);
+        if (newSys) newSys.label.visible = true;
+      }
+      console.log(
+        "Selected system:",
+        selectedSystem ? selectedSystem.itemname : "None"
+      );
+    } else if (!clickedSystem) {
+      if (selectedSystem) {
+        const prevSystem = solarSystems.get(selectedSystem.itemid);
+        if (prevSystem && prevSystem.data.itemid !== hoveredSystemData?.itemid)
+          prevSystem.label.visible = false;
+      }
+      selectedSystem = null;
+      console.log("Selection cleared");
+    }
   }
   function onDoubleClick(event) {
-    /* ... */
+    if (!renderer || !mounted) return;
+    const rect = renderer.domElement.getBoundingClientRect();
+    mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+    mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+    raycaster.setFromCamera(mouse, camera);
+    const pointObjects = scene.children.filter(
+      (c) => c.userData?.isSystemPoints
+    );
+    if (pointObjects.length === 0) return;
+    const intersects = raycaster.intersectObjects(pointObjects);
+    if (intersects.length > 0) {
+      const index = intersects[0].index;
+      const systemsArray = Array.from(solarSystems.values());
+      const clickedSystem = systemsArray[index];
+      if (clickedSystem) {
+        if (selectedSystem?.itemid !== clickedSystem.data.itemid) {
+          if (selectedSystem) {
+            const prev = solarSystems.get(selectedSystem.itemid);
+            if (prev) prev.label.visible = false;
+          }
+          selectedSystem = clickedSystem.data;
+          clickedSystem.label.visible = true;
+        }
+        zoomToSystem(clickedSystem);
+      }
+    }
   }
   function zoomToSystem(system) {
-    /* ... */
+    const startPosition = camera.position.clone();
+    const startTarget = controls.target.clone();
+    const targetPosition = system.position.clone();
+    const endTarget = targetPosition.clone();
+    const distance = Math.max(SYSTEM_SIZE * 10, 1);
+    const offset = new THREE.Vector3().subVectors(startPosition, startTarget);
+    offset.setLength(distance);
+    const endPosition = new THREE.Vector3().addVectors(endTarget, offset);
+    endPosition.x = endTarget.x;
+    endPosition.z = endTarget.z;
+    endPosition.y = endTarget.y + distance; // Position above
+
+    const duration = 800;
+    const startTime = performance.now();
+    function animateCam() {
+      const now = performance.now();
+      const elapsed = now - startTime;
+      let progress = Math.min(elapsed / duration, 1);
+      progress = 1 - Math.pow(1 - progress, 3);
+      camera.position.lerpVectors(startPosition, endPosition, progress);
+      controls.target.lerpVectors(startTarget, endTarget, progress);
+      controls.update();
+      if (progress < 1) {
+        frameId = requestAnimationFrame(animateCam);
+      } else {
+        camera.position.copy(endPosition);
+        controls.target.copy(endTarget);
+        controls.update();
+      }
+    }
+    frameId = requestAnimationFrame(animateCam);
   }
   function handleSearch(event) {
-    /* ... */
+    if (event.key !== "Enter") return;
+    if (!searchTerm.trim()) return;
+    const solarSystemsData = mapData.filter((item) => item.typeid === 5);
+    const matchingSystems = solarSystemsData.filter((system) =>
+      system.itemname.toLowerCase().includes(searchTerm.toLowerCase())
+    );
+    if (matchingSystems.length > 0) {
+      const targetSystem = matchingSystems[0];
+      const renderedSystem = Array.from(solarSystems.values()).find(
+        (sys) => sys.data.itemid === targetSystem.itemid
+      );
+      if (renderedSystem) {
+        zoomToSystem(renderedSystem);
+        selectedSystem = renderedSystem.data;
+        if (renderedSystem.label) renderedSystem.label.visible = true;
+      } else {
+        alert(
+          `System "${targetSystem.itemname}" found but not visible on the current map.`
+        );
+      }
+    } else {
+      alert(`No system found with name containing "${searchTerm}"`);
+    }
   }
   function clearSelection() {
-    /* ... */
+    if (selectedSystem) {
+      const prev = solarSystems.get(selectedSystem.itemid);
+      if (prev?.label && prev.data.itemid !== hoveredSystemData?.itemid)
+        prev.label.visible = false;
+    }
+    selectedSystem = null;
   }
 
   // --- Animation Loop ---
   function animate(time) {
-    if (!mounted) return;
-    frameId = requestAnimationFrame(animate);
+    //
+    if (!mounted) return; //
+    frameId = requestAnimationFrame(animate); //
 
     const now = clock.getElapsedTime(); // Use THREE.Clock for consistent time
-    const deltaTime = now - lastAnimationTime;
-    lastAnimationTime = now;
+    const deltaTime = now - lastAnimationTime; //
+    lastAnimationTime = now; //
 
     // --- CHANGE: Update unified activity markers ---
     activityMarkers.forEach((markerObj) => {
+      //
       // Update mixer if it exists
-      if (markerObj.mixer) markerObj.mixer.update(deltaTime);
+      if (markerObj.mixer) markerObj.mixer.update(deltaTime); //
 
       // Handle flash animation
       const glowSprite = markerObj.group?.children.find(
-        (c) =>
-          c.isSprite &&
-          c.material.map === glowTexture &&
-          c !== markerObj.secondaryGlow
+        //
+        (
+          c //
+        ) =>
+          c.isSprite && //
+          c.material.map === glowTexture && //
+          c !== markerObj.secondaryGlow //
       );
-      const secondaryGlow = markerObj.secondaryGlow;
+      const secondaryGlow = markerObj.secondaryGlow; //
       const lineMat = markerObj.lineMaterial; // For roams
-      const activity = markerObj.activityData;
-      const classification = activity.classification;
+      const activity = markerObj.activityData; //
+      const classification = activity?.classification; // Safely access classification //
 
-      // Determine colors based on classification stored in userData
+      // Determine colors based on classification stored in markerObj
       let flashColor = FLASH_COLOR_CAMP; // Default
       let baseColor = CAMP_COLOR; // Default
-      let secondaryBaseOpacity = 0.1;
-      let secondaryFlashOpacityBoost = 0.3;
+      let secondaryBaseOpacity = 0.1; //
+      let secondaryFlashOpacityBoost = 0.3; //
 
       switch (
+        //
         markerObj.type // Use stored type for consistency
       ) {
-        case "camp":
-          flashColor = FLASH_COLOR_CAMP;
-          baseColor = CAMP_COLOR;
-          break;
-        case "smartbomb":
-          flashColor = FLASH_COLOR_SMARTBOMB;
-          baseColor = SMARTBOMB_COLOR;
-          secondaryBaseOpacity = 0.15;
-          secondaryFlashOpacityBoost = 0.35;
-          break;
-        case "roaming_camp":
-          flashColor = FLASH_COLOR_ROAMING_CAMP;
-          baseColor = ROAMING_CAMP_COLOR;
-          secondaryBaseOpacity = 0.15;
-          secondaryFlashOpacityBoost = 0.35;
-          break;
-        case "battle":
-          flashColor = FLASH_COLOR_BATTLE;
-          baseColor = BATTLE_COLOR;
-          secondaryBaseOpacity = 0.2;
-          secondaryFlashOpacityBoost = 0.4;
-          break;
-        case "roam":
-          flashColor = FLASH_COLOR_ROAM;
-          baseColor = ROAM_COLOR;
-          secondaryBaseOpacity = 0.1;
-          secondaryFlashOpacityBoost = 0.3;
-          break;
+        case "camp": //
+          flashColor = FLASH_COLOR_CAMP; //
+          baseColor = CAMP_COLOR; //
+          break; //
+        case "smartbomb": //
+          flashColor = FLASH_COLOR_SMARTBOMB; //
+          baseColor = SMARTBOMB_COLOR; //
+          secondaryBaseOpacity = 0.15; //
+          secondaryFlashOpacityBoost = 0.35; //
+          break; //
+        case "roaming_camp": //
+          flashColor = FLASH_COLOR_ROAMING_CAMP; //
+          baseColor = ROAMING_CAMP_COLOR; //
+          secondaryBaseOpacity = 0.15; //
+          secondaryFlashOpacityBoost = 0.35; //
+          break; //
+        case "battle": //
+          flashColor = FLASH_COLOR_BATTLE; //
+          baseColor = BATTLE_COLOR; //
+          secondaryBaseOpacity = 0.2; //
+          secondaryFlashOpacityBoost = 0.4; //
+          break; //
+        case "roam": //
+          flashColor = FLASH_COLOR_ROAM; //
+          baseColor = ROAM_COLOR; //
+          secondaryBaseOpacity = 0.1; //
+          secondaryFlashOpacityBoost = 0.3; //
+          break; //
       }
 
       if (markerObj.flashEndTime > 0 && markerObj.flashEndTime > now) {
+        //
         const flashProgress = Math.max(
-          0,
-          1 - (markerObj.flashEndTime - now) / FLASH_DURATION
+          //
+          0, //
+          1 - (markerObj.flashEndTime - now) / FLASH_DURATION //
         );
-        const flashSine = Math.sin(flashProgress * Math.PI);
+        const flashSine = Math.sin(flashProgress * Math.PI); //
 
         // Flash primary visual (glow or line)
         if (glowSprite) {
-          const baseScale = markerObj.group.userData.baseGlowSize || 10; // Use stored base size
-          const flashScaleMultiplier = 1 + flashSine * 19.0; // Flash size multiplier
-          glowSprite.scale.setScalar(baseScale * flashScaleMultiplier);
+          //
+          const baseScale = markerObj.group.userData.baseGlowSize || 10; // Use stored base size //
+          const flashScaleMultiplier = 1 + flashSine * 19.0; // Flash size multiplier //
+          glowSprite.scale.setScalar(baseScale * flashScaleMultiplier); //
           glowSprite.material.color.lerpColors(
-            new THREE.Color(flashColor),
-            new THREE.Color(baseColor),
-            flashProgress
+            //
+            new THREE.Color(flashColor), //
+            new THREE.Color(baseColor), //
+            flashProgress //
           );
-          glowSprite.material.opacity = 0.9 + flashSine * 0.1;
+          glowSprite.material.opacity = 0.9 + flashSine * 0.1; //
         } else if (lineMat) {
-          lineMat.opacity = 1.0;
+          //
+          lineMat.opacity = 1.0; //
           lineMat.color.lerpColors(
-            new THREE.Color(flashColor),
-            new THREE.Color(baseColor),
-            flashProgress
+            //
+            new THREE.Color(flashColor), //
+            new THREE.Color(baseColor), //
+            flashProgress //
           );
         }
 
         // Flash secondary glow
         if (secondaryGlow) {
-          secondaryGlow.material.opacity =
-            secondaryBaseOpacity + flashSine * secondaryFlashOpacityBoost;
+          //
+          secondaryGlow.material.opacity = //
+            secondaryBaseOpacity + flashSine * secondaryFlashOpacityBoost; //
         }
       } else {
+        //
         // Reset flash time if it just ended
         if (markerObj.flashEndTime > 0 && markerObj.flashEndTime <= now) {
-          markerObj.flashEndTime = 0;
+          //
+          markerObj.flashEndTime = 0; //
         }
 
         // Handle normal state / pulse
         if (glowSprite) {
+          //
           // Camp-like markers
-          const baseScale = markerObj.group.userData.baseGlowSize || 10;
-          glowSprite.scale.setScalar(baseScale); // Reset scale
-          glowSprite.material.color.set(baseColor); // Reset color
+          const baseScale = markerObj.group.userData.baseGlowSize || 10; //
+          glowSprite.scale.setScalar(baseScale); // Reset scale //
+          glowSprite.material.color.set(baseColor); // Reset color //
           glowSprite.material.opacity = Math.min(
-            0.8,
-            (activity.probability || 0) / 100
-          ); // Update opacity based on probability
+            //
+            0.8, //
+            (activity?.probability || 0) / 100 // Safely access probability //
+          );
         } else if (lineMat) {
+          //
           // Roam markers
-          const pulseFactor = (Math.sin(now * 4) + 1) / 2; // Pulse speed
-          lineMat.opacity = 0.7 + pulseFactor * 0.3; // Pulse opacity
+          const pulseFactor = (Math.sin(now * 4) + 1) / 2; // Pulse speed //
+          lineMat.opacity = 0.7 + pulseFactor * 0.3; // Pulse opacity //
           lineMat.color.lerpColors(
-            new THREE.Color(baseColor),
-            new THREE.Color(0xffffff),
-            pulseFactor * 0.9
-          ); // Pulse color towards white
+            //
+            new THREE.Color(baseColor), //
+            new THREE.Color(0xffffff), //
+            pulseFactor * 0.9 // Pulse color towards white // Increase brightness intensity further //
+          );
         }
 
         // Pulse secondary glow
         if (secondaryGlow) {
-          const pulseFactorSec = (Math.sin(now * 3) + 1) / 2; // Slower pulse
-          secondaryGlow.material.opacity =
-            secondaryBaseOpacity + pulseFactorSec * 0.2; // Pulse opacity
+          //
+          const pulseFactorSec = (Math.sin(now * 3) + 1) / 2; // Slower pulse //
+          secondaryGlow.material.opacity = //
+            secondaryBaseOpacity + pulseFactorSec * 0.2; // Pulse opacity //
         }
       }
     });
     // --- END CHANGE ---
 
-    if (userLocationMarker.mixer) userLocationMarker.mixer.update(deltaTime);
-
+    if (userLocationMarker.mixer) userLocationMarker.mixer.update(deltaTime); //
     // Region label visibility (remains the same - always visible)
     regionLabelCache.forEach((cacheEntry) => {
-      if (cacheEntry.label) cacheEntry.label.visible = true;
+      //
+      if (cacheEntry.label) cacheEntry.label.visible = true; //
     });
-
-    if (controls) controls.update();
-    if (renderer && camera) renderer.render(scene, camera);
-    if (labelRenderer && camera) labelRenderer.render(scene, camera);
-  }
+    if (controls) controls.update(); //
+    if (renderer && camera) renderer.render(scene, camera); //
+    if (labelRenderer && camera) labelRenderer.render(scene, camera); //
+  } //
 </script>
 
 <div class="universe-map-container">
@@ -1048,24 +2478,23 @@
         <span
           class="security"
           style="color: {new THREE.Color(
-            getSecurityColor(selectedSystem.security)
+            getSecurityColor(selectedSystem.security) //
           ).getStyle()}"
         >
-          {selectedSystem.security !== null
-            ? selectedSystem.security.toFixed(1)
+          {selectedSystem.security !== null //
+            ? selectedSystem.security.toFixed(1) //
             : "N/A"} ({getSecurityDescription(selectedSystem.security)})
         </span>
       </div>
       <div class="info-row">
         <span>Region:</span>
         <span
-          >{regions.find((r) => r.id === selectedSystem.regionid)?.name ||
+          >{regions.find((r) => r.id === selectedSystem.regionid)?.name || //
             "Unknown"}</span
         >
       </div>
       <div class="info-row">
-        <span>System ID:</span>
-        <span>{selectedSystem.itemid}</span>
+        <span>System ID:</span> <span>{selectedSystem.itemid}</span>
       </div>
       {#if selectedActivityData}
         <div
@@ -1076,21 +2505,22 @@
           <span class="{selectedActivityData.classification}-indicator">
             <span
               class="icon"
-              title={classificationTooltips[
-                selectedActivityData.classification
+              title={classificationTooltips[ //
+                selectedActivityData.classification //
               ] || "Activity"}
             >
               {classificationIcons[selectedActivityData.classification] || "?"}
             </span>
             {#if selectedActivityData.classification === "camp" || selectedActivityData.classification === "smartbomb" || selectedActivityData.classification === "roaming_camp"}
               {classificationTooltips[selectedActivityData.classification]} ({Math.round(
-                selectedActivityData.probability
+                //
+                selectedActivityData.probability //
               )}% conf.)
             {:else if selectedActivityData.classification === "battle"}
-              {classificationTooltips[selectedActivityData.classification]} ({selectedActivityData
+              {classificationTooltips[selectedActivityData.classification]} ({selectedActivityData //
                 .metrics?.partyMetrics?.characters || 0} pilots)
             {:else if selectedActivityData.classification === "roam"}
-              {classificationTooltips[selectedActivityData.classification]} ({selectedActivityData
+              {classificationTooltips[selectedActivityData.classification]} ({selectedActivityData //
                 .members?.size || 0} pilots)
             {:else}
               {classificationTooltips[selectedActivityData.classification]}
@@ -1136,242 +2566,305 @@
 <style>
   /* --- Styles (remain mostly the same, added indicator styles) --- */
   .universe-map-container {
-    position: relative;
-    width: 100%;
-    height: 100%;
-    overflow: hidden;
+    /* */
+    position: relative; /* Needed for absolute positioning of children */ /* */
+    width: 100%; /* */
+    height: 100%; /* */
+    overflow: hidden; /* */
   }
   .controls {
-    position: absolute;
-    top: 20px;
-    left: 20px;
-    z-index: 10;
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
+    /* */
+    position: absolute; /* */
+    top: 20px; /* */
+    left: 20px; /* */
+    z-index: 10; /* Ensure controls are above map */ /* */
+    display: flex; /* */
+    flex-direction: column; /* */
+    gap: 10px; /* */
   }
   .control-panel {
-    background-color: rgba(0, 0, 0, 0.7);
-    border: 1px solid rgba(0, 255, 255, 0.3);
-    border-radius: 8px;
-    padding: 12px;
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
+    /* */
+    background-color: rgba(0, 0, 0, 0.7); /* */
+    border: 1px solid rgba(0, 255, 255, 0.3); /* */
+    border-radius: 8px; /* */
+    padding: 12px; /* */
+    display: flex; /* */
+    flex-direction: column; /* */
+    gap: 10px; /* */
   }
   .search-box input {
-    background-color: rgba(30, 30, 30, 0.7);
-    color: white;
-    border: 1px solid rgba(0, 255, 255, 0.5);
-    padding: 8px 12px;
-    border-radius: 4px;
-    width: 100%;
+    /* */
+    background-color: rgba(30, 30, 30, 0.7); /* */
+    color: white; /* */
+    border: 1px solid rgba(0, 255, 255, 0.5); /* */
+    padding: 8px 12px; /* */
+    border-radius: 4px; /* */
+    width: 100%; /* */
   }
   .color-toggle {
-    background-color: rgba(0, 100, 100, 0.7);
-    color: white;
-    border: 1px solid #00ffff;
-    padding: 8px 16px;
-    cursor: pointer;
-    border-radius: 4px;
-    transition: background-color 0.2s;
+    /* */
+    background-color: rgba(0, 100, 100, 0.7); /* */
+    color: white; /* */
+    border: 1px solid #00ffff; /* */
+    padding: 8px 16px; /* */
+    cursor: pointer; /* */
+    border-radius: 4px; /* */
+    transition: background-color 0.2s; /* */
   }
   .color-toggle:hover {
-    background-color: rgba(0, 150, 150, 0.7);
+    /* */
+    background-color: rgba(0, 150, 150, 0.7); /* */
   }
   .fullscreen-toggle {
-    background-color: rgba(50, 50, 150, 0.7);
-    border: 1px solid #aaaaff;
-    color: white;
-    padding: 8px 16px;
-    cursor: pointer;
-    border-radius: 4px;
-    transition: background-color 0.2s;
-    margin-top: 5px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
+    /* */
+    background-color: rgba(50, 50, 150, 0.7); /* */
+    border: 1px solid #aaaaff; /* */
+    color: white; /* */
+    padding: 8px 16px; /* */
+    cursor: pointer; /* */
+    border-radius: 4px; /* */
+    transition: background-color 0.2s; /* */
+    margin-top: 5px; /* */
+    display: inline-flex; /* */
+    align-items: center; /* */
+    justify-content: center; /* */
   }
   .fullscreen-toggle:hover {
-    background-color: rgba(70, 70, 180, 0.7);
+    /* */
+    background-color: rgba(70, 70, 180, 0.7); /* */
   }
 
+  /* Info Panel Styling */
   .system-info-panel {
-    position: absolute;
-    bottom: 20px;
-    left: 20px;
-    z-index: 100;
-    background-color: rgba(0, 0, 0, 0.8);
-    border: 1px solid rgba(0, 255, 255, 0.3);
-    border-radius: 8px;
-    padding: 15px;
-    min-width: 250px;
-    max-width: 300px;
-    color: white;
+    /* */
+    position: absolute; /* */
+    bottom: 20px; /* */
+    left: 20px; /* */
+    z-index: 100; /* High z-index */ /* */
+    background-color: rgba(0, 0, 0, 0.8); /* */
+    border: 1px solid rgba(0, 255, 255, 0.3); /* */
+    border-radius: 8px; /* */
+    padding: 15px; /* */
+    min-width: 250px; /* */
+    max-width: 300px; /* */
+    color: white; /* */
   }
   .close-btn {
-    position: absolute;
-    top: 10px;
-    right: 10px;
-    width: 20px;
-    height: 20px;
-    background-color: rgba(255, 100, 100, 0.7);
-    color: white;
-    border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    border: none;
-    line-height: 1;
-    padding: 0;
+    /* */
+    position: absolute; /* */
+    top: 10px; /* */
+    right: 10px; /* */
+    width: 20px; /* */
+    height: 20px; /* */
+    background-color: rgba(255, 100, 100, 0.7); /* */
+    color: white; /* */
+    border-radius: 50%; /* */
+    display: flex; /* */
+    align-items: center; /* */
+    justify-content: center; /* */
+    cursor: pointer; /* */
+    border: none; /* */
+    line-height: 1; /* */
+    padding: 0; /* */
   }
   .system-info-panel h3 {
-    color: #00ffff;
-    margin: 0 0 10px 0;
-    font-size: 16px;
+    /* */
+    color: #00ffff; /* */
+    margin: 0 0 10px 0; /* */
+    font-size: 16px; /* */
   }
   .info-row {
-    display: flex;
-    justify-content: space-between;
-    margin-bottom: 5px;
-    font-size: 14px;
+    /* */
+    display: flex; /* */
+    justify-content: space-between; /* */
+    margin-bottom: 5px; /* */
+    font-size: 14px; /* */
   }
   .info-row span:first-child {
-    color: #888;
+    /* */
+    color: #888; /* */
   }
   .info-row span:last-child {
-    color: white;
+    /* */
+    color: white; /* */
+  }
+  .camp-indicator {
+    /* */
+    color: #ff3333; /* */
+    font-weight: bold; /* */
+  }
+  .roam-indicator {
+    /* */
+    color: #3333ff; /* Roam color */ /* */
+    font-weight: bold; /* */
+  }
+  .danger {
+    /* */
+    background-color: rgba(255, 0, 0, 0.2); /* */
+    border-radius: 4px; /* */
+    padding: 2px 4px; /* */
+  }
+  .warning {
+    /* */
+    background-color: rgba(
+      255,
+      165,
+      0,
+      0.2
+    ); /* Use roam color for warning */ /* */
+    border-radius: 4px; /* */
+    padding: 2px 4px; /* */
   }
   .action-buttons {
-    margin-top: 15px;
-    display: flex;
-    gap: 10px;
+    /* */
+    margin-top: 15px; /* */
+    display: flex; /* */
+    gap: 10px; /* */
   }
   .action-buttons button {
-    flex-grow: 1;
-    background-color: rgba(0, 255, 255, 0.2);
-    color: #00ffff;
-    border: 1px solid rgba(0, 255, 255, 0.5);
-    padding: 6px 10px;
-    border-radius: 4px;
-    cursor: pointer;
-    font-size: 13px;
-    transition: background-color 0.2s;
+    /* */
+    flex-grow: 1; /* */
+    background-color: rgba(0, 255, 255, 0.2); /* */
+    color: #00ffff; /* */
+    border: 1px solid rgba(0, 255, 255, 0.5); /* */
+    padding: 6px 10px; /* */
+    border-radius: 4px; /* */
+    cursor: pointer; /* */
+    font-size: 13px; /* */
+    transition: background-color 0.2s; /* */
   }
   .action-buttons button:hover {
-    background-color: rgba(0, 255, 255, 0.4);
+    /* */
+    background-color: rgba(0, 255, 255, 0.4); /* */
   }
   .action-buttons button:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
+    /* */
+    opacity: 0.5; /* */
+    cursor: not-allowed; /* */
   }
 
   /* --- NEW: Indicator Styles --- */
-  .camp-indicator,
-  .smartbomb-indicator,
-  .roaming_camp-indicator,
-  .battle-indicator,
-  .roam-indicator {
-    display: inline-flex;
-    align-items: center;
-    font-weight: bold;
+  .camp-indicator, /* */
+    .smartbomb-indicator, /* */
+    .roaming_camp-indicator, /* */
+    .battle-indicator, /* */
+    .roam-indicator {
+    /* */
+    display: inline-flex; /* */
+    align-items: center; /* */
+    font-weight: bold; /* */
   }
   .camp-indicator {
-    color: #ff3333;
+    /* */
+    color: #ff3333; /* */
   }
   .smartbomb-indicator {
-    color: #ff9933;
+    /* */
+    color: #ff9933; /* */
   }
   .roaming_camp-indicator {
-    color: #ff8c00;
+    /* */
+    color: #ff8c00; /* */
   }
   .battle-indicator {
-    color: #cc00cc;
+    /* */
+    color: #cc00cc; /* */
   }
   .roam-indicator {
-    color: #3333ff;
+    /* */
+    color: #3333ff; /* */
   }
   .icon {
-    margin-right: 5px;
-    font-size: 1.1em;
+    /* */
+    margin-right: 5px; /* */
+    font-size: 1.1em; /* */
   }
   /* --- END NEW --- */
 
   .map-view {
-    width: 100%;
-    height: 100%;
-    background-color: #000;
+    /* */
+    width: 100%; /* */
+    height: 100%; /* */
+    background-color: #000; /* */
   }
-  .loading,
-  .error {
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    color: white;
-    background-color: rgba(0, 0, 0, 0.7);
-    padding: 20px;
-    border-radius: 8px;
-    z-index: 20;
+  .loading, /* */
+    .error {
+    /* */
+    position: absolute; /* */
+    top: 50%; /* */
+    left: 50%; /* */
+    transform: translate(-50%, -50%); /* */
+    color: white; /* */
+    background-color: rgba(0, 0, 0, 0.7); /* */
+    padding: 20px; /* */
+    border-radius: 8px; /* */
+    z-index: 20; /* */
   }
   .error {
-    color: #ff6b6b;
+    /* */
+    color: #ff6b6b; /* */
   }
 
   :global(.system-label) {
-    color: white;
-    font-size: 12px;
-    padding: 2px 5px;
-    background-color: rgba(0, 0, 0, 0.7);
-    border-radius: 3px;
-    white-space: nowrap;
-    pointer-events: none;
-    user-select: none;
+    /* */
+    color: white; /* */
+    font-size: 12px; /* */
+    padding: 2px 5px; /* */
+    background-color: rgba(0, 0, 0, 0.7); /* */
+    border-radius: 3px; /* */
+    white-space: nowrap; /* */
+    pointer-events: none; /* */
+    user-select: none; /* */
   }
   :global(.region-label) {
-    font-size: 16px;
-    font-weight: bold;
-    padding: 3px 6px;
-    background-color: rgba(0, 0, 0, 0.5);
-    border-radius: 4px;
-    white-space: nowrap;
-    pointer-events: none;
-    user-select: none;
-    text-shadow:
+    /* */
+    font-size: 16px; /* */
+    font-weight: bold; /* */
+    padding: 3px 6px; /* */
+    background-color: rgba(0, 0, 0, 0.5); /* */
+    border-radius: 4px; /* */
+    white-space: nowrap; /* */
+    pointer-events: none; /* */
+    user-select: none; /* */
+    text-shadow: /* */
       0 0 3px black,
-      0 0 3px black;
+      /* */ 0 0 3px black; /* */
   }
 
   :global(.danger-tooltip) {
-    position: absolute;
-    bottom: 20px; /* Adjust if needed */
-    left: 20px;
-    background: rgba(0, 0, 0, 0.8);
-    border: 1px solid #ff6600;
-    border-radius: 4px;
-    padding: 10px;
-    color: white;
-    font-family: sans-serif;
-    max-width: 300px;
-    z-index: 1000;
+    /* */
+    position: absolute; /* */
+    bottom: 20px; /* */
+    left: 20px; /* */
+    background: rgba(0, 0, 0, 0.8); /* */
+    border: 1px solid #ff6600; /* */
+    border-radius: 4px; /* */
+    padding: 10px; /* */
+    color: white; /* */
+    font-family: sans-serif; /* */
+    max-width: 300px; /* */
+    z-index: 1000; /* */
   }
   :global(.danger-header) {
-    font-weight: bold;
-    font-size: 16px;
-    margin-bottom: 8px;
-    color: #ff6600;
+    /* */
+    font-weight: bold; /* */
+    font-size: 16px; /* */
+    margin-bottom: 8px; /* */
+    color: #ff6600; /* */
   }
   :global(.danger-list) {
-    margin: 0;
-    padding: 0 0 0 20px;
-    list-style: none;
+    /* */
+    margin: 0; /* */
+    padding: 0 0 0 20px; /* */
+    list-style: none; /* */
   }
   :global(.danger-list li) {
-    margin-bottom: 4px;
-    position: relative;
-    padding-left: 15px;
+    /* */
+    margin-bottom: 4px; /* */
+    position: relative; /* */
+    padding-left: 15px; /* */
   }
+
   :global(.danger-list li::before) {
     content: "";
     position: absolute;
