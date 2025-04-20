@@ -1,14 +1,16 @@
-<!-- LocationTracker.svelte -->
 <script>
   import { currentLocation, locationError } from "./locationStore";
-  import { activeCamps } from "./campManager.js";
+  import { activeActivities } from "./activityManager.js";
+  import { settings } from "./settingsStore.js";
   import { onMount, onDestroy } from "svelte";
   import {
     startLocationPolling,
     stopLocationPolling,
   } from "./locationStore.js";
+  // import audioManager from "./audioUtils.js"; // Not currently used
 
-  export let isTracking;
+  // One-way prop from App.svelte
+  export let isTracking = false; // Default to false
 
   let selectedVoice = null;
   let trackedCharacter = null;
@@ -17,23 +19,76 @@
   let speechQueue = [];
   let isSpeaking = false;
 
-  // Subscribe to activeCamps store
-  $: camps = $activeCamps;
+  let currentActivities = [];
+  const unsubActivities = activeActivities.subscribe((value) => {
+    currentActivities = value || [];
+  });
 
+  $: audioEnabled = $settings.audio_alerts_enabled;
+  // let mounted = false; // No longer needed for polling logic
+
+  // Diagnostic Logs
+  $: console.log("[LocationTracker UI] isTracking prop:", isTracking);
+  $: console.log(
+    "[LocationTracker UI] $currentLocation value:",
+    $currentLocation
+  );
+  $: $currentLocation &&
+    isTracking &&
+    console.log(
+      "[LocationTracker UI] Template #if condition PASSED (Attempting render)."
+    );
+
+  // Start/Stop polling based on the isTracking prop change
+  // Svelte automatically handles running this when isTracking changes after mount
   $: if (isTracking) {
+    console.log(
+      "[LocationTracker] Detected isTracking=true, starting polling..."
+    );
     startLocationPolling();
   } else {
+    // This will run initially (isTracking=false) and when tracking is toggled off
+    console.log(
+      "[LocationTracker] Detected isTracking=false, stopping polling..."
+    );
     stopLocationPolling();
+    // Optionally clear speech queue when tracking stops
+    speechQueue = [];
+    if (typeof window !== "undefined" && window.speechSynthesis) {
+      window.speechSynthesis.cancel();
+    }
+    isSpeaking = false;
   }
 
+  // --- Voice, Summary, Speech functions remain the same as previous version ---
   function initializeVoice() {
     if (typeof window !== "undefined" && window.speechSynthesis) {
-      window.speechSynthesis.onvoiceschanged = () => {
+      const loadVoices = () => {
         const voices = window.speechSynthesis.getVoices();
-        selectedVoice =
-          voices.find((voice) => voice.name.includes("Microsoft Hazel")) ||
-          voices.find((voice) => voice.lang.includes("en-GB"));
+        if (voices.length > 0) {
+          selectedVoice =
+            voices.find((voice) => voice.name.includes("Microsoft Hazel")) ||
+            voices.find((voice) => voice.lang.startsWith("en-GB")) ||
+            voices.find((voice) => voice.lang.startsWith("en"));
+          console.log(
+            "[LocationTracker] Selected voice:",
+            selectedVoice?.name || "Default"
+          );
+        } else {
+          console.warn("[LocationTracker] No voices loaded yet.");
+          setTimeout(() => {
+            if (window.speechSynthesis.getVoices().length === 0)
+              console.error("Speech synthesis voices failed to load.");
+          }, 2000);
+        }
       };
+      if (window.speechSynthesis.getVoices().length > 0) {
+        loadVoices();
+      } else {
+        window.speechSynthesis.onvoiceschanged = loadVoices;
+      }
+    } else {
+      console.warn("[LocationTracker] Speech synthesis not supported.");
     }
   }
 
@@ -43,238 +98,340 @@
       const text = speechQueue.shift();
       speak(text, () => {
         isSpeaking = false;
-        processNextSpeechItem();
+        setTimeout(processNextSpeechItem, 250);
       });
     }
   }
 
   function queueSpeech(text) {
-    if (!isTracking) return; // Don't queue speech if not tracking
+    if (!isTracking || !audioEnabled || !text) return;
+    console.log("[LocationTracker] Queuing speech:", text);
     speechQueue.push(text);
     processNextSpeechItem();
   }
 
   function speak(text, callback) {
-    if (!window.speechSynthesis || !isTracking) {
+    if (!window.speechSynthesis || !isTracking || !audioEnabled) {
       if (callback) callback();
       return;
     }
-
+    if (window.speechSynthesis.speaking) {
+      console.warn(
+        "[LocationTracker Speak] SpeechSynthesis is speaking, cancelling previous."
+      );
+      window.speechSynthesis.cancel();
+      setTimeout(() => speak(text, callback), 100);
+      return;
+    }
     const msg = new SpeechSynthesisUtterance(text);
     if (selectedVoice) {
       msg.voice = selectedVoice;
       msg.rate = 0.9;
       msg.pitch = 1.1;
+      msg.volume = 0.8;
+    } else {
+      console.warn("[LocationTracker Speak] No voice selected, using default.");
     }
-
     msg.onend = () => {
       if (callback) callback();
     };
-
-    msg.onerror = () => {
-      console.error("Speech synthesis error");
+    msg.onerror = (event) => {
+      console.error(
+        "[LocationTracker Speak] Speech synthesis error:",
+        event.error
+      );
       if (callback) callback();
     };
-
-    window.speechSynthesis.cancel();
+    console.log(
+      "[LocationTracker Speak] Attempting to speak:",
+      text.substring(0, 50) + "..."
+    );
     window.speechSynthesis.speak(msg);
   }
 
-  function getCampSummary(camps) {
-    if (!$currentLocation) return "No location data available";
-    if (!isTracking) return ""; // Don't show summary if not tracking
-
-    const warnings = [];
-
-    // Check current system camps
-    const currentSystemCamps = camps.filter(
-      (camp) => camp.systemId === $currentLocation.solar_system_id
-    );
-
-    if (currentSystemCamps.length > 0) {
-      const highProbCamps = currentSystemCamps.filter(
-        (camp) => camp.probability >= 50
-      );
-      if (highProbCamps.length > 0) {
-        warnings.push(
-          `⚠️ Active camps in current system at: ${highProbCamps
-            .map(
-              (camp) =>
-                `${camp.stargateName} (${Math.round(camp.probability)}% confidence)`
-            )
-            .join(", ")}`
-        );
-      }
-    }
-
-    // Check camps in connected systems and their neighbors
-    const connectedSystemWarnings = [];
-
-    $currentLocation.connected_systems.forEach((connectedSystem) => {
+  function getCampSummary(activities) {
+    // Assume $currentLocation and isTracking are true if called from template
+    try {
       const warnings = [];
-
-      // Find the gate in current system that leads to this connected system
-      const gateToSystem = $currentLocation.celestialData.find(
-        (cel) =>
-          cel.typename?.toLowerCase().includes("stargate") &&
-          cel.itemname
-            .toLowerCase()
-            .includes(connectedSystem.name.toLowerCase())
+      if (!$currentLocation)
+        return "Internal error: No location data for summary.";
+      const currentSystemId = $currentLocation.solar_system_id;
+      const safeActivities = Array.isArray(activities) ? activities : [];
+      const relevantActivities = safeActivities.filter(
+        (activity) =>
+          activity &&
+          ["camp", "smartbomb", "roaming_camp", "battle"].includes(
+            activity.classification
+          ) &&
+          (activity.probability >= 50 || activity.classification === "battle")
       );
-      const gateName =
-        gateToSystem?.itemname || `Gate to ${connectedSystem.name}`;
-
-      // Check camps in the directly connected system
-      const directCamps = camps
-        .filter((camp) => camp.systemId === connectedSystem.id)
-        .filter((camp) => camp.probability >= 50);
-
-      if (directCamps.length > 0) {
+      const currentSystemDangers = relevantActivities.filter(
+        (activity) => activity.systemId === currentSystemId
+      );
+      if (currentSystemDangers.length > 0) {
         warnings.push(
-          `${directCamps.length} camp${directCamps.length > 1 ? "s" : ""} at ${directCamps
-            .map(
-              (camp) =>
-                `${camp.stargateName} (${Math.round(camp.probability)}% confidence)`
-            )
-            .join(", ")}`
+          `⚠️ Active threats HERE: ${currentSystemDangers.map((activity) => `${activity.stargateName || activity.classification?.replace("_", " ") || "Unknown threat"} (${activity.classification === "battle" ? (activity.metrics?.partyMetrics?.characters || 0) + " pilots" : Math.round(activity.probability || 0) + "% conf."})`).join(", ")}`
         );
       }
-
-      // Check for camps in systems that are one jump further
-      const neighboringCamps = camps.filter(
-        (camp) =>
-          // Get camps that aren't in our current system or the connected system
-          camp.systemId !== $currentLocation.solar_system_id &&
-          camp.systemId !== connectedSystem.id &&
-          camp.probability >= 50 &&
-          // Only include camps where the gate name mentions either our connected system
-          // or the current system (indicating it's one jump away)
-          (camp.stargateName
-            .toLowerCase()
-            .includes(connectedSystem.name.toLowerCase()) ||
-            camp.stargateName
-              .toLowerCase()
-              .includes($currentLocation.systemName.toLowerCase()))
-      );
-
-      if (neighboringCamps.length > 0) {
-        warnings.push(
-          `${neighboringCamps.length} camp${neighboringCamps.length > 1 ? "s" : ""} in neighboring systems: ${neighboringCamps
-            .map(
-              (camp) =>
-                `${camp.stargateName} in ${camp.kills[0]?.pinpoints?.celestialData?.solarsystemname || "Unknown"} (${Math.round(camp.probability)}% confidence)`
-            )
-            .join(", ")}`
+      const connectedSystemWarnings = [];
+      if (
+        $currentLocation &&
+        $currentLocation.connected_systems &&
+        Array.isArray($currentLocation.connected_systems)
+      ) {
+        $currentLocation.connected_systems.forEach((connectedSystem) => {
+          if (!connectedSystem || typeof connectedSystem.id === "undefined")
+            return;
+          const systemWarnings = [];
+          const connectedSystemId = connectedSystem.id;
+          const connectedSystemName = connectedSystem.name || "Unknown System";
+          const gateToSystem = ($currentLocation.celestialData || []).find(
+            (cel) => cel && cel.destinationid === connectedSystemId
+          );
+          let gateName = `Gate to ${connectedSystemName}`;
+          if (gateToSystem?.itemname) {
+            gateName =
+              gateToSystem.itemname
+                .replace(`Stargate (${connectedSystemName})`, "")
+                .trim() || gateToSystem.itemname;
+          }
+          const directDangers = relevantActivities.filter(
+            (activity) => activity.systemId === connectedSystemId
+          );
+          if (directDangers.length > 0) {
+            systemWarnings.push(
+              `${directDangers.length} threat${directDangers.length > 1 ? "s" : ""} at ${directDangers.map((activity) => `${activity.stargateName || activity.classification?.replace("_", " ") || "Threat"} (${activity.classification === "battle" ? (activity.metrics?.partyMetrics?.characters || 0) + " pilots" : Math.round(activity.probability || 0) + "% conf."})`).join(", ")}`
+            );
+          }
+          const neighboringDangers = relevantActivities.filter(
+            (activity) =>
+              activity.systemId !== currentSystemId &&
+              activity.systemId !== connectedSystemId &&
+              activity.stargateName
+                ?.toLowerCase()
+                .includes(connectedSystemName.toLowerCase())
+          );
+          if (neighboringDangers.length > 0) {
+            const neighborSystemNames = neighboringDangers
+              .map((activity) => {
+                const systemDataName =
+                  activity.kills?.[0]?.pinpoints?.celestialData
+                    ?.solarsystemname || `System ${activity.systemId}`;
+                const threatName =
+                  activity.stargateName ||
+                  activity.classification?.replace("_", " ") ||
+                  "Threat";
+                const confidence =
+                  activity.classification === "battle"
+                    ? (activity.metrics?.partyMetrics?.characters || 0) +
+                      " pilots"
+                    : Math.round(activity.probability || 0) + "% conf.";
+                return `${threatName} in ${systemDataName} (${confidence})`;
+              })
+              .join(", ");
+            systemWarnings.push(
+              `${neighboringDangers.length} threat${neighboringDangers.length > 1 ? "s" : ""} in neighbors: ${neighborSystemNames}`
+            );
+          }
+          if (systemWarnings.length > 0) {
+            connectedSystemWarnings.push(
+              `⚠️ ${gateName}: ${systemWarnings.join("; ")}`
+            );
+          }
+        });
+      } else if ($currentLocation) {
+        console.warn(
+          "[LocationTracker getCampSummary] $currentLocation.connected_systems is missing or not an array."
         );
       }
-
-      if (warnings.length > 0) {
-        connectedSystemWarnings.push(`⚠️ ${gateName}: ${warnings.join("; ")}`);
+      if (connectedSystemWarnings.length > 0) {
+        warnings.push(...connectedSystemWarnings);
       }
-    });
-
-    if (connectedSystemWarnings.length > 0) {
-      warnings.push(...connectedSystemWarnings);
+      return warnings.length > 0
+        ? warnings.join("\n")
+        : "✓ No active threats detected nearby";
+    } catch (error) {
+      console.error("[LocationTracker] Error during getCampSummary:", error);
+      return `Error generating summary: ${error.message}`;
     }
-
-    return warnings.length > 0
-      ? warnings.join("\n")
-      : "✓ No active camps detected";
   }
 
   function stripSymbols(text) {
-    return text.replace(/[⚠️✓]/g, "");
+    return String(text || "").replace(/[⚠️✓]/g, "");
   }
 
-  // Location change handler
+  // Reactive block for triggering speech (still useful)
   $: if ($currentLocation && isTracking) {
-    if (lastSystemId !== $currentLocation.solar_system_id) {
-      const campSummary = getCampSummary(camps);
-      const announcement = `System change. Your current system is ${$currentLocation.systemName} in ${$currentLocation.regionName}. ${stripSymbols(campSummary)}`;
-
-      queueSpeech(announcement);
-      lastSystemId = $currentLocation.solar_system_id;
-      lastCampWarning = {
-        systemId: $currentLocation.solar_system_id,
-        timestamp: Date.now(),
-        campIds: new Set(
-          camps
-            .filter((c) => c.systemId === $currentLocation.solar_system_id)
-            .map((c) => c.id)
-        ),
-      };
-    } else {
-      // Check for new camps in current system
-      const currentCamps = camps.filter(
-        (c) => c.systemId === $currentLocation.solar_system_id
-      );
-      const currentCampIds = new Set(currentCamps.map((c) => c.id));
-      const newCamps = Array.from(currentCampIds).filter(
-        (id) => !lastCampWarning.campIds.has(id)
-      );
-
-      if (newCamps.length > 0) {
-        const newCampSummary = getCampSummary(
-          currentCamps.filter((c) => newCamps.includes(c.id))
+    // Removed mounted check here too
+    const currentSystemId = $currentLocation.solar_system_id;
+    if (lastSystemId !== currentSystemId) {
+      // System changed
+      console.log("[LocationTracker Reactive] System changed detected.");
+      const summaryResult = getCampSummary(currentActivities);
+      if (!summaryResult.startsWith("Error generating summary")) {
+        const announcement = `System change. Current system ${$currentLocation.systemName || "Unknown"} in ${$currentLocation.regionName || "Unknown"}. ${stripSymbols(summaryResult)}`;
+        queueSpeech(announcement);
+      } else {
+        queueSpeech(
+          `System change. Current system ${$currentLocation.systemName || "Unknown"} in ${$currentLocation.regionName || "Unknown"}. Error getting threat summary.`
         );
-        queueSpeech(`New camp alert! ${stripSymbols(newCampSummary)}`);
-        lastCampWarning.campIds = currentCampIds;
+        console.error(
+          "[LocationTracker Reactive] Summary generation failed on system change:",
+          summaryResult
+        );
+      }
+      lastSystemId = currentSystemId;
+      try {
+        const currentSystemDangers = (
+          Array.isArray(currentActivities) ? currentActivities : []
+        ).filter(
+          (a) =>
+            a &&
+            a.systemId === currentSystemId &&
+            ["camp", "smartbomb", "roaming_camp", "battle"].includes(
+              a.classification
+            ) &&
+            (a.probability >= 50 || a.classification === "battle")
+        );
+        lastCampWarning = {
+          systemId: currentSystemId,
+          timestamp: Date.now(),
+          activityIds: new Set(currentSystemDangers.map((a) => a.id)),
+        };
+      } catch (error) {
+        console.error(
+          "[LocationTracker Reactive] Error updating lastCampWarning:",
+          error
+        );
+        lastCampWarning = {
+          systemId: currentSystemId,
+          timestamp: Date.now(),
+          activityIds: new Set(),
+        };
+      }
+    } else {
+      // Still in the same system, check for *new* high-confidence threats
+      try {
+        const currentSystemDangers = (
+          Array.isArray(currentActivities) ? currentActivities : []
+        ).filter(
+          (a) =>
+            a &&
+            a.systemId === currentSystemId &&
+            ["camp", "smartbomb", "roaming_camp", "battle"].includes(
+              a.classification
+            ) &&
+            (a.probability >= 50 || a.classification === "battle")
+        );
+        const currentDangerIds = new Set(currentSystemDangers.map((a) => a.id));
+        const newDangers = currentSystemDangers.filter(
+          (a) => !lastCampWarning?.activityIds?.has(a.id)
+        );
+        if (newDangers.length > 0) {
+          console.log(
+            "[LocationTracker Reactive] New threats detected in current system."
+          );
+          const newDangerSummaryResult = getCampSummary(newDangers);
+          if (!newDangerSummaryResult.startsWith("Error generating summary")) {
+            queueSpeech(
+              `New threat alert! ${stripSymbols(newDangerSummaryResult)}`
+            );
+          } else {
+            queueSpeech(`New threat alert! Error getting summary.`);
+            console.error(
+              "[LocationTracker Reactive] Summary generation failed for new threat alert:",
+              newDangerSummaryResult
+            );
+          }
+          lastCampWarning.activityIds = currentDangerIds;
+        }
+      } catch (error) {
+        console.error(
+          "[LocationTracker Reactive] Error checking for new dangers:",
+          error
+        );
       }
     }
   }
 
-  onMount(async () => {
+  // Lifecycle hooks
+  onMount(() => {
+    // mounted = true; // No longer strictly needed for polling start/stop
+    console.log("[LocationTracker] Component Mounted.");
     if (typeof window !== "undefined") {
-      try {
-        const response = await fetch("/api/session", {
-          credentials: "include",
-        });
-        const data = await response.json();
-        trackedCharacter = data.user?.character_name;
-      } catch (error) {
-        console.error("Error getting session data:", error);
-      }
-
+      fetch("/api/session", { credentials: "include" })
+        .then((res) =>
+          res.ok
+            ? res.json()
+            : Promise.reject(`Session fetch failed: ${res.status}`)
+        )
+        .then((data) => {
+          trackedCharacter = data.user?.character_name;
+          console.log(
+            "[LocationTracker] Session fetched, character:",
+            trackedCharacter
+          );
+        })
+        .catch((err) =>
+          console.error("[LocationTracker] Error getting session data:", err)
+        );
       initializeVoice();
+      // Polling now started reactively by $: block when isTracking becomes true
+      // if (isTracking) { startLocationPolling(); }
     }
   });
 
   onDestroy(() => {
+    // mounted = false;
+    console.log("[LocationTracker] Component Destroyed.");
     if (typeof window !== "undefined" && window.speechSynthesis) {
       window.speechSynthesis.cancel();
     }
+    stopLocationPolling(); // Ensure polling stops
+    unsubActivities();
   });
 </script>
 
 <div class="tracking-info" class:error={$locationError}>
-  {#if $currentLocation && isTracking}
-    <div class="flex items-center gap-4">
+  {#if !$currentLocation && isTracking && !$locationError}
+    <span>Polling for location...</span>
+  {:else if $currentLocation && isTracking}
+    {@const summary = getCampSummary(currentActivities)}
+    <div class="flex items-center gap-4 w-full">
       <div class="system-info">
-        <span class="system-name">{$currentLocation.systemName}</span>
-        <span class="region-name">({$currentLocation.regionName})</span>
+        <span class="system-name"
+          >{$currentLocation.systemName || "Unknown System"}</span
+        >
+        <span class="region-name"
+          >({$currentLocation.regionName || "Unknown Region"})</span
+        >
       </div>
-      <div class="camp-status">
-        {getCampSummary(camps)}
+      <div class="camp-status whitespace-pre-line flex-1">
+        {#if summary.startsWith("Error generating summary")}
+          <span class="error-message">{summary}</span>
+        {:else}
+          <span>{summary}</span>
+        {/if}
       </div>
     </div>
-  {/if}
-
-  {#if $locationError && isTracking}
-    <span class="error-message">
-      {$locationError}
-      <!-- Show a retry button for errors -->
+  {:else if $locationError && isTracking}
+    <span class="error-message flex items-center gap-2">
+      <span>{$locationError}</span>
       <button
-        class="px-2 py-1 ml-2 bg-eve-danger/30 hover:bg-eve-danger/50 rounded-sm"
+        class="px-2 py-0.5 bg-eve-danger/30 hover:bg-eve-danger/50 rounded-sm text-white text-xs"
         on:click={() => {
+          locationError.set(null);
           stopLocationPolling();
           setTimeout(() => {
             if (isTracking) startLocationPolling();
-          }, 1000);
+          }, 500);
         }}
       >
         Retry
       </button>
     </span>
+  {:else if !isTracking}
+    <span>Tracking inactive.</span>
   {/if}
 </div>
 
@@ -285,32 +442,52 @@
     display: flex;
     align-items: center;
     color: white;
+    font-size: 0.875rem;
+    padding: 0 0.5rem;
   }
-
   .system-info {
     display: flex;
-    gap: 1rem;
-    align-items: center;
+    gap: 0.5rem;
+    align-items: baseline;
+    white-space: nowrap;
   }
-
   .system-name {
     color: #ffd700;
     font-weight: 500;
   }
-
   .region-name {
     color: #aaa;
+    font-size: 0.8rem;
   }
-
   .camp-status {
-    flex: 1;
+    color: #ccc;
+    margin-left: 1rem;
+    line-height: 1.4;
+    white-space: pre-line;
+    overflow-wrap: break-word;
+    word-break: break-word;
   }
-
+  .camp-status span {
+    display: inline-block;
+  }
   .error-message {
     color: #ff4444;
+    margin-left: 1rem;
+    display: inline-flex;
+    align-items: center;
   }
-
+  .camp-status .error-message {
+    margin-left: 0;
+    font-weight: bold;
+  }
   .tracking-info.error {
-    color: #ff4444;
+    border-left: 3px solid #ff4444;
+    padding-left: 0.8rem;
+  }
+  .tracking-info.error .camp-status {
+    display: none;
+  }
+  .tracking-info.error .system-info {
+    opacity: 0.6;
   }
 </style>

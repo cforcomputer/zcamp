@@ -3,9 +3,7 @@ import express from "express";
 import { createServer } from "http";
 import { Server } from "socket.io";
 import axios from "axios";
-// import { createClient as createSqlClient } from "@libsql/client";
 import path from "path";
-
 import cors from "cors";
 import fs from "fs";
 import session from "express-session";
@@ -14,8 +12,8 @@ import { createClient as createRedisClient } from "redis";
 import { hash, compare } from "bcrypt";
 import { THRESHOLDS } from "../src/constants";
 import pg from "pg";
-import { ServerCampManager } from "./serverCampManager.js";
-import { ServerRoamManager } from "./serverRoamManager.js";
+
+import { ServerActivityManager } from "./serverActivityManager.js";
 
 const { Pool } = pg;
 
@@ -195,12 +193,10 @@ const pool = new Pool({
   native: false,
 });
 
-const serverCampManager = new ServerCampManager(io, pool);
-const serverRoamManager = new ServerRoamManager(io);
+const serverActivityManager = new ServerActivityManager(io, pool);
 
 // Start the manager update intervals
-serverCampManager.startUpdates();
-serverRoamManager.startUpdates();
+serverActivityManager.startUpdates();
 
 // Initialize Redis store
 const redisStore = new RedisStore({
@@ -272,11 +268,10 @@ if (!EVE_SSO_CONFIG.client_id || !EVE_SSO_CONFIG.client_secret) {
 
 // Database setup
 async function initializeDatabase() {
-  console.log("Initializing PostgreSQL database");
-
+  const client = await pool.connect();
   try {
-    // Users table
-    await pool.query(`
+    // Users table - Cleaned whitespace
+    await client.query(`
       CREATE TABLE IF NOT EXISTS users (
         id SERIAL PRIMARY KEY,
         username VARCHAR(255) UNIQUE,
@@ -286,88 +281,174 @@ async function initializeDatabase() {
         character_name TEXT,
         access_token TEXT,
         refresh_token TEXT,
-        token_expiry INTEGER
-      )
-    `);
+        token_expiry INTEGER,
+        bashbucks INTEGER DEFAULT 0
+      );
+    `); // Ensure no non-standard spaces/chars here
 
-    await pool.query(`
+    // Ensure users.bashbucks exists (using ALTER TABLE) - Cleaned whitespace
+    try {
+      await client.query(`
+        ALTER TABLE users
+        ADD COLUMN IF NOT EXISTS bashbucks INTEGER DEFAULT 0;
+      `); // Ensure no non-standard spaces/chars here
+      console.log("Ensured 'bashbucks' column exists in 'users'.");
+    } catch (alterErr) {
+      if (alterErr.code !== "42701") {
+        // Ignore "duplicate column" error
+        console.error(
+          "Error attempting to add 'bashbucks' column to users:",
+          alterErr
+        );
+        throw alterErr;
+      } else {
+        console.log("'bashbucks' column likely already exists in users.");
+      }
+    }
+
+    // Add index for users table - Cleaned whitespace
+    await client.query(
+      `CREATE INDEX IF NOT EXISTS idx_users_character_id ON users(character_id);` // Ensure no non-standard spaces/chars here
+    );
+
+    // Camp Crushers table (Remove bashbucks) - Cleaned whitespace
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS camp_crushers (
+        id SERIAL PRIMARY KEY,
+        character_id TEXT NOT NULL UNIQUE,
+        character_name TEXT NOT NULL
+      );
+    `); // Ensure no non-standard spaces/chars here
+
+    // Remove camp_crushers.bashbucks column if it exists (using ALTER TABLE) - Cleaned whitespace
+    try {
+      await client.query(`
+          ALTER TABLE camp_crushers
+          DROP COLUMN IF EXISTS bashbucks;
+        `); // Ensure no non-standard spaces/chars here
+      console.log(
+        "Removed 'bashbucks' column from 'camp_crushers' if it existed."
+      );
+    } catch (alterErr) {
+      console.error(
+        "Error attempting to drop 'bashbucks' column from camp_crushers:",
+        alterErr
+      );
+      if (alterErr.code !== "42703") {
+        // Ignore "column does not exist"
+        console.warn(
+          "Non-critical error dropping bashbucks from camp_crushers:",
+          alterErr.message
+        );
+      } else {
+        console.log(
+          "'bashbucks' column likely did not exist in camp_crushers."
+        );
+      }
+    }
+
+    // Add index for camp_crushers table - Cleaned whitespace
+    await client.query(
+      `CREATE INDEX IF NOT EXISTS idx_camp_crushers_character_id ON camp_crushers(character_id);` // Ensure no non-standard spaces/chars here
+    );
+
+    // Camp Crusher Targets table (including target_character_id) - Cleaned whitespace
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS camp_crusher_targets (
+        id SERIAL PRIMARY KEY,
+        character_id TEXT NOT NULL,
+        target_character_id TEXT,
+        camp_id TEXT NOT NULL,
+        system_id INTEGER,
+        stargate_name TEXT,
+        start_time TIMESTAMP NOT NULL,
+        end_time TIMESTAMP NOT NULL,
+        completed BOOLEAN DEFAULT FALSE,
+        FOREIGN KEY(character_id) REFERENCES users(character_id) ON DELETE CASCADE
+      );
+    `); // Ensure no non-standard spaces/chars here
+
+    // Ensure camp_crusher_targets.target_character_id exists (using ALTER TABLE) - Cleaned whitespace
+    try {
+      await client.query(`
+        ALTER TABLE camp_crusher_targets
+        ADD COLUMN IF NOT EXISTS target_character_id TEXT;
+      `); // Ensure no non-standard spaces/chars here
+      console.log(
+        "Ensured 'target_character_id' column exists in 'camp_crusher_targets'."
+      );
+    } catch (alterErr) {
+      if (alterErr.code !== "42701") {
+        console.error(
+          "Error attempting to add 'target_character_id' column:",
+          alterErr
+        );
+        throw alterErr;
+      } else {
+        console.log("'target_character_id' column likely already exists.");
+      }
+    }
+
+    // Add indexes for camp_crusher_targets table - Cleaned whitespace
+    await client.query(
+      `CREATE INDEX IF NOT EXISTS idx_camp_crusher_targets_character_id ON camp_crusher_targets(character_id);` // Ensure no non-standard spaces/chars here
+    );
+    await client.query(
+      `CREATE INDEX IF NOT EXISTS idx_camp_crusher_targets_lookup ON camp_crusher_targets(target_character_id, completed);` // Ensure no non-standard spaces/chars here
+    );
+
+    // --- Other Tables (Assuming standard whitespace) ---
+    await client.query(`
       CREATE TABLE IF NOT EXISTS filter_lists (
         id SERIAL PRIMARY KEY,
-        user_id INTEGER,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
         name TEXT,
         ids TEXT,
         enabled INTEGER,
         is_exclude INTEGER,
-        filter_type TEXT,
-        FOREIGN KEY(user_id) REFERENCES users(id)
-      )
+        filter_type TEXT
+      );
     `);
-
-    await pool.query(`
+    await client.query(`
       CREATE TABLE IF NOT EXISTS user_profiles (
         id SERIAL PRIMARY KEY,
-        user_id INTEGER,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
         name TEXT,
-        settings TEXT,
-        FOREIGN KEY(user_id) REFERENCES users(id)
-      )
+        settings TEXT
+      );
     `);
-
-    await pool.query(`
+    await client.query(`
       CREATE TABLE IF NOT EXISTS celestial_data (
         system_id INTEGER PRIMARY KEY,
         system_name TEXT,
         celestial_data TEXT,
         last_updated TIMESTAMP DEFAULT NOW()
-      )
+      );
     `);
-
-    await pool.query(`
+    await client.query(`
       CREATE TABLE IF NOT EXISTS ship_types (
         ship_type_id INTEGER PRIMARY KEY,
         category TEXT NOT NULL,
         name TEXT,
         tier TEXT,
         last_updated TIMESTAMP DEFAULT NOW()
-      )
+      );
     `);
-
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS camp_crushers (
-        id SERIAL PRIMARY KEY,
-        character_id TEXT NOT NULL,
-        character_name TEXT NOT NULL,
-        bashbucks INTEGER DEFAULT 0,
-        FOREIGN KEY(character_id) REFERENCES users(character_id)
-      )
-    `);
-
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS camp_crusher_targets (
-        id SERIAL PRIMARY KEY,
-        character_id TEXT NOT NULL,
-        camp_id TEXT NOT NULL,
-        start_time TIMESTAMP NOT NULL,
-        end_time TIMESTAMP NOT NULL,
-        completed BOOLEAN DEFAULT FALSE,
-        FOREIGN KEY(character_id) REFERENCES users(character_id)
-      )
-    `);
-
-    await pool.query(`
+    await client.query(`
       CREATE TABLE IF NOT EXISTS pinned_systems (
         id SERIAL PRIMARY KEY,
-        user_id INTEGER NOT NULL,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
         system_id INTEGER NOT NULL,
-        stargate_name TEXT NOT NULL,
-        created_at TIMESTAMP DEFAULT NOW(),
-        FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+        stargate_name VARCHAR(255) NOT NULL,
+        system_name VARCHAR(255),
+        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
         UNIQUE(user_id, system_id, stargate_name)
-      )
+      );
     `);
-
-    // For ML processing
-    await pool.query(`
+    await client.query(
+      `CREATE INDEX IF NOT EXISTS idx_pinned_systems_user_id ON pinned_systems(user_id);`
+    );
+    await client.query(`
       CREATE TABLE IF NOT EXISTS expired_camps (
         id SERIAL PRIMARY KEY,
         camp_unique_id TEXT UNIQUE NOT NULL,
@@ -376,21 +457,41 @@ async function initializeDatabase() {
         max_probability INTEGER,
         camp_start_time TIMESTAMP,
         last_kill_time TIMESTAMP NOT NULL,
-        camp_end_time TIMESTAMP, 
-        processing_time TIMESTAMP DEFAULT NOW(), 
+        camp_end_time TIMESTAMP,
+        processing_time TIMESTAMP DEFAULT NOW(),
         total_value NUMERIC,
         camp_type TEXT,
         final_kill_count INTEGER,
-        camp_details JSONB, 
+        camp_details JSONB,
         classifier INTEGER DEFAULT NULL
-      )
+      );
+    `);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS map_denormalize (
+        itemID INTEGER PRIMARY KEY,
+        typeID INTEGER,
+        groupID INTEGER,
+        solarSystemID INTEGER,
+        constellationID INTEGER,
+        regionID INTEGER,
+        orbitID INTEGER,
+        x DOUBLE PRECISION,
+        y DOUBLE PRECISION,
+        z DOUBLE PRECISION,
+        radius DOUBLE PRECISION,
+        itemName TEXT,
+        security DOUBLE PRECISION,
+        celestialIndex INTEGER,
+        orbitIndex INTEGER
+      );
     `);
 
-    console.log("Database initialized successfully");
-    isDatabaseInitialized = true;
+    console.log("Database tables ensured.");
   } catch (err) {
-    console.error("Error initializing database:", err);
-    isDatabaseInitialized = false;
+    console.error("Database initialization error:", err);
+    throw err;
+  } finally {
+    client.release();
   }
 }
 
@@ -618,54 +719,47 @@ app.get("/api/route/:origin/:destination", async (req, res) => {
 });
 
 // Fetch trophy page data
+// Fetch trophy page data
 app.get("/api/trophy/:characterId", async (req, res) => {
   const characterId = req.params.characterId;
 
   if (!characterId || isNaN(parseInt(characterId))) {
-    // Basic validation
     return res.status(400).json({ error: "Invalid Character ID" });
   }
 
   try {
-    // Fetch Character Name and Bashbucks from camp_crushers
-    const crusherQuery = `
+    // --- MODIFIED QUERY ---
+    // Fetch Character Name and Bashbucks directly from the users table
+    const userQuery = `
       SELECT character_name, bashbucks
-      FROM camp_crushers
-      WHERE character_id = $1
+      FROM users                -- Query users table
+      WHERE character_id = $1    -- Find by character_id
     `;
-    const crusherResult = await pool.query(crusherQuery, [characterId]); // [cite: 508]
+    const userResult = await pool.query(userQuery, [characterId]);
+    // --- END MODIFIED QUERY ---
 
-    if (crusherResult.rows.length === 0) {
-      // Optionally check the main users table if not found in camp_crushers
-      const userQuery = `SELECT character_name FROM users WHERE character_id = $1`; // [cite: 503]
-      const userResult = await pool.query(userQuery, [characterId]);
-      if (userResult.rows.length === 0) {
-        return res.status(404).json({ error: "Character not found" });
-      }
-      // If found in users but not crushers, assume 0 bashbucks/attacks
-      return res.json({
-        characterName: userResult.rows[0].character_name,
-        bashbucks: 0,
-        successfulAttacks: 0,
-      });
+    if (userResult.rows.length === 0) {
+      // If user not found in the main users table, they don't exist for trophy purposes
+      return res.status(404).json({ error: "Character not found" });
     }
 
-    const crusherData = crusherResult.rows[0];
+    const userData = userResult.rows[0];
 
     // Fetch count of successful attacks (completed camp targets)
+    // This part remains the same as it queries camp_crusher_targets
     const attacksQuery = `
       SELECT COUNT(*) as successfulAttacks
       FROM camp_crusher_targets
       WHERE character_id = $1 AND completed = TRUE
-    `; // [cite: 509]
+    `;
     const attacksResult = await pool.query(attacksQuery, [characterId]);
     const successfulAttacks = parseInt(
       attacksResult.rows[0].successfulattacks || 0
     );
 
     res.json({
-      characterName: crusherData.character_name,
-      bashbucks: crusherData.bashbucks || 0,
+      characterName: userData.character_name,
+      bashbucks: userData.bashbucks || 0, // Use bashbucks from users table
       successfulAttacks: successfulAttacks,
     });
   } catch (error) {
@@ -804,22 +898,48 @@ app.get("/api/campcrushers/stats", async (req, res) => {
     return res.status(401).json({ error: "Not authenticated" });
   }
 
+  const sessionCharacterId = req.session.user.character_id;
+  const sessionCharacterName = req.session.user.character_name; // Get name from session
+
   try {
-    const { rows } = await pool.query(
-      "SELECT character_name, bashbucks FROM camp_crushers WHERE character_id = $1",
-      [req.session.user.character_id]
-    );
+    // --- MODIFIED QUERY ---
+    // Check if player is in camp_crushers AND fetch bashbucks from users table
+    const query = `
+      SELECT
+        cc.character_id,
+        u.bashbucks
+      FROM camp_crushers cc
+      JOIN users u ON cc.character_id = u.character_id
+      WHERE cc.character_id = $1
+    `;
+    const { rows } = await pool.query(query, [sessionCharacterId]);
+    // --- END MODIFIED QUERY ---
 
     if (rows.length === 0) {
-      // Initialize new player
-      await pool.query(
-        "INSERT INTO camp_crushers (character_id, character_name, bashbucks) VALUES ($1, $2, 0)",
-        [req.session.user.character_id, req.session.user.character_name]
+      // User exists in session (and presumably 'users' table), but not in 'camp_crushers'.
+      // Initialize them in camp_crushers (without bashbucks).
+      console.log(
+        `Initializing character ${sessionCharacterId} in camp_crushers.`
       );
-      return res.json({ bashbucks: 0 });
+      await pool.query(
+        // --- MODIFIED INSERT (Removed bashbucks) ---
+        "INSERT INTO camp_crushers (character_id, character_name) VALUES ($1, $2) ON CONFLICT (character_id) DO NOTHING",
+        [sessionCharacterId, sessionCharacterName] // Use name from session
+        // --- END MODIFIED INSERT ---
+      );
+
+      // Since they were just initialized or their stats weren't joined, fetch bashbucks directly from users table
+      const userBashbucksQuery = await pool.query(
+        "SELECT bashbucks FROM users WHERE character_id = $1",
+        [sessionCharacterId]
+      );
+      const userBashbucks = userBashbucksQuery.rows[0]?.bashbucks || 0;
+
+      return res.json({ bashbucks: userBashbucks });
     }
 
-    return res.json({ bashbucks: rows[0].bashbucks });
+    // User found in both tables, return bashbucks from users table result
+    return res.json({ bashbucks: rows[0].bashbucks || 0 });
   } catch (error) {
     console.error("Error fetching camp crusher stats:", error);
     res.status(500).json({ error: "Internal server error" });
@@ -905,35 +1025,38 @@ app.post("/api/campcrushers/target", async (req, res) => {
 
 app.get("/api/campcrushers/leaderboard", async (req, res) => {
   try {
-    // This query gets players and their current active targets (if any)
-    const { rows } = await pool.query(`
-      SELECT 
-        cc.character_id, 
-        cc.character_name, 
-        cc.bashbucks,
+    // --- MODIFIED QUERY ---
+    // Join with users table to get bashbucks and order by it
+    const query = `
+      SELECT
+        cc.character_id,
+        cc.character_name,
+        u.bashbucks, -- Get bashbucks from users table
         current_target.camp_id AS target_camp_id,
         current_target.start_time AS target_start_time
-      FROM 
+      FROM
         camp_crushers cc
+      JOIN users u ON cc.character_id = u.character_id -- Join users table
       LEFT JOIN LATERAL (
-        SELECT 
-          camp_id, 
-          start_time
-        FROM 
-          camp_crusher_targets
-        WHERE 
-          character_id = cc.character_id
-          AND completed = FALSE 
-          AND end_time > CURRENT_TIMESTAMP
-        ORDER BY 
-          start_time DESC
+        SELECT
+          cct.camp_id,
+          cct.start_time
+        FROM
+          camp_crusher_targets cct
+        WHERE
+          cct.character_id = cc.character_id
+          AND cct.completed = FALSE
+          AND cct.end_time > CURRENT_TIMESTAMP
+        ORDER BY
+          cct.start_time DESC
         LIMIT 1
       ) current_target ON true
-      ORDER BY 
-        cc.bashbucks DESC
-    `);
+      ORDER BY
+        u.bashbucks DESC -- Order by bashbucks from users table
+    `;
+    const { rows } = await pool.query(query);
+    // --- END MODIFIED QUERY ---
 
-    // If we have no data, return empty array
     if (!rows || !Array.isArray(rows)) {
       return res.json([]);
     }
@@ -942,7 +1065,7 @@ app.get("/api/campcrushers/leaderboard", async (req, res) => {
     const leaderboard = rows.map((player) => ({
       character_id: player.character_id,
       character_name: player.character_name,
-      bashbucks: player.bashbucks || 0,
+      bashbucks: player.bashbucks || 0, // Use bashbucks from the joined users table
       target_camp_id: player.target_camp_id,
       target_start_time: player.target_start_time,
       total_camps_crushed: 0, // We can add this feature later
@@ -2759,6 +2882,29 @@ function isDuplicateKillmail(killmail, existingKillmails) {
 }
 
 async function processKillmailData(killmail) {
+  // Basic validation of killmail structure
+  if (
+    !killmail ||
+    !killmail.killmail ||
+    !killmail.killmail.killmail_time ||
+    !killmail.killmail.solar_system_id ||
+    !killmail.killmail.attackers ||
+    !killmail.killmail.victim
+  ) {
+    console.warn(
+      "Skipping invalid killmail data (missing core fields):",
+      killmail?.killID
+    );
+    return null; // Return null if basic structure is invalid
+  }
+  // Validate time
+  if (isNaN(new Date(killmail.killmail.killmail_time).getTime())) {
+    console.warn(
+      `Skipping killmail ${killmail.killID} due to invalid kill time.`
+    );
+    return null; // Return null if time is invalid
+  }
+
   console.log("Starting processKillmailData", {
     killID: killmail.killID,
     systemId: killmail.killmail.solar_system_id,
@@ -2766,100 +2912,237 @@ async function processKillmailData(killmail) {
   });
 
   try {
-    const systemId = killmail.killmail.solar_system_id;
+    // Add ship categories first
+    const killmailWithShips = await addShipCategoriesToKillmail(killmail); //
+    if (!killmailWithShips) {
+      console.warn(
+        `Skipping killmail ${killmail.killID}: Failed to add ship categories.`
+      );
+      return null; // Return null if adding categories fails
+    }
+    // killmailWithShips is now guaranteed to be defined and non-null here
 
-    console.log("Fetching celestial data...");
-    const celestialData = await fetchCelestialData(systemId);
-    console.log(
-      "Celestial data fetched:",
-      celestialData && celestialData.length
-    );
-
-    // Calculate pinpoint data including nearest celestial
-    console.log("Calculating pinpoints...");
-    const pinpointData = calculatePinpoints(
-      celestialData,
-      killmail.killmail.victim.position
-    );
-    console.log("Pinpoint data calculated:", pinpointData);
-
-    // Get the first celestial entry which contains system info
-    const systemInfo = celestialData?.[0];
-    const celestialInfo = systemInfo
-      ? {
-          regionid: systemInfo.regionid,
-          regionname: systemInfo.regionname,
-          solarsystemid: systemInfo.solarsystemid,
-          solarsystemname: systemInfo.solarsystemname,
-        }
-      : {
+    // Ensure nested properties exist before accessing for pinpoints
+    if (
+      !killmailWithShips.killmail ||
+      !killmailWithShips.killmail.victim ||
+      !killmailWithShips.killmail.victim.position
+    ) {
+      console.warn(
+        `Skipping killmail ${killmail.killID}: Missing killmail, victim, or position data needed for pinpoints.`
+      );
+      // Decide if you want to continue without pinpoints or return null
+      // For now, let's add default pinpoints and continue
+      killmailWithShips.pinpoints = {
+        hasTetrahedron: false,
+        points: [],
+        atCelestial: false,
+        nearestCelestial: null,
+        triangulationPossible: false,
+        triangulationType: null,
+        celestialData: {
+          // Add default celestial data structure
           regionid: null,
           regionname: null,
-          solarsystemid: systemId,
+          solarsystemid: killmailWithShips.killmail.solar_system_id,
           solarsystemname: null,
-        };
-
-    // Set celestial data for pinpoints
-    pinpointData.celestialData = celestialInfo;
-
-    // Check for camp crusher rewards
-    console.log("Checking camp crusher targets...");
-    try {
-      const { rows: targets } = await pool.query(
-        `SELECT ct.*, cc.bashbucks 
-     FROM camp_crusher_targets ct 
-     JOIN camp_crushers cc ON ct.character_id = cc.character_id
-     WHERE ct.camp_id = $1 AND ct.completed = FALSE AND ct.end_time > CURRENT_TIMESTAMP`,
-        [killmail.killmail.solar_system_id]
+        },
+      };
+      // return null; // Option to stop processing if position is missing
+    } else {
+      // Fetch celestial data
+      const systemId = killmailWithShips.killmail.solar_system_id; // [cite: 862]
+      const celestialData = await fetchCelestialData(systemId); //
+      // Calculate pinpoint data including nearest celestial
+      const pinpointData = calculatePinpoints(
+        //
+        celestialData,
+        killmailWithShips.killmail.victim.position // Safe to use now
       );
-      console.log(`Found ${targets.length} potential camp crusher targets`);
-
-      for (const target of targets) {
-        const isAttacker = killmail.killmail.attackers.some(
-          (a) => a.character_id === target.character_id
-        );
-
-        if (isAttacker) {
-          const bashbucksAwarded = Math.floor(
-            killmail.zkb.totalValue / 1000000
-          );
-          await pool.query(
-            "UPDATE camp_crushers SET bashbucks = bashbucks + $1 WHERE character_id = $2",
-            [bashbucksAwarded, target.character_id]
-          );
-
-          await pool.query(
-            "UPDATE camp_crusher_targets SET completed = TRUE WHERE id = $1",
-            [target.id]
-          );
-
-          io.to(target.character_id).emit("bashbucksAwarded", {
-            amount: bashbucksAwarded,
-            newTotal: target.bashbucks + bashbucksAwarded,
-            killmail: {
-              id: killmail.killID,
-              value: killmail.zkb.totalValue,
-              system: celestialInfo.solarsystemname || systemId,
-            },
-          });
-        }
-      }
-    } catch (error) {
-      console.error("Error processing camp crusher rewards:", error);
+      // Add pinpoint and celestial info to the killmail object
+      killmailWithShips.pinpoints = pinpointData; // [cite: 865]
+      const systemInfo = celestialData?.[0]; // [cite: 865]
+      killmailWithShips.pinpoints.celestialData = systemInfo // [cite: 866]
+        ? {
+            regionid: systemInfo.regionid, // [cite: 866]
+            regionname: systemInfo.regionname, // [cite: 866]
+            solarsystemid: systemInfo.solarsystemid, // [cite: 866]
+            solarsystemname: systemInfo.solarsystemname, // [cite: 866]
+          }
+        : {
+            regionid: null, // [cite: 866]
+            regionname: null, // [cite: 866]
+            solarsystemid: systemId, // [cite: 867]
+            solarsystemname: null, // [cite: 867]
+          };
     }
 
-    // Add the celestial data to the killmail object
-    killmail.pinpoints = pinpointData;
+    // Process with the unified manager
+    serverActivityManager.processKillmailActivity(killmailWithShips); // [cite: 868]
 
-    serverCampManager.processCamp(killmail);
-    serverRoamManager.updateRoamingGangs(killmail);
+    // --- START: NEW Camp Crusher Reward Logic ---
+    console.log("Checking camp crusher targets (New Logic)..."); // [cite: 869]
+    const victimCharacterId = killmailWithShips.killmail.victim.character_id; // [cite: 870]
+    const attackerCharacterIds = killmailWithShips.killmail.attackers // [cite: 870]
+      .map((a) => a.character_id) // [cite: 870]
+      .filter(Boolean); // Get IDs of all attackers // [cite: 870]
 
-    return killmail;
+    const killLocation = {
+      // [cite: 870]
+      systemId: killmailWithShips.killmail.solar_system_id, // [cite: 870]
+      // We need a way to check proximity to the stargate.
+      // Using pinpoint data is the most accurate.
+      // Let's check if the kill happened 'at' or 'near' the gate associated with the target.
+      isNearTargetGate: (targetStargateName) => {
+        // [cite: 870]
+        if (
+          !killmailWithShips.pinpoints?.nearestCelestial?.name ||
+          !targetStargateName
+        )
+          return false; // [cite: 870]
+        const killNearestGate =
+          killmailWithShips.pinpoints.nearestCelestial.name; // [cite: 870]
+        // Check if the kill's nearest gate matches the target gate name AND
+        // if the triangulation type indicates proximity.
+        return (
+          // [cite: 870]
+          killNearestGate
+            .toLowerCase()
+            .includes(targetStargateName.toLowerCase()) && // [cite: 870]
+          (killmailWithShips.pinpoints.atCelestial || // [cite: 870]
+            killmailWithShips.pinpoints.triangulationType === "direct_warp" || // [cite: 870]
+            killmailWithShips.pinpoints.triangulationType === "near_celestial") // [cite: 870]
+        );
+      },
+    };
+
+    const BASHBUCKS_DEATH_PENALTY = 5; // [cite: 872]
+    const BASHBUCKS_KILL_REWARD = 20; // [cite: 872]
+    const awardedCrushers = new Set(); // Track who received points for this killmail // [cite: 872]
+
+    try {
+      // --- Check if Victim was a Crusher at their Target Location ---
+      if (victimCharacterId) {
+        // [cite: 872]
+        const { rows: victimTargets } = await pool.query(
+          // [cite: 872]
+          `SELECT id, system_id, stargate_name
+               FROM camp_crusher_targets
+               WHERE character_id = $1 AND completed = FALSE AND end_time > NOW()`, // [cite: 872]
+          [victimCharacterId] // [cite: 872]
+        );
+
+        for (const target of victimTargets) {
+          // [cite: 872]
+          // Check if the kill occurred in the target system AND near the target stargate
+          if (
+            target.system_id === killLocation.systemId &&
+            killLocation.isNearTargetGate(target.stargate_name)
+          ) {
+            // [cite: 872]
+            // Victim died at their target location
+            if (!awardedCrushers.has(victimCharacterId)) {
+              // Avoid double awarding if also attacker // [cite: 872]
+              console.log(
+                `Camp Crusher ${victimCharacterId} died at target location ${target.stargate_name}. Awarding ${BASHBUCKS_DEATH_PENALTY} Bashbucks.`
+              ); // [cite: 872]
+              // Award points to the user's main bashbucks count
+              await pool.query(
+                // [cite: 872]
+                `UPDATE users SET bashbucks = bashbucks + $1 WHERE character_id = $2`, // [cite: 872]
+                [BASHBUCKS_DEATH_PENALTY, victimCharacterId] // [cite: 872]
+              );
+              awardedCrushers.add(victimCharacterId); // [cite: 872]
+              // Emit update to the specific user (optional: fetch new total first)
+              io.to(victimCharacterId.toString()).emit("bashbucksUpdate", {
+                change: BASHBUCKS_DEATH_PENALTY,
+              }); // [cite: 872]
+              break; // Only award once per killmail even if multiple targets match location // [cite: 872]
+            }
+          }
+        }
+      }
+
+      // --- Check if Attacker was a Crusher who got a kill at their Target Location ---
+      for (const attackerId of attackerCharacterIds) {
+        // [cite: 872]
+        if (awardedCrushers.has(attackerId)) continue; // Skip if already awarded for dying // [cite: 872]
+
+        const { rows: attackerTargets } = await pool.query(
+          // [cite: 872]
+          `SELECT id, system_id, stargate_name
+               FROM camp_crusher_targets
+               WHERE character_id = $1 AND completed = FALSE AND end_time > NOW()`, // [cite: 872]
+          [attackerId] // [cite: 872]
+        );
+
+        for (const target of attackerTargets) {
+          // [cite: 872]
+          // Check if the kill occurred in the target system AND near the target stargate
+          if (
+            target.system_id === killLocation.systemId &&
+            killLocation.isNearTargetGate(target.stargate_name)
+          ) {
+            // [cite: 872]
+            // Attacker got *a* kill at their target location. Award points and complete.
+            if (!awardedCrushers.has(attackerId)) {
+              // [cite: 872]
+              console.log(
+                `Camp Crusher ${attackerId} got a kill at target location ${target.stargate_name}. Awarding ${BASHBUCKS_KILL_REWARD} Bashbucks & completing target ${target.id}.`
+              ); // [cite: 872]
+              // Award Bashbucks
+              await pool.query(
+                // [cite: 872]
+                `UPDATE users SET bashbucks = bashbucks + $1 WHERE character_id = $2`, // [cite: 872]
+                [BASHBUCKS_KILL_REWARD, attackerId] // [cite: 872]
+              );
+              // Mark target as complete using its specific ID
+              await pool.query(
+                // [cite: 872]
+                `UPDATE camp_crusher_targets SET completed = TRUE WHERE id = $1`, // [cite: 872]
+                [target.id] // [cite: 872]
+              );
+              awardedCrushers.add(attackerId); // [cite: 872]
+              // Emit updates
+              io.to(attackerId.toString()).emit("bashbucksUpdate", {
+                change: BASHBUCKS_KILL_REWARD,
+              }); // [cite: 872]
+              io.to(attackerId.toString()).emit("targetCompleted", {
+                targetId: target.id,
+              }); // [cite: 872]
+              break; // Only award once per killmail even if multiple targets match location // [cite: 872]
+            }
+          }
+        }
+      }
+      // --- END: NEW Camp Crusher Reward Logic ---
+    } catch (error) {
+      // Log specific camp crusher errors but don't stop overall processing
+      console.error("Error processing camp crusher rewards:", error); // [cite: 882]
+    }
+
+    // Add killmail to in-memory cache (moved from pollRedisQ)
+    // This ensures only fully processed killmails are added
+    if (!isDuplicateKillmail(killmailWithShips, killmails)) {
+      // [cite: 883, 855]
+      killmails.push(killmailWithShips); // [cite: 883]
+      // Optionally broadcast the new, fully processed killmail
+      io.to("live-updates").emit("newKillmail", killmailWithShips); // [cite: 884]
+    }
+
+    return killmailWithShips; // Return the processed killmail // [cite: 885]
   } catch (error) {
-    console.error("Fatal error in processKillmailData:", error);
-    throw error;
+    // Log the error with the original killID for reference
+    console.error(
+      // [cite: 885]
+      `Fatal error in processKillmailData for kill ${
+        killmail?.killID || "UNKNOWN"
+      }:`, // [cite: 885]
+      error // [cite: 885]
+    );
+    return null; // Return null on failure // [cite: 886]
   }
-}
+} // End of processKillmailData
 
 io.on("connection", (socket) => {
   console.log("New client connected");
@@ -2895,20 +3178,18 @@ io.on("connection", (socket) => {
     }
   });
 
-  socket.on("requestCamps", () => {
-    const activeCamps = serverCampManager.getActiveCamps();
-    socket.emit("campUpdate", activeCamps);
-  });
-
-  socket.on("requestRoams", () => {
-    const activeRoams = serverRoamManager.getRoams();
-    socket.emit("roamUpdate", activeRoams);
+  socket.on("requestActivities", () => {
+    console.log(`Socket ${socket.id} requested current activities.`);
+    const currentActivities = serverActivityManager.getActiveActivities();
+    socket.emit("activityUpdate", currentActivities); // Emit the unified update
   });
 
   socket.on("cacheSyncComplete", () => {
-    // Simply acknowledge completion and enable live updates
+    console.log(
+      `Socket ${socket.id} confirmed cache sync complete. Joining live updates.`
+    );
     socket.emit("syncVerified", { success: true });
-    socket.join("live-updates");
+    socket.join("live-updates"); // Join the room for live killmail broadcasts
   });
 
   socket.on("fetchFilterLists", async () => {
@@ -3284,28 +3565,21 @@ async function pollRedisQ() {
       const killmail = response.data.package;
 
       if (
-        !isDuplicate(killmail) &&
-        isWithinLast6Hours(killmail.killmail.killmail_time) // Updated function name
+        !isDuplicateKillmail(killmail, killmails) &&
+        isWithinLast6Hours(killmail.killmail.killmail_time)
       ) {
-        // Enqueue processing instead of processing immediately
+        // Enqueue processing
         killmailProcessingQueue
           .enqueue(async () => {
             try {
-              // First add ship categories (faster operation)
-              const killmailWithShips = await addShipCategoriesToKillmail(
-                killmail
-              );
+              // Process killmail (adds ships, pinpoints, updates activities)
+              const processedKillmail = await processKillmailData(killmail);
 
-              // Then do the more expensive pinpoint calculations
-              const processedKillmail = await processKillmailData(
-                killmailWithShips
-              );
-
-              killmails.push(processedKillmail);
-              killmails = cleanKillmailsCache(killmails);
-
-              // Emit only to synced clients
-              io.to("live-updates").emit("newKillmail", processedKillmail);
+              // Add to in-memory cache only if successfully processed
+              if (processedKillmail) {
+                killmails.push(processedKillmail);
+                // Clean cache periodically or based on size, not necessarily here
+              }
             } catch (error) {
               console.error("Error processing killmail in queue:", error);
             }
@@ -3316,10 +3590,14 @@ async function pollRedisQ() {
       }
     }
   } catch (error) {
-    console.error("Error polling RedisQ:", error);
+    // Ignore timeout errors, log others
+    if (error.code !== "ECONNABORTED" && error.code !== "ETIMEDOUT") {
+      console.error("Error polling RedisQ:", error.message);
+    }
+  } finally {
+    // Schedule next poll regardless of outcome
+    setTimeout(pollRedisQ, 50); // Poll slightly less aggressively
   }
-
-  setTimeout(pollRedisQ, 20);
 }
 
 // There are sometimes duplicate killmails in the RedisQ
@@ -3419,9 +3697,9 @@ app.get(/^(?!\/(api|trophy|trophy-page)\/).*/, (_, res) => {
 
 process.on("SIGTERM", async () => {
   console.log("SIGTERM received. Cleaning up...");
-  serverCampManager.cleanup();
-  serverRoamManager.cleanup();
+  serverActivityManager.cleanup();
   await redisClient.quit();
+  console.log("Cleanup finished. Exiting.");
   process.exit(0);
 });
 

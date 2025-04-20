@@ -121,8 +121,6 @@ Tech stack:
 
 - Add additional options for the tts messages. Allow the user to enable roaming gang warnings, and high risk system warnings, also potentially nearby roam warnings (example, if a gang kills someone in your region). It should warn you of the location of the combat activity and tell you what the composition is of the activity if occurred in the last 3 minutes.
 - Give the "AI" voice a name, like TARA.
-- Add npc losses tab, showing where players died to valuable npcs (if it is triangulatable) --> within the last 1 hour.
-- Add an option to pin camp systems so you can see their status at the top (linked to the player account, so it remembers)
 - Reduce the time decay for smartbomb camps and highlight them as blue, allow the user to filter by smartbomb camps.
 - Add a second cache list for camps, even if the decay has reduced it to less than 1%, it will stay watch that gate for 20 minutes after to see if there is another kill, then it will still count for the successive kills bonus. For smartbomb camps, it is 30 minutes. 
 - Reduce the complexity and load time of the campcrushers leaderboard
@@ -130,20 +128,14 @@ Tech stack:
 - Add a filter gangs to only show roaming gangs (multiple systems)
 - Add a filter for gangs that is a dropdown to show currently active regions, user can also type it in to filter the dropdown to select what they want.
 - Add an option to send alerts if there is a gang in a specific region.
-- Allow "gangs" to be 1 person. This way we can detect and track active combat pilots, certain rules should apply to these though, they should be marked as solo.
-- Victims consistency duplication check for same is attackers for some reason? It is also skipping all consistency checks after one instance where they are all the same corp/alliance --> needs to just not apply for that specific one but allowed for later.
-- Threat ship limitation is no longer applied after the consistency check passes, this should probability be permanently limited to 50%
-- Smartbomb activity should be ignored if the kill is an awox kill.
-- Fix the error where audio alert triggers for every visible item if all items are visible. Should only be for each new received kill that is visible.
 
 #### Next thing
 
 - Model complex relationships for camps over 7 days. If a system is repeatedly marked as a camp, record the time of day it first appears, and record when it ends. Create a graph that shows when that system is likely to be camped, and then feed this into the probability calculation. If there is a camp there, it immediately jumps to 95% probability and takes longer to degrade (20 minutes instead of 10). It also has a special mark to show it is a regularly camped system.
 - The tables stores the  frequency of camps for the system over time, but we only fetch the last 7 days. This way we continue to accumulate data over time and can use it to visualize popular camp locations over time by specific groups (should also record the corp/alliance name of the campers and the ship types)
 - If recording the ship types (We want to show this anyways in the composition instead of probability debug), then we can use the composition to better model against other camps to increase accuracy.
-- 50% probability restriction should always be applied to ships even if there are consecutive kills
 - 50% of the pre-time decay probability prediction should be ML 
 - Add an additional score that is recalculated once per day at downtime. This score should check for the frequency + probability > 50% (combined max score) for different systems and groups to identify most camped systems. This score should be used in ML.
 - There should be two ML models, one does clustering for a cluster score, and the other is a manual random forest classifier.
-- Fix the error where a camp is ignored if any one of the consecutive kills is an npc kill
-- Fix the error when combining multiple lists (NPCs page and filter lists manager) where it won't combine all the ids from the lists, only showing matching results from a single list.
+- Make it so that the settings are correctly remembered when switching between tabs (Default profile that updates automatically and saves automatically)
+- The knows there's a rare npc kill because the status bar is generated, but it does not appear.

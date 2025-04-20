@@ -3,8 +3,8 @@ import { writable, get } from "svelte/store";
 import socket from "./socket.js";
 import { processNewSalvage } from "./salvage.js";
 import { addKillmailToBattles } from "./battles.js";
-import { activeCamps } from "./campManager.js";
-import { activeRoams } from "./roamManager.js";
+// Import the unified activity store
+import { activeActivities } from "./activityManager.js"; // Changed import
 import {
   killmails,
   settings,
@@ -33,16 +33,13 @@ export function initializeSocketStore() {
     if (!get(isInitialLoadComplete)) {
       socket.emit("requestInitialKillmails");
     }
-    socket.emit("requestCamps");
-    socket.emit("requestRoams");
+    // Request unified activity data
+    socket.emit("requestActivities"); // Changed event name
   });
 
   socket.on("disconnect", (reason) => {
     console.log("Socket disconnected:", reason);
     socketConnected.set(false);
-
-    // We don't reset isInitialLoadComplete on disconnect
-    // This prevents unnecessary reinitialization on reconnect
   });
 
   socket.on("connect_error", (error) => {
@@ -52,7 +49,6 @@ export function initializeSocketStore() {
 
   // Cache initialization and synchronization
   socket.on("cacheInitStart", ({ totalSize }) => {
-    // Only start a new sync if we haven't completed the initial load
     if (!get(isInitialLoadComplete)) {
       console.log(`Starting cache initialization. Expected size: ${totalSize}`);
       isSyncing = true;
@@ -64,12 +60,10 @@ export function initializeSocketStore() {
   });
 
   socket.on("cacheChunk", ({ chunk, currentCount, totalSize }) => {
-    // Only process chunks if we're syncing
     if (isSyncing) {
       receivedKillmails.push(...chunk);
       console.log(`Received chunk. Progress: ${currentCount}/${totalSize}`);
 
-      // Process the chunk
       chunk.forEach((killmail) => {
         processNewSalvage(killmail);
         addKillmailToBattles(killmail);
@@ -78,8 +72,6 @@ export function initializeSocketStore() {
       if (currentCount === totalSize) {
         console.log("Cache chunk reception complete");
         killmails.set(receivedKillmails);
-
-        // Complete the sync
         socket.emit("cacheSyncComplete");
       }
     } else {
@@ -101,29 +93,26 @@ export function initializeSocketStore() {
       killmails.update((km) => [killmail, ...km]);
       processNewSalvage(killmail);
       addKillmailToBattles(killmail);
+      // Note: Server's processKillmailActivity should handle updating activities
     }
   });
 
-  // Camp and roam updates
-  socket.on("campUpdate", (camps) => {
-    console.log(`Received camp update: ${camps.length} camps`);
-    activeCamps.set(camps);
-  });
+  // --- REMOVED campUpdate and roamUpdate listeners ---
 
-  socket.on("roamUpdate", (roams) => {
-    console.log(`Received roam update: ${roams.length} roams`);
-    activeRoams.set(roams);
+  // --- ADDED activityUpdate listener ---
+  socket.on("activityUpdate", (activities) => {
+    console.log(`Received activity update: ${activities.length} activities`);
+    activeActivities.set(activities); // Update the unified store
   });
+  // --- END ADDED ---
 
-  // Filter and profile events
+  // Filter and profile events (remain the same)
   socket.on("filterListCreated", (newList) => {
     filterLists.update((lists) => [...lists, newList]);
   });
-
   socket.on("filterListDeleted", (id) => {
     filterLists.update((lists) => lists.filter((l) => l.id !== id));
   });
-
   socket.on("profileSaved", (profile) => {
     profiles.update((currentProfiles) => {
       const index = currentProfiles.findIndex((p) => p.id === profile.id);
@@ -135,7 +124,6 @@ export function initializeSocketStore() {
       return [...currentProfiles, profile];
     });
   });
-
   socket.on("profileDeleted", (id) => {
     profiles.update((currentProfiles) =>
       currentProfiles.filter((p) => p.id !== id)
@@ -150,12 +138,12 @@ export function initializeSocketStore() {
 
   socket.on("reconnect", () => {
     console.log("Socket reconnected");
-
-    // On reconnect, only request new data if we never completed the initial load
     if (!get(isInitialLoadComplete)) {
       receivedKillmails = [];
       socket.emit("requestInitialKillmails");
     }
+    // Request activities on reconnect
+    socket.emit("requestActivities"); // Changed event name
   });
 }
 
@@ -168,8 +156,9 @@ function cleanupSocket() {
     "cacheChunk",
     "syncVerified",
     "newKillmail",
-    "campUpdate",
-    "roamUpdate",
+    // "campUpdate", // Removed
+    // "roamUpdate", // Removed
+    "activityUpdate", // Added
     "filterListCreated",
     "filterListDeleted",
     "profileSaved",

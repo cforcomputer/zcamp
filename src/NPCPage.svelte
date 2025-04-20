@@ -1,17 +1,12 @@
-<!-- NPCPage.svelte -->
 <script>
-  import { onMount } from "svelte";
+  import { onMount, onDestroy } from "svelte"; // Added onDestroy
   import { killmails, settings } from "./settingsStore.js";
-  //   import { createEventDispatcher } from "svelte";
   import ContextMenu from "./ContextMenu.svelte";
   import { NPC_CATEGORIES } from "./constants.js"; // Import NPC categories from constants
   import audioManager from "./audioUtils.js";
+  import { getValidAccessToken } from "./tokenManager.js"; // Import ESI helper
 
-  //   const dispatch = createEventDispatcher();
-
-  // NPC categories with their IDs and display colors
-
-  // Create a flat array of all NPC IDs for easy lookup
+  // Create a flat array of all NPC ship type IDs for easy lookup
   const ALL_NPC_IDS = Object.values(NPC_CATEGORIES).flatMap(
     (category) => category.ids
   );
@@ -23,9 +18,9 @@
     BELT_COMMANDERS: true,
   };
 
-  let showSecurityDropdown = false;
   let filteredKillmails = [];
   let enableAudioAlerts = false;
+  let previousKillmailIds = new Set(); // Track IDs for audio alerts
 
   const SOUND_SETTINGS = {
     MORDUS_LEGION: "blue", // Blue alert for Mordus
@@ -35,84 +30,70 @@
 
   onMount(() => {
     audioManager.init();
+    // Initialize previous IDs when component mounts
+    previousKillmailIds = new Set($killmails.map((km) => km.killID));
   });
 
   // Filter killmails for NPCs
   $: {
     // Get all selected NPC IDs (which are actually Ship Type IDs)
-    const selectedNpcShipTypeIds = Object.entries(selectedCategories) //
-      .filter(([_, selected]) => selected) //
-      .flatMap(([key, _]) => NPC_CATEGORIES[key].ids); //
+    const selectedNpcShipTypeIds = Object.entries(selectedCategories)
+      .filter(([_, selected]) => selected)
+      .flatMap(([key, _]) => NPC_CATEGORIES[key].ids);
 
     const newFilteredKillmails = $killmails.filter((killmail) => {
-      // Check if any attacker's SHIP TYPE ID is in our list
-      const hasNpcAttackerShip = killmail.killmail.attackers.some(
-        (
-          attacker //
-        ) =>
-          // Compare selected IDs against the attacker's ship_type_id
-          selectedNpcShipTypeIds.includes(attacker.ship_type_id) // <-- FIX: Check ship_type_id
+      // Check if any attacker's SHIP TYPE ID is in our list of selected NPC ship types
+      const hasNpcAttackerShip = killmail.killmail.attackers.some((attacker) =>
+        selectedNpcShipTypeIds.includes(attacker.ship_type_id)
       );
-
-      return hasNpcAttackerShip; //
+      return hasNpcAttackerShip;
     });
 
     // Sort by most recent first
     newFilteredKillmails.sort((a, b) => {
-      //
       return (
-        //
-        new Date(b.killmail.killmail_time) - new Date(a.killmail.killmail_time) //
+        new Date(b.killmail.killmail_time) - new Date(a.killmail.killmail_time)
       );
     });
 
-    // Check for new killmails to play alerts (existing logic)
+    // --- Audio Alert Logic ---
     if (enableAudioAlerts && newFilteredKillmails.length > 0) {
-      //
-      const currentIds = new Set(newFilteredKillmails.map((km) => km.killID)); //
-      // Find killmails that weren't in the previous set
-      const newKillmails = newFilteredKillmails.filter(
-        //
-        (km) => !previousKillmailIds.has(km.killID) //
+      const currentIds = new Set(newFilteredKillmails.map((km) => km.killID));
+      const newlyAddedKillmails = newFilteredKillmails.filter(
+        (km) => !previousKillmailIds.has(km.killID)
       );
-      // Play audio alerts for new killmails
-      newKillmails.forEach((killmail) => {
-        //
-        // Find NPC type for this killmail (still using character_id here might be okay if constants map ship->category, but check consistency)
-        const npcAttackers = killmail.killmail.attackers.filter(
-          (
-            attacker // Check attacker's SHIP TYPE ID against ALL known NPC ship type IDs
-          ) => ALL_NPC_IDS.includes(attacker.ship_type_id) // <-- Check if this needs adjustment based on how SOUND_SETTINGS work
+
+      newlyAddedKillmails.forEach((killmail) => {
+        // Find the *first* attacker in this killmail whose ship type ID matches ANY known NPC category ID
+        const npcAttacker = killmail.killmail.attackers.find((attacker) =>
+          ALL_NPC_IDS.includes(attacker.ship_type_id)
         );
 
-        if (npcAttackers.length > 0) {
-          //
-          // Find the category based on the FIRST matching NPC attacker's SHIP TYPE ID
-          let alertType = "default"; //
-          let foundCategory = false; //
-          for (const attacker of npcAttackers) {
-            //
-            for (const [categoryKey, category] of Object.entries(
-              //
-              NPC_CATEGORIES //
-            )) {
-              if (category.ids.includes(attacker.ship_type_id)) {
-                // Match category by ship ID
-                alertType = SOUND_SETTINGS[categoryKey]; //
-                foundCategory = true; //
-                break; // Exit inner loop once category found for this attacker
-              }
+        if (npcAttacker) {
+          let alertType = "default"; // Default sound
+          // Find the category this specific NPC belongs to
+          for (const [categoryKey, category] of Object.entries(
+            NPC_CATEGORIES
+          )) {
+            if (category.ids.includes(npcAttacker.ship_type_id)) {
+              alertType = SOUND_SETTINGS[categoryKey] || "default";
+              break; // Found the category
             }
-            if (foundCategory) break; // Exit outer loop if category found for any attacker
           }
-          audioManager.playAlert(alertType); //
+          audioManager.playAlert(alertType);
         }
       });
-      // Update previous killmail IDs
-      previousKillmailIds = currentIds; //
+      // Update previous killmail IDs *after* processing new ones
+      previousKillmailIds = currentIds;
+    } else if (!enableAudioAlerts) {
+      // Update previous IDs even if alerts are off to prevent sound burst when re-enabled
+      previousKillmailIds = new Set(
+        newFilteredKillmails.map((km) => km.killID)
+      );
     }
+    // --- End Audio Alert Logic ---
 
-    filteredKillmails = newFilteredKillmails; //
+    filteredKillmails = newFilteredKillmails;
   }
 
   // Context menu state
@@ -123,14 +104,16 @@
     options: [],
   };
 
-  function getNpcCategory(characterId) {
+  // --- MODIFIED: Takes shipTypeId ---
+  function getNpcCategory(shipTypeId) {
     for (const [key, category] of Object.entries(NPC_CATEGORIES)) {
-      if (category.ids.includes(characterId)) {
-        return { key, ...category };
+      if (category.ids.includes(shipTypeId)) {
+        return { key, ...category }; // Return the key and the category object
       }
     }
-    return null;
+    return null; // Return null if no category matches
   }
+  // --- END MODIFIED ---
 
   function getTimeAgo(timestamp) {
     if (!timestamp) return "unknown";
@@ -192,11 +175,15 @@
     }
 
     if (killmail.pinpoints.triangulationType === "direct_warp") {
-      return `Direct warp to ${killmail.pinpoints.nearestCelestial.name} (${(killmail.pinpoints.nearestCelestial.distance / 1000).toFixed(2)} km)`;
+      return `Direct warp to ${killmail.pinpoints.nearestCelestial.name} (${(
+        killmail.pinpoints.nearestCelestial.distance / 1000
+      ).toFixed(2)} km)`;
     }
 
     if (killmail.pinpoints.triangulationType === "near_celestial") {
-      return `Near celestial: ${killmail.pinpoints.nearestCelestial.name} (${(killmail.pinpoints.nearestCelestial.distance / 1000).toFixed(2)} km)`;
+      return `Near celestial: ${killmail.pinpoints.nearestCelestial.name} (${(
+        killmail.pinpoints.nearestCelestial.distance / 1000
+      ).toFixed(2)} km)`;
     }
 
     if (killmail.pinpoints.triangulationType === "via_bookspam") {
@@ -205,8 +192,6 @@
 
     return "Cannot be triangulated";
   }
-
-  import { getValidAccessToken } from "./tokenManager.js";
 
   async function setDestination(systemId, clearOthers = true) {
     try {
@@ -277,7 +262,6 @@
     <h2 class="text-xl font-bold text-white">NPC Hunter</h2>
     <div class="flex gap-4 items-center">
       <div class="relative">
-        <!-- Audio alerts toggle -->
         <label
           class="flex items-center gap-2 px-3 py-1.5 rounded bg-eve-dark/80 border border-eve-accent/30"
         >
@@ -288,40 +272,12 @@
           />
           <span class="text-eve-accent">Audio Alerts</span>
         </label>
-        <!-- Security status dropdown -->
-        <!-- <button
-          class="px-3 py-1.5 bg-eve-dark border border-eve-secondary/30 text-white rounded flex items-center gap-2"
-          on:click={() => (showSecurityDropdown = !showSecurityDropdown)}
-        >
-          Security Status
-          <span class="text-xs opacity-50">▼</span>
-        </button>
-
-        {#if showSecurityDropdown}
-          <div
-            class="absolute right-0 top-full mt-1 bg-eve-dark border border-eve-secondary/30 rounded p-2 z-10 min-w-[150px] shadow-lg"
-            on:mouseleave={() => (showSecurityDropdown = false)}
-          >
-            {#each Object.entries($settings.location_types) as [type, enabled]}
-              <label
-                class="flex items-center px-2 py-1.5 hover:bg-eve-secondary/20"
-              >
-                <input
-                  type="checkbox"
-                  class="form-checkbox"
-                  bind:checked={$settings.location_types[type]}
-                />
-                <span class="ml-2 text-white capitalize">{type}</span>
-              </label>
-            {/each}
-          </div>
-        {/if} -->
       </div>
 
       <div class="flex gap-2">
         {#each Object.entries(NPC_CATEGORIES) as [key, category]}
           <label
-            class="flex items-center gap-2 px-3 py-1.5 rounded"
+            class="flex items-center gap-2 px-3 py-1.5 rounded cursor-pointer"
             style="background: {category.color}40; border: 1px solid {category.color}"
           >
             <input
@@ -338,7 +294,7 @@
 
   {#if filteredKillmails.length === 0}
     <div class="text-gray-400 text-center py-4">
-      No rare NPC kills found in the past 6 hours...
+      No rare NPC kills found matching your filters...
     </div>
   {:else}
     <div class="overflow-x-auto rounded-lg border border-eve-secondary/30">
@@ -353,14 +309,13 @@
           </tr>
         </thead>
         <tbody>
-          {#each filteredKillmails as killmail}
-            {@const npcAttackers = killmail.killmail.attackers.filter(
-              (attacker) => ALL_NPC_IDS.includes(attacker.character_id)
+          {#each filteredKillmails as killmail (killmail.killID)}
+            {@const primaryNpcAttacker = killmail.killmail.attackers.find(
+              (attacker) => ALL_NPC_IDS.includes(attacker.ship_type_id)
             )}
-            {#if npcAttackers.length > 0}
-              {@const primaryNpcAttacker = npcAttackers[0]}
+            {#if primaryNpcAttacker}
               {@const category = getNpcCategory(
-                primaryNpcAttacker.character_id
+                primaryNpcAttacker.ship_type_id
               )}
               {#if category}
                 <tr
@@ -384,7 +339,7 @@
                 >
                   <td class="px-4 py-3">
                     <span
-                      class="px-2 py-1 rounded text-white"
+                      class="px-2 py-1 rounded text-white text-sm"
                       style="background-color: {category.color}"
                     >
                       {category.name}

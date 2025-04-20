@@ -15,6 +15,7 @@
     filterLists,
     profiles,
     clearKills,
+    initializeSettings, // Import initializeSettings
   } from "./settingsStore.js";
   import Login from "./Login.svelte";
   import WelcomeOverlay from "./WelcomeOverlay.svelte";
@@ -22,7 +23,6 @@
   import ActiveCamps from "./ActiveCamps.svelte";
   import ActiveRoams from "./ActiveRoams.svelte";
   import SalvageFields from "./SalvageFields.svelte";
-  import { initializeSettings } from "./settingsStore.js";
   import Leaderboard from "./Leaderboard.svelte";
   import LocationTracker from "./LocationTracker.svelte";
   import MapVisualization from "./MapVisualization.svelte";
@@ -35,8 +35,9 @@
     startLocationPolling,
     stopLocationPolling,
   } from "./locationStore.js";
-  import campManager from "./campManager.js";
-  import roamManager from "./roamManager.js";
+  // --- CHANGE: Import the new activity manager ---
+  import activityManager from "./activityManager.js";
+  // --- Removed old manager imports ---
 
   // Create a store for tracking state
   const trackingStore = writable(false);
@@ -45,101 +46,95 @@
   let checkingSession = true;
   let showLoginModal = false;
   let loggedIn = false;
-  let username = "";
+  let username = ""; // Keep username if needed for display, but rely on session for auth
   let settingsManagerComponent;
-  let currentPage = "camps";
+  let currentPage = "camps"; // Default page
   let showMapOverlay = false;
   let selectedKillmailId = null;
   let selectedKillmail = null;
   let showWreckFieldDialog = false;
   let selectedWreckData = null;
   let isTrackingEnabled = false;
-  let currentUser = null;
+  let currentUser = null; // Store user info from session
 
+  // Reactive subscriptions
   $: userSettings = $settings;
   $: kills = $killmails;
   $: userFilterLists = $filterLists;
   $: userProfiles = $profiles;
   $: isConnected = $socketConnected;
   $: socketError = $lastSocketError;
-  $: isTracking = $trackingStore;
+  $: isTracking = $trackingStore; // Subscribe to tracking store
 
+  // --- CHANGE: Update tracking logic ---
   $: {
-    isTrackingEnabled = $trackingStore;
-    console.log("Tracking state:", isTrackingEnabled);
-    if (isTrackingEnabled) {
-      // Initialize location polling when tracking is enabled
-      const startPolling = async () => {
-        const success = await startLocationPolling();
+    isTrackingEnabled = $trackingStore; // Keep local variable in sync
+    console.log("Tracking state changed in App:", isTrackingEnabled);
+    if (loggedIn && isTrackingEnabled) {
+      // Only poll if logged in and tracking enabled
+      startLocationPolling().then((success) => {
         if (!success) {
-          trackingStore.set(false); // Reset if polling fails
+          console.error(
+            "Failed to start location polling, disabling tracking."
+          );
+          trackingStore.set(false); // Reset tracking if polling fails to start
         }
-      };
-      startPolling();
+      });
     } else {
-      stopLocationPolling();
+      stopLocationPolling(); // Stop polling if not logged in or tracking disabled
     }
   }
+  // --- END CHANGE ---
 
+  // --- CHANGE: Update reactive block for page switching ---
+  let mounted = false; // Track mount state for reactivity updates
   $: {
-    if (currentPage === "camps") {
-      campManager.forceUpdate();
-    } else if (currentPage === "gangs") {
-      roamManager.forceUpdate();
+    // Optionally force an update when switching to activity-related pages
+    // This can make the UI feel slightly more responsive by immediately requesting data
+    if (
+      mounted &&
+      (currentPage === "camps" ||
+        currentPage === "gangs" ||
+        currentPage === "map")
+    ) {
+      activityManager.forceUpdate();
     }
   }
+  // --- END CHANGE ---
 
   function handleVerified() {
     showWelcome = false;
-    initializeSocketStore();
+    // Initialize socket store AFTER verification if not logged in
+    if (!loggedIn) {
+      initializeSocketStore();
+    }
   }
 
   function toggleTracking() {
+    if (!loggedIn) {
+      alert("Please log in with EVE Online to enable location tracking.");
+      return;
+    }
     const newValue = !get(trackingStore);
     trackingStore.set(newValue);
-    console.log("Tracking toggled to:", newValue); // Debug log
+    console.log("Tracking toggled to:", newValue);
   }
 
+  // --- Updated handleLogin ---
   async function handleLogin(event) {
-    try {
-      if (event.detail.type === "credentials") {
-        username = event.detail.username;
-        loggedIn = true;
-      } else if (event.detail.type === "eve") {
-        loggedIn = true;
-      }
-      currentUser = data.user;
-
+    // Login handled via session check after EVE SSO redirect or credential check
+    // We just need to update the UI state based on the successful session check
+    await checkSession(); // Re-check session to load data
+    if (loggedIn) {
       showLoginModal = false;
       showWelcome = false;
-      initializeSocketStore();
-
-      try {
-        const response = await fetch("/api/session");
-        const data = await response.json();
-
-        if (data.user) {
-          if (data.filterLists) {
-            filterLists.set(data.filterLists);
-          }
-          if (data.profiles) {
-            profiles.set(data.profiles);
-          }
-          if (data.user.settings) {
-            settings.set(initializeSettings(data.user.settings));
-          }
-          socket.emit("requestInitialKillmails");
-        }
-      } catch (error) {
-        console.error("Error loading initial session data:", error);
-        settings.set(initializeSettings({}));
-      }
-
-      window.history.replaceState({}, document.title, "/");
-    } catch (error) {
-      console.error("Error during login:", error);
+      // Socket store should be initialized by checkSession if login was successful
+    } else {
+      // Handle case where login attempt failed (error should be shown by Login component)
+      console.error("Login attempt reported but session check failed.");
     }
   }
+  // --- End Updated handleLogin ---
 
   async function handleLogout() {
     try {
@@ -149,99 +144,87 @@
       });
 
       if (response.ok) {
-        if (isTrackingEnabled) {
-          stopLocationPolling(); // Stop polling before clearing state
-        }
+        trackingStore.set(false); // Turn off tracking on logout
+        // Clear client-side stores
         settings.set({});
         filterLists.set([]);
         profiles.set([]);
         killmails.set([]);
+        // Cleanup socket connections and listeners
         cleanup();
+        // Update UI state
         loggedIn = false;
         currentUser = null;
-        username = "";
-        showWelcome = true;
-        trackingStore.set(false);
-        window.location.reload();
+        username = ""; // Clear username display
+        showWelcome = true; // Show welcome screen again
+        // Optionally reload the page for a clean state
+        // window.location.reload();
+      } else {
+        console.error("Logout API call failed:", response.status);
       }
     } catch (error) {
       console.error("Error during logout:", error);
     }
   }
 
+  // --- Updated checkSession ---
   async function checkSession() {
+    checkingSession = true; // Start check
     try {
-      const params = new URLSearchParams(window.location.search);
-      const isAuthCallback = params.get("authenticated") === "true";
+      const response = await fetch("/api/session", { credentials: "include" });
 
-      if (loggedIn) {
-        showWelcome = false;
-        return;
-      }
+      if (response.ok) {
+        const data = await response.json();
+        if (data.user) {
+          loggedIn = true;
+          showWelcome = false;
+          currentUser = data.user; // Store user data
 
-      const response = await fetch("/api/check-session", {
-        credentials: "include",
-      });
+          // Initialize stores with fetched data
+          if (data.filterLists) filterLists.set(data.filterLists);
+          if (data.profiles) profiles.set(data.profiles);
+          // Use initializeSettings to merge defaults with fetched settings
+          // Ensure settings are initialized before dependent logic runs
+          const initialSettings = initializeSettings(data.user.settings || {});
+          settings.set(initialSettings);
+          // Update tracking store based on loaded settings if necessary (or keep it independent)
+          // trackingStore.set(initialSettings.trackingEnabled || false); // Example if tracking was a setting
 
-      const data = await response.json();
+          // Initialize socket store now that we are logged in
+          initializeSocketStore();
 
-      if (data.validSession && data.user) {
-        loggedIn = true;
-        showWelcome = false;
-        currentUser = data.user;
-
-        try {
-          const filterListsResponse = await fetch(
-            "/api/filter-lists/" + data.user.id,
-            {
-              credentials: "include",
-            }
-          );
-          const filterListsData = await filterListsResponse.json();
-          if (filterListsData.success) {
-            filterLists.set(filterListsData.filterLists);
+          // Clear URL params if coming from SSO callback
+          const params = new URLSearchParams(window.location.search);
+          if (params.get("authenticated") === "true") {
+            window.history.replaceState({}, document.title, "/");
           }
-        } catch (error) {
-          console.error("Error fetching filter lists:", error);
+        } else {
+          // API returned OK but no user data - treat as logged out
+          handleLogout(); // Ensure clean state
+          showWelcome = true;
         }
-
-        try {
-          const profilesResponse = await fetch(
-            "/api/profiles/" + data.user.id,
-            {
-              credentials: "include",
-            }
-          );
-          const profilesData = await profilesResponse.json();
-          if (profilesData.success) {
-            profiles.set(profilesData.profiles);
-          }
-        } catch (error) {
-          console.error("Error fetching profiles:", error);
-        }
-
-        if (data.user.settings) {
-          settings.set(initializeSettings(data.user.settings));
-        }
-
-        initializeSocketStore();
-        socket.emit("requestInitialKillmails");
-
-        if (isAuthCallback) {
-          window.history.replaceState({}, document.title, "/");
-        }
-      } else if (!isAuthCallback && response.status === 401) {
+      } else if (response.status === 401) {
+        // Not logged in
+        loggedIn = false;
+        currentUser = null;
         showWelcome = true;
+      } else {
+        // Other server error
+        console.error("Error checking session status:", response.status);
+        showWelcome = true; // Default to welcome screen on error
       }
     } catch (error) {
       console.error("Error checking session:", error);
-      if (!loggedIn && !window.location.search.includes("authenticated=true")) {
+      // Don't assume logged out on network error, could be temporary
+      // Show welcome only if we are sure there's no active session
+      if (!loggedIn) {
         showWelcome = true;
       }
     } finally {
-      checkingSession = false;
+      checkingSession = false; // Finish check
     }
   }
+  // --- End Updated checkSession ---
 
   function openMap(killmail) {
     selectedKillmailId = killmail.killID;
@@ -270,29 +253,24 @@
   }
 
   onMount(async () => {
-    await checkSession();
+    mounted = true; // Set mounted flag here
+    await checkSession(); // Check session state when component mounts
+
+    // Listen for session expiry events triggered by tokenManager
     const handleSessionExpiry = () => {
-      loggedIn = false;
-      showLoginModal = true;
-      settings.set({});
-      filterLists.set([]);
-      profiles.set([]);
-      killmails.set([]);
-      trackingStore.set(false);
-      cleanup();
+      console.log("Session expired event received in App.svelte");
+      handleLogout(); // Trigger logout process
+      showLoginModal = true; // Show login modal after logout
     };
-
     window.addEventListener("session-expired", handleSessionExpiry);
-    return () => {
-      window.removeEventListener("session-expired", handleSessionExpiry);
-    };
-  });
 
-  onDestroy(() => {
-    if (isTrackingEnabled) {
-      stopLocationPolling();
-    }
-    cleanup();
+    // Cleanup function
+    return () => {
+      mounted = false; // Reset mounted flag
+      window.removeEventListener("session-expired", handleSessionExpiry);
+      // Socket cleanup is handled in dataManager's cleanup
+      // Polling cleanup is handled by trackingStore reactivity
+    };
   });
 </script>
 
@@ -300,37 +278,43 @@
   <style>
     body {
       margin: 0;
-      overflow-y: scroll !important;
+      overflow-y: scroll !important; /* Ensure scrollbar is always present to prevent layout shifts */
       padding-right: 0 !important;
     }
   </style>
 </svelte:head>
 
-{#if !checkingSession}
+{#if checkingSession}
+  <div
+    class="fixed inset-0 flex items-center justify-center bg-eve-primary z-50"
+  >
+    <p class="text-eve-accent text-xl animate-pulse">Initializing...</p>
+  </div>
+{:else}
   <div class="min-h-screen">
-    {#if showWelcome}
+    {#if showWelcome && !loggedIn}
       <WelcomeOverlay
         on:verified={handleVerified}
         on:login={() => {
           showWelcome = false;
           showLoginModal = true;
-          initializeSocketStore();
+          // Initialize socket store only if not already initialized by a previous guest session
+          if (!get(socketConnected)) {
+            initializeSocketStore();
+          }
         }}
       />
     {/if}
 
     {#if showWreckFieldDialog && selectedWreckData}
-      <!-- svelte-ignore a11y-no-static-element-interactions -->
       <div
-        class="fixed inset-0 z-50 flex items-center justify-center"
+        class="fixed inset-0 z-[60] flex items-center justify-center"
         on:click={closeWreckField}
         on:keydown={(e) => {
           if (e.key === "Escape") closeWreckField();
         }}
       >
         <div class="fixed inset-0 bg-black/75 backdrop-blur-sm" />
-        <!-- svelte-ignore a11y-click-events-have-key-events -->
-        <!-- svelte-ignore a11y-no-static-element-interactions -->
         <div class="relative z-50" on:click|stopPropagation>
           <WreckFieldDialog
             wrecks={selectedWreckData.wrecks}
@@ -353,85 +337,77 @@
                 class="eve-nav-item {currentPage === 'camps'
                   ? 'bg-eve-accent/20 text-eve-accent'
                   : ''}"
-                on:click={() => (currentPage = "camps")}
+                on:click={() => (currentPage = "camps")}>Gate Camps</button
               >
-                Gate Camps
-              </button>
               <button
                 class="eve-nav-item {currentPage === 'kills'
                   ? 'bg-eve-accent/20 text-eve-accent'
                   : ''}"
-                on:click={() => (currentPage = "kills")}
+                on:click={() => (currentPage = "kills")}>KM Hunter</button
               >
-                KM Hunter
-              </button>
               <button
                 class="eve-nav-item {currentPage === 'battles'
                   ? 'bg-eve-accent/20 text-eve-accent'
                   : ''}"
-                on:click={() => (currentPage = "battles")}
+                on:click={() => (currentPage = "battles")}>Battles</button
               >
-                Battles
-              </button>
               <button
                 class="eve-nav-item {currentPage === 'gangs'
                   ? 'bg-eve-accent/20 text-eve-accent'
                   : ''}"
-                on:click={() => (currentPage = "gangs")}
+                on:click={() => (currentPage = "gangs")}>Gangs</button
               >
-                Gangs
-              </button>
               <button
                 class="eve-nav-item {currentPage === 'map'
                   ? 'bg-eve-accent/20 text-eve-accent'
                   : ''}"
-                on:click={() => (currentPage = "map")}
+                on:click={() => (currentPage = "map")}>Map</button
               >
-                Map
-              </button>
               <button
                 class="eve-nav-item {currentPage === 'salvage'
                   ? 'bg-eve-accent/20 text-eve-accent'
                   : ''}"
                 on:click={() => (currentPage = "salvage")}
+                >Salvage Fields</button
               >
-                Salvage Fields
-              </button>
               <button
                 class="eve-nav-item {currentPage === 'npcs'
                   ? 'bg-eve-accent/20 text-eve-accent'
                   : ''}"
-                on:click={() => (currentPage = "npcs")}
+                on:click={() => (currentPage = "npcs")}>NPCs</button
               >
-                NPCs
-              </button>
               <button
                 class="eve-nav-item {currentPage === 'bountyboard'
                   ? 'bg-eve-accent/20 text-eve-accent'
                   : ''}"
                 on:click={() => (currentPage = "bountyboard")}
+                >Bountyboard</button
               >
-                Bountyboard
-              </button>
             </div>
 
             <div class="flex items-center">
               {#if loggedIn}
-                <div class="flex items-center gap-2">
+                <div class="flex items-center gap-2 mr-4">
                   <label
                     class="relative inline-flex items-center cursor-pointer"
+                    title={currentUser?.character_id
+                      ? "Toggle location tracking (requires ESI scopes)"
+                      : "Login with EVE to enable tracking"}
                   >
                     <input
                       type="checkbox"
                       checked={isTrackingEnabled}
                       on:change={toggleTracking}
                       class="sr-only peer"
+                      disabled={!currentUser?.character_id}
                     />
                     <div
-                      class="w-9 h-5 bg-gray-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-eve-accent"
-                    />
-                    <span class="ml-2 text-sm font-medium text-white"
-                      >Track</span
+                      class="w-9 h-5 bg-gray-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all dark:border-gray-600 peer-checked:bg-eve-accent peer-disabled:opacity-50 peer-disabled:cursor-not-allowed"
+                    ></div>
+                    <span
+                      class="ms-2 text-sm font-medium text-white {!currentUser?.character_id
+                        ? 'opacity-50'
+                        : ''}">Track</span
                     >
                   </label>
                 </div>
@@ -441,11 +417,18 @@
                     href="/trophy-page/{currentUser.character_id}"
                     target="_blank"
                     rel="noopener noreferrer"
-                    class="eve-nav-item ml-4 text-eve-accent hover:bg-eve-accent/20"
+                    class="eve-nav-item text-eve-accent hover:bg-eve-accent/20"
                     title="View Your Trophy Page"
                   >
                     {currentUser.character_name || "Profile"}
                   </a>
+                {:else}
+                  <span
+                    class="eve-nav-item text-gray-400"
+                    title="Logged in with username/password"
+                  >
+                    {username || "User"}
+                  </span>
                 {/if}
 
                 <button
@@ -479,79 +462,74 @@
       {/if}
     </div>
 
-    <!-- Main content -->
-    <main class="pt-16 px-4 max-w-7xl mx-auto {$trackingStore ? 'mt-12' : ''}">
+    <main
+      class="pt-16 px-4 max-w-7xl mx-auto {$trackingStore && loggedIn
+        ? 'mt-12'
+        : ''}"
+    >
       {#if currentPage === "kills"}
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <div class="eve-card">
+          <div class="eve-card backdrop-blur-eve">
             <SettingsManager bind:this={settingsManagerComponent} {socket} />
           </div>
-          <div class="eve-card">
+          <div class="eve-card backdrop-blur-eve">
             <KillmailViewer {openMap} />
           </div>
         </div>
       {:else if currentPage === "camps"}
-        <div class="eve-card">
-          <ActiveCamps />
-        </div>
+        <div class="eve-card backdrop-blur-eve"><ActiveCamps /></div>
       {:else if currentPage === "battles"}
-        <div class="eve-card">
-          <ActiveBattles />
-        </div>
+        <div class="eve-card backdrop-blur-eve"><ActiveBattles /></div>
       {:else if currentPage === "gangs"}
-        <div class="eve-card">
-          <ActiveRoams />
-        </div>
+        <div class="eve-card backdrop-blur-eve"><ActiveRoams /></div>
       {:else if currentPage === "map"}
-        <div class="eve-card" style="height: calc(100vh - 100px);">
+        <div
+          class="eve-card backdrop-blur-eve"
+          style="height: calc(100vh - 100px);"
+        >
           <UniverseMap />
         </div>
       {:else if currentPage === "salvage"}
-        <div class="eve-card">
+        <div class="eve-card backdrop-blur-eve">
           <SalvageFields on:openWreckField={handleOpenWreckField} />
         </div>
       {:else if currentPage === "npcs"}
-        <div class="eve-card">
-          <NPCPage />
-        </div>
+        <div class="eve-card backdrop-blur-eve"><NPCPage /></div>
       {:else if currentPage === "bountyboard"}
-        <div class="eve-card">
-          <Leaderboard />
-        </div>
+        <div class="eve-card backdrop-blur-eve"><Leaderboard /></div>
       {/if}
     </main>
+
+    {#if showLoginModal}
+      <div
+        class="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50"
+      >
+        <div class="relative">
+          <Login on:login={handleLogin} />
+          <button
+            class="absolute top-2 right-2 text-gray-400 hover:text-white"
+            on:click={() => (showLoginModal = false)}>✕</button
+          >
+        </div>
+      </div>
+    {/if}
+
+    {#if showMapOverlay && selectedKillmailId}
+      <div class="map-overlay">
+        <div class="map-container">
+          <MapVisualization
+            killmailId={selectedKillmailId}
+            kill={selectedKillmail}
+          />
+          <button class="close-map" on:click={closeMap}>Close Map</button>
+        </div>
+      </div>
+    {/if}
   </div>
-
-  {#if showLoginModal}
-    <div
-      class="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50"
-    >
-      <div class="relative">
-        <Login on:login={handleLogin} />
-        <button
-          class="absolute top-2 right-2 text-gray-400 hover:text-white"
-          on:click={() => (showLoginModal = false)}
-        >
-          ✕
-        </button>
-      </div>
-    </div>
-  {/if}
-
-  {#if showMapOverlay && selectedKillmailId}
-    <div class="map-overlay">
-      <div class="map-container">
-        <MapVisualization
-          killmailId={selectedKillmailId}
-          kill={selectedKillmail}
-        />
-        <button class="close-map" on:click={closeMap}>Close Map</button>
-      </div>
-    </div>
-  {/if}
 {/if}
 
 <style>
+  /* Basic styles, assuming Tailwind handles most */
   :global(body) {
     @apply bg-eve-primary text-gray-200;
     background-image: url("/bg.jpg");
@@ -559,6 +537,14 @@
     background-position: center;
     background-attachment: fixed;
   }
+  .eve-nav-item {
+    @apply px-3 py-2 rounded-md text-sm font-medium text-gray-300 hover:text-white hover:bg-eve-secondary/50 transition-colors;
+  }
+  /* --- CHANGE: Removed backdrop-blur-eve from @apply --- */
+  .eve-card {
+    @apply bg-eve-card rounded-lg shadow-lg p-4 mb-6;
+  } /* Reusable card style */
+  /* --- END CHANGE --- */
 
   .map-overlay {
     position: fixed;
@@ -573,7 +559,6 @@
     z-index: 50;
     backdrop-filter: blur(5px);
   }
-
   .map-container {
     position: relative;
     width: 80vw;
@@ -582,7 +567,6 @@
     border-radius: 5px;
     overflow: hidden;
   }
-
   .close-map {
     position: absolute;
     top: 10px;
@@ -595,8 +579,12 @@
     cursor: pointer;
     z-index: 60;
   }
-
   .close-map:hover {
     background-color: #c82333;
+  }
+
+  /* Ensure tracking toggle looks right */
+  .form-checkbox {
+    @apply rounded border-eve-accent/50 text-eve-accent focus:ring-eve-accent;
   }
 </style>

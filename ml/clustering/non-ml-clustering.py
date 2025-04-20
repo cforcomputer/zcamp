@@ -152,7 +152,7 @@ def analyze_recurring_campers(df, min_occurrences):
         start_time_camp = row['camp_start_time']; details = row['camp_details']
         if pd.isna(start_time_camp) or pd.isna(system_id): continue
         if not isinstance(details, dict) or 'kills' not in details: continue
-        kills = details.get('kills', []);
+        kills = details.get('kills', [])
         if not isinstance(kills, list): continue
         camp_attackers = set()
         for kill in kills:
