@@ -52,8 +52,7 @@
   let userLocationMarker = { group: null, mixer: null }; //
   let routeLines = null; //
   let currentRoute = []; // Stores the current full route (array of system IDs)
-  let dangerWarnings = []; //
-  let dangerTooltip; //
+  let dangerWarningsList = [];
 
   // Animation properties
   const PULSE_DURATION = 2.0; //
@@ -86,7 +85,6 @@
   const SECONDARY_GLOW_COLOR_ROAM = 0xaaaaff; //
   const SECONDARY_GLOW_COLOR_ROAMING_CAMP = 0xffcc88; //
   const SECONDARY_GLOW_COLOR_BATTLE = 0xee88ee; //
-  // --- NEW: Classification Icons/Tooltips (used in info panel) ---
   const classificationIcons = {
     //
     camp: "⛺", //
@@ -105,17 +103,7 @@
     roam: "Roaming Gang", //
     activity: "Unclassified Activity", //
   };
-  // --- END NEW ---
 
-  // Region colors (remains the same)
-  const regionColors = [
-    0x3498db, 0x9b59b6, 0x2ecc71, 0xe74c3c, 0xf1c40f, 0x1abc9c, 0xd35400,
-    0x34495e, 0x95a5a6, 0x16a085, 0x27ae60, 0x2980b9, 0x8e44ad, 0xe67e22,
-    0xc0392b, 0xf39c12, 0xd35400, 0x7f8c8d, 0xbdc3c7, 0x7d3c98, 0xb3b6b7,
-    0x2874a6, 0x138d75, 0xba4a00, 0x566573, 0xd4ac0d, 0xca6f1e, 0x48c9b0,
-    0xf5b041, 0xa569bd, 0x5d6d7e, 0x45b39d, 0xf4d03f, 0xaf7ac5, 0x5499c7,
-    0x48c9b0, 0xeb984e, 0xcd6155, 0x5d6d7e, 0xf7dc6f, 0x85c1e9, 0x73c6b6,
-  ];
   // --- Reusable Textures ---
   let circleTexture; //
   let glowTexture; //
@@ -268,10 +256,6 @@
       container.addEventListener("contextmenu", onContextMenu); //
       document.addEventListener("fullscreenchange", handleFullscreenChange); //
 
-      dangerTooltip = document.createElement("div"); //
-      dangerTooltip.className = "danger-tooltip"; //
-      dangerTooltip.style.display = "none"; //
-
       mounted = true; //
       console.log("[UniverseMap] Map initialized."); // <<< DEBUG
       animate(performance.now()); //
@@ -341,7 +325,7 @@
     if (circleTexture) circleTexture.dispose(); //
     if (glowTexture) glowTexture.dispose(); //
     console.log("[UniverseMap] Renderers, controls, textures disposed."); // <<< DEBUG
-    if (dangerTooltip?.parentElement) dangerTooltip.remove(); //
+
     console.log("[UniverseMap] Component destroyed."); // <<< DEBUG
   }); //
 
@@ -537,58 +521,97 @@
 
   // --- Map Initialization & Building ---
   async function initializeMap() {
-    //
-    console.log("[UniverseMap] initializeMap started..."); // <<< DEBUG
-    initThreeJS(); //
+    console.log("[UniverseMap] initializeMap started...");
+    initThreeJS(); // Initialize Three.js setup first
 
     try {
-      isLoading = true; //
-      error = null; //
-      mapReady = false; // <<< Ensure map is not ready initially
-      console.log("[UniverseMap] Fetching /api/map-data..."); // <<< DEBUG
-      const response = await fetch("/api/map-data"); // Fetch map data from API
+      isLoading = true;
+      error = null;
+      mapReady = false;
+      console.log("[UniverseMap] Fetching /api/map-data...");
+      const response = await fetch("/api/map-data");
       if (!response.ok) {
-        //
-        throw new Error(`Failed to fetch map data: ${response.status}`); //
+        throw new Error(`Failed to fetch map data: ${response.status}`);
       }
-      mapData = await response.json(); //
-      console.log(`[UniverseMap] Fetched ${mapData.length} map entries.`); // <<< DEBUG
-      if (mapData.length === 0) throw new Error("No map data received"); //
-      regions = mapData //
-        .filter((item) => item.typeid === 3) //
-        .map((region, index) => ({
-          //
-          id: region.itemid, //
-          name: region.itemname, //
-          x: region.x, //
-          y: region.y, //
-          z: region.z, //
-          color: regionColors[index % regionColors.length], //
-        }))
-        .sort((a, b) => a.name.localeCompare(b.name)); //
-      console.log(`[UniverseMap] Extracted ${regions.length} regions`); // <<< DEBUG
+      mapData = await response.json();
+      console.log(`[UniverseMap] Fetched ${mapData.length} map entries.`);
+      if (mapData.length === 0) throw new Error("No map data received");
 
-      buildMap(mapData); // Call buildMap function here //
+      // --- DYNAMIC REGION COLOR GENERATION --- START ---
+
+      // 1. Filter mapData to get only region definitions first
+      const regionDefinitions = mapData.filter((item) => item.typeid === 3);
+      const numberOfRegions = regionDefinitions.length;
+      console.log(
+        `[UniverseMap] Found ${numberOfRegions} region definitions (typeid 3).`
+      );
+
+      if (numberOfRegions === 0) {
+        console.warn(
+          "[UniverseMap] No region definitions found in mapData. Region coloring/labels might fail."
+        );
+        regions = []; // Ensure regions array is empty
+      } else {
+        // 2. Generate distinct colors using HSL hue stepping
+        const hueStep = 360 / numberOfRegions;
+        const saturation = 0.85; // High saturation for vibrancy (adjust 0.7 - 1.0)
+        const lightness = 0.55; // Mid-range lightness (adjust 0.5 - 0.6)
+
+        // 3. Map region definitions to the desired structure, calculating color
+        regions = regionDefinitions
+          .map((regionData, index) => {
+            const hue = (index * hueStep) % 360; // Calculate hue for this region
+
+            const color = new THREE.Color();
+            // THREE.Color.setHSL expects H, S, L values between 0 and 1
+            color.setHSL(hue / 360, saturation, lightness);
+
+            return {
+              id: regionData.itemid, // Use the ID from the region definition
+              name: regionData.itemname,
+              x: regionData.x,
+              y: regionData.y,
+              z: regionData.z,
+              color: color.getHex(), // Store the calculated HEX color
+            };
+          })
+          .sort((a, b) => a.name.localeCompare(b.name)); // Sort alphabetically after processing
+
+        console.log(
+          `[UniverseMap] Generated and assigned distinct colors for ${regions.length} regions.`
+        );
+        // Optional: Log a sample of generated colors
+        // console.log("Sample generated colors:", regions.slice(0, 5).map(r => ({ name: r.name, hex: `#${r.color.toString(16).padStart(6, '0')}` })));
+      }
+      // --- DYNAMIC REGION COLOR GENERATION --- END ---
+
+      // 4. Now build the map - it will use the 'regions' array with generated colors
+      console.log(
+        `[UniverseMap] Final regions array (sample):`,
+        JSON.stringify(regions.slice(0, 10)),
+        "Total count:",
+        regions.length
+      );
+      buildMap(mapData); // Pass the full mapData
     } catch (err) {
-      //
-      console.error("[UniverseMap] Error during initializeMap:", err); // <<< DEBUG
-      error = err.message || "Failed to initialize map"; //
-      if (errorTimeout) clearTimeout(errorTimeout); //
+      console.error("[UniverseMap] Error during initializeMap:", err);
+      error = err.message || "Failed to initialize map";
+      if (errorTimeout) clearTimeout(errorTimeout);
       errorTimeout = setTimeout(() => {
-        //
-        error = null; //
-      }, 5000); //
+        error = null;
+      }, 5000);
+      // Optional: Set mapReady = true even on error? Or leave false?
+      // mapReady = true;
     } finally {
-      //
-      isLoading = false; //
+      isLoading = false;
       console.log(
         "[UniverseMap] initializeMap finished. isLoading:",
         isLoading,
         "mapReady:",
-        mapReady
-      ); // <<< DEBUG
+        mapReady // mapReady will be true only if buildMap completes successfully
+      );
     }
-  } //
+  }
   function initThreeJS() {
     //
     console.log("[UniverseMap] Initializing Three.js..."); // <<< DEBUG
@@ -660,255 +683,277 @@
     console.log("[UniverseMap] Three.js initialized successfully"); // <<< DEBUG
   } //
   function buildMap(systemsData) {
-    //
     console.log(
       `[UniverseMap] Building map with ${systemsData?.length ?? 0} entries...`
-    ); // <<< DEBUG
+    );
     if (!scene) {
-      //
       console.error(
         "[UniverseMap] buildMap called but scene is not initialized."
-      ); // <<< DEBUG
-      return; //
+      );
+      return;
     }
-    // Clear previous points/lines (important for re-builds, e.g., search/color change)
+
+    // --- Clear existing region labels from scene ---
+    regionLabelCache.forEach((cacheEntry) => {
+      if (cacheEntry.label && cacheEntry.label.parent) {
+        scene.remove(cacheEntry.label);
+        // Optional: Dispose CSS2DObject element if needed and safe
+        // if (cacheEntry.label.element && cacheEntry.label.element.parentNode) {
+        //     cacheEntry.label.element.parentNode.removeChild(cacheEntry.label.element);
+        // }
+      }
+    });
+    // We don't clear regionLabelCache itself, it's reused/updated in createRegionLabels
+
+    // --- Clear previous points/lines ---
     const oldPointsObject = scene?.children.find(
-      //
-      (child) => child.userData?.isSystemPoints //
+      (child) => child.userData?.isSystemPoints
     );
     if (oldPointsObject) {
-      //
-      console.log("[UniverseMap] Removing old system points..."); // <<< DEBUG
-      scene.remove(oldPointsObject); //
-      disposeObject3D(oldPointsObject); //
+      console.log("[UniverseMap] Removing old system points...");
+      scene.remove(oldPointsObject);
+      disposeObject3D(oldPointsObject);
     }
     stargateConnections.forEach((line) => {
-      //
-      scene.remove(line); //
-      disposeObject3D(line); //
+      scene.remove(line);
+      disposeObject3D(line);
     });
-    stargateConnections = []; //
+    stargateConnections = [];
     solarSystems.forEach((sys) => {
-      // Clear old label references if any //
-      if (sys.label && sys.label.parent) scene.remove(sys.label); //
+      // Clear old system labels
+      if (sys.label && sys.label.parent) {
+        // Check if parent exists before removing
+        scene.remove(sys.label);
+        // disposeObject3D(sys.label); // Disposal handled by main dispose loop if needed
+      }
     });
-    solarSystems.clear(); // Clear the system map //
+    solarSystems.clear(); // Clear the system map
 
-    // Filter data
-    const solarSystemsData = systemsData.filter((item) => item.typeid === 5); //
-    const stargatesData = systemsData.filter((item) => item.groupid === 10); //
+    // --- Filter data ---
+    const solarSystemsData = systemsData.filter((item) => item.typeid === 5);
+    const stargatesData = systemsData.filter((item) => item.groupid === 10);
     console.log(
       `[UniverseMap] Filtered data: ${solarSystemsData.length} systems, ${stargatesData.length} stargates.`
-    ); // <<< DEBUG
-    if (solarSystemsData.length === 0) {
-      //
-      console.warn("[UniverseMap] No solar system data found after filtering."); // <<< DEBUG
-      mapReady = true; // <<< SET FLAG even if empty
-      return; //
-    }
-    const processedConnections = new Set(); //
-    const connectedSystems = new Set(); //
-    stargatesData.forEach((sourceGate) => {
-      //
-      if (!sourceGate.solarsystemid || !sourceGate.itemname) return; //
-      const match = sourceGate.itemname.match(/Stargate \(([^)]+)\)/); //
-      if (!match) return; //
-      const destinationName = match[1]; //
-      const destinationSystem = solarSystemsData.find(
-        //
-        (sys) => sys.itemname === destinationName //
-      );
-      if (!destinationSystem) return; //
-      const sourceSystem = solarSystemsData.find(
-        //
-        (sys) => sys.itemid === sourceGate.solarsystemid //
-      );
-      if (!sourceSystem) return; //
-      // Skip C-R regions (remains same)
-      const sourceRegion = regions.find((r) => r.id === sourceSystem.regionid); //
-      const destRegion = regions.find(
-        //
-        (r) => r.id === destinationSystem.regionid //
-      );
-      if (
-        //
-        (sourceRegion && sourceRegion.name.startsWith("C-R")) || //
-        (destRegion && destRegion.name.startsWith("C-R")) //
-      )
-        return; //
-      const connectionId = [sourceSystem.itemid, destinationSystem.itemid] //
-        .sort() //
-        .join("-"); //
-      if (processedConnections.has(connectionId)) return; //
-      processedConnections.add(connectionId); //
-      connectedSystems.add(sourceSystem.itemid); //
-      connectedSystems.add(destinationSystem.itemid); //
-    });
-    const filteredSystems = solarSystemsData.filter(
-      (
-        system //
-      ) => connectedSystems.has(system.itemid) //
     );
-    // Apply search term filtering (remains same)
-    const searchFilteredSystems = searchTerm //
-      ? filteredSystems.filter(
-          (
-            system //
-          ) => system.itemname.toLowerCase().includes(searchTerm.toLowerCase()) //
+    if (solarSystemsData.length === 0) {
+      console.warn("[UniverseMap] No solar system data found after filtering.");
+      mapReady = true;
+      // Attempt to create labels even if no systems shown? Or handle empty state?
+      createRegionLabels([]); // Call with empty array if needed? Or skip?
+      calculateGalaxyBounds(); // Will result in 0/null bounds
+      setInitialCameraPosition(); // Will use fallback position
+      return;
+    }
+
+    // --- Filter systems by connectivity and search term ---
+    const processedConnections = new Set();
+    const connectedSystems = new Set();
+    stargatesData.forEach((sourceGate) => {
+      if (!sourceGate.solarsystemid || !sourceGate.itemname) return;
+      const match = sourceGate.itemname.match(/Stargate \(([^)]+)\)/);
+      if (!match) return;
+      const destinationName = match[1];
+      const destinationSystem = solarSystemsData.find(
+        (sys) => sys.itemname === destinationName
+      );
+      if (!destinationSystem) return;
+      const sourceSystem = solarSystemsData.find(
+        (sys) => sys.itemid === sourceGate.solarsystemid
+      );
+      if (!sourceSystem) return;
+      const sourceRegion = regions.find(
+        (r) => String(r.id) === String(sourceSystem.regionid)
+      ); // Use string comparison
+      const destRegion = regions.find(
+        (r) => String(r.id) === String(destinationSystem.regionid)
+      ); // Use string comparison
+      if (
+        (sourceRegion && sourceRegion.name.startsWith("C-R")) ||
+        (destRegion && destRegion.name.startsWith("C-R"))
+      )
+        return;
+
+      const connectionId = [sourceSystem.itemid, destinationSystem.itemid]
+        .sort()
+        .join("-");
+      if (processedConnections.has(connectionId)) return;
+      processedConnections.add(connectionId);
+      connectedSystems.add(sourceSystem.itemid);
+      connectedSystems.add(destinationSystem.itemid);
+    });
+    const filteredSystems = solarSystemsData.filter((system) =>
+      connectedSystems.has(system.itemid)
+    );
+    const searchFilteredSystems = searchTerm
+      ? filteredSystems.filter((system) =>
+          system.itemname.toLowerCase().includes(searchTerm.toLowerCase())
         )
-      : filteredSystems; //
+      : filteredSystems;
     console.log(
       `[UniverseMap] After connection/search filtering: ${searchFilteredSystems.length} systems`
-    ); // <<< DEBUG
+    );
+
     if (searchFilteredSystems.length === 0) {
-      //
-      calculateGalaxyBounds(); //
-      setInitialCameraPosition(); //
-      mapReady = true; // <<< SET FLAG even if empty to allow activity updates
-      return; //
+      // If search yields no results, still mark map as ready but show no systems
+      mapReady = true;
+      createRegionLabels([]); // Call with empty array
+      calculateGalaxyBounds();
+      setInitialCameraPosition();
+      return;
     }
 
-    // Create System Points
-    const positions = []; //
-    const colors = []; //
+    // --- Create System Points (Geometry) ---
+    const positions = [];
+    const colors = [];
     searchFilteredSystems.forEach((system, idx) => {
-      //
       if (system.x === null || system.z === null) {
-        // Check X and Z mainly for 2D map
         console.warn(
           `[UniverseMap] Skipping system ${system.itemname} due to null coordinates.`
-        ); // <<< DEBUG
-        return; //
+        );
+        return;
       }
-      const posX = system.x * SCALE_FACTOR; //
+      const posX = system.x * SCALE_FACTOR;
       const posY = 0; // Keep Y=0 for 2D map
-      const posZ = system.z * SCALE_FACTOR; //
-      positions.push(posX, posY, posZ); //
-      let color; //
+      const posZ = system.z * SCALE_FACTOR;
+      positions.push(posX, posY, posZ);
+
+      let colorValue;
+      // --- Assign point color based on mode ---
       if (colorByRegion) {
-        //
-        const region = regions.find((r) => r.id === system.regionid); //
-        color = new THREE.Color(region ? region.color : 0xffffff); //
+        // Robust find using string comparison
+        const region = regions.find(
+          (r) => String(r.id) === String(system.regionid)
+        );
+        colorValue = region ? region.color : 0xffffff; // Default white if region not found
       } else {
-        //
-        color = new THREE.Color(getSecurityColor(system.security)); //
+        colorValue = getSecurityColor(system.security);
       }
-      colors.push(color.r, color.g, color.b); //
-      const labelDiv = document.createElement("div"); //
-      labelDiv.className = "system-label"; //
-      labelDiv.textContent = system.itemname; //
-      const label = new CSS2DObject(labelDiv); //
-      label.position.set(posX, posY, posZ); //
+      const color = new THREE.Color(colorValue);
+      colors.push(color.r, color.g, color.b);
+
+      // --- Create System Label (CSS2DObject) ---
+      const labelDiv = document.createElement("div");
+      labelDiv.className = "system-label";
+      labelDiv.textContent = system.itemname;
+      const label = new CSS2DObject(labelDiv);
+      label.position.set(posX, posY, posZ);
       label.visible = false; // Initially hidden
-      scene.add(label); //
+      scene.add(label);
+
+      // --- Store system data in map ---
       solarSystems.set(system.itemid, {
-        //
-        position: new THREE.Vector3(posX, posY, posZ), //
-        label, //
-        data: system, //
-        index: idx, //
-        securityColor: getSecurityColor(system.security), // Store hex value //
-        //
+        position: new THREE.Vector3(posX, posY, posZ),
+        label,
+        data: system,
+        index: idx, // Store index relative to searchFilteredSystems for potential direct updates
+        securityColor: getSecurityColor(system.security),
+        // Store region color using robust find
         regionColor:
-          regions.find((r) => r.id === system.regionid)?.color || 0xffffff, //
-        connections: new Set(), //
+          regions.find((r) => String(r.id) === String(system.regionid))
+            ?.color || 0xffffff,
+        connections: new Set(),
       });
     });
-    if (positions.length === 0) {
-      //
-      console.warn("[UniverseMap] No valid system positions after processing."); // <<< DEBUG
-      mapReady = true; // <<< SET FLAG
-      return; //
-    }
-    const geometry = new THREE.BufferGeometry(); //
-    geometry.setAttribute(
-      //
-      "position", //
-      new THREE.Float32BufferAttribute(positions, 3) //
-    );
-    geometry.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3)); //
-    const pointsMaterial = new THREE.PointsMaterial({
-      //
-      size: SYSTEM_SIZE, //
-      vertexColors: true, //
-      sizeAttenuation: true, //
-      map: circleTexture, //
-      alphaTest: 0.5, //
-      transparent: true, //
-    });
-    const points = new THREE.Points(geometry, pointsMaterial); //
-    points.userData.isSystemPoints = true; //
-    scene.add(points); //
-    console.log(`[UniverseMap] Added ${solarSystems.size} system points.`); // <<< DEBUG
 
-    // Create Connections
-    let connectionCount = 0; //
-    processedConnections.clear(); //
+    if (positions.length === 0) {
+      console.warn("[UniverseMap] No valid system positions after processing.");
+      mapReady = true;
+      createRegionLabels([]);
+      calculateGalaxyBounds();
+      setInitialCameraPosition();
+      return;
+    }
+
+    // --- Add Points Object to Scene ---
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute(
+      "position",
+      new THREE.Float32BufferAttribute(positions, 3)
+    );
+    geometry.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
+    const pointsMaterial = new THREE.PointsMaterial({
+      size: SYSTEM_SIZE,
+      vertexColors: true,
+      sizeAttenuation: true,
+      map: circleTexture,
+      alphaTest: 0.5,
+      transparent: true,
+    });
+    const points = new THREE.Points(geometry, pointsMaterial);
+    points.userData.isSystemPoints = true;
+    scene.add(points);
+    console.log(
+      `[UniverseMap] Added ${solarSystems.size} system points object to scene.`
+    );
+
+    // --- Create Connections ---
+    let connectionCount = 0;
+    processedConnections.clear(); // Clear again for the connection drawing loop
     stargatesData.forEach((sourceGate) => {
-      //
-      if (!sourceGate.solarsystemid || !sourceGate.itemname) return; //
-      const match = sourceGate.itemname.match(/Stargate \(([^)]+)\)/); //
-      if (!match) return; //
-      const destinationName = match[1]; //
+      if (!sourceGate.solarsystemid || !sourceGate.itemname) return;
+      const match = sourceGate.itemname.match(/Stargate \(([^)]+)\)/);
+      if (!match) return;
+      const destinationName = match[1];
+      // Find systems in the original data, not the filtered one, for connection logic
       const destinationSystem = solarSystemsData.find(
-        //
-        (sys) => sys.itemname === destinationName //
+        (sys) => sys.itemname === destinationName
       );
-      if (!destinationSystem) return; //
+      if (!destinationSystem) return;
       const sourceSystem = solarSystemsData.find(
-        //
-        (sys) => sys.itemid === sourceGate.solarsystemid //
+        (sys) => sys.itemid === sourceGate.solarsystemid
       );
-      if (!sourceSystem) return; //
-      // Skip C-R regions (remains same)
-      const sourceRegion = regions.find((r) => r.id === sourceSystem.regionid); //
+      if (!sourceSystem) return;
+
+      // Skip C-R regions (same check as before)
+      const sourceRegion = regions.find(
+        (r) => String(r.id) === String(sourceSystem.regionid)
+      );
       const destRegion = regions.find(
-        //
-        (r) => r.id === destinationSystem.regionid //
+        (r) => String(r.id) === String(destinationSystem.regionid)
       );
       if (
-        //
-        (sourceRegion && sourceRegion.name.startsWith("C-R")) || //
-        (destRegion && destRegion.name.startsWith("C-R")) //
+        (sourceRegion && sourceRegion.name.startsWith("C-R")) ||
+        (destRegion && destRegion.name.startsWith("C-R"))
       )
-        return; //
-      const connectionId = [sourceSystem.itemid, destinationSystem.itemid] //
-        .sort() //
-        .join("-"); //
-      if (processedConnections.has(connectionId)) return; //
-      processedConnections.add(connectionId); //
-      // Ensure *both* systems exist in the *rendered* solarSystems map
+        return;
+
+      const connectionId = [sourceSystem.itemid, destinationSystem.itemid]
+        .sort()
+        .join("-");
+      if (processedConnections.has(connectionId)) return;
+      processedConnections.add(connectionId);
+
+      // Ensure BOTH systems exist in the *rendered* solarSystems map (i.e., passed filtering)
       if (
-        //
-        solarSystems.has(sourceSystem.itemid) && // Use the rendered map //
-        solarSystems.has(destinationSystem.itemid) // Use the rendered map //
+        solarSystems.has(sourceSystem.itemid) &&
+        solarSystems.has(destinationSystem.itemid)
       ) {
+        // Pass the original system data to createConnectionLine
         const connection = createConnectionLine(
-          //
-          sourceSystem, //
-          destinationSystem //
+          sourceSystem,
+          destinationSystem
         );
         if (connection) {
-          //
-          scene.add(connection); //
-          stargateConnections.push(connection); //
-          connectionCount++; //
+          scene.add(connection);
+          stargateConnections.push(connection);
+          connectionCount++;
         }
       }
     });
     console.log(
-      `[UniverseMap] Created ${connectionCount} stargate connections`
-    ); // <<< DEBUG
+      `[UniverseMap] Created ${connectionCount} stargate connections.`
+    );
 
-    // Create or show Region Labels (Backgrounds removed)
-    createRegionLabels(searchFilteredSystems); //
+    // --- Create Region Labels ---
+    // Pass the currently filtered list of systems to base label positions
+    createRegionLabels(searchFilteredSystems);
 
-    // Final steps
-    calculateGalaxyBounds(); //
-    setInitialCameraPosition(); //
-    mapReady = true; // <<< *** SET FLAG HERE ***
-    console.log("[UniverseMap] Base map build complete and ready."); // <<< DEBUG
-  } //
+    // --- Final Steps ---
+    calculateGalaxyBounds();
+    setInitialCameraPosition();
+    mapReady = true; // Mark map as ready
+    console.log("[UniverseMap] Base map build complete and ready.");
+  }
   function createConnectionLine(sourceSystem, destinationSystem) {
     if (
       sourceSystem.x === null ||
@@ -959,63 +1004,121 @@
     return new THREE.Line(geometry, material);
   }
   function createRegionLabels(systemsInMap) {
-    console.log("Creating/Updating region labels...");
+    console.log(
+      `CREATE REGION LABELS START. Received ${systemsInMap?.length ?? 0} systems.`
+    );
 
-    // Ensure all cached region labels are added to the scene if not already present
-    regionLabelCache.forEach((cacheEntry) => {
-      if (!cacheEntry.label.parent) scene.add(cacheEntry.label);
-      cacheEntry.label.visible = true; // Labels are always visible
+    // Ensure all cached region labels ARE added to the scene if not already present
+    regionLabelCache.forEach((cacheEntry, regionId) => {
+      // Added regionId for logging
+      if (cacheEntry.label && !cacheEntry.label.parent) {
+        console.log(`-- Re-adding cached label ${regionId} to scene.`);
+        scene.add(cacheEntry.label);
+      }
+      // Visibility is primarily handled by animate loop, ensuring true here is safe fallback
+      if (cacheEntry.label) cacheEntry.label.visible = true;
     });
 
     const regionSystems = new Map();
     systemsInMap.forEach((systemData) => {
-      const regionId = systemData.regionid;
-      if (!regionSystems.has(regionId)) regionSystems.set(regionId, []);
-      regionSystems.get(regionId).push({
-        x: systemData.x * SCALE_FACTOR,
-        y: 0,
-        z: systemData.z * SCALE_FACTOR,
-      });
+      if (
+        systemData &&
+        typeof systemData.regionid !== "undefined" &&
+        systemData.x !== null &&
+        systemData.z !== null
+      ) {
+        const regionId = systemData.regionid; // Use the ID from system data
+        if (!regionSystems.has(regionId)) regionSystems.set(regionId, []);
+        // Store scaled coordinates for averaging
+        regionSystems.get(regionId).push({
+          x: systemData.x * SCALE_FACTOR,
+          y: 0,
+          z: systemData.z * SCALE_FACTOR,
+        });
+      }
     });
+    console.log(
+      `-- Processed systems into ${regionSystems.size} region groups.`
+    );
 
     regionSystems.forEach((positions, regionId) => {
-      if (positions.length < 1) return; // Need at least one system
-      const region = regions.find((r) => r.id === regionId);
-      if (!region) return;
+      // regionId here comes from systemData.regionid
+      if (positions.length < 1) return;
 
+      // --- Use Robust String Comparison ---
+      const region = regions.find((r) => String(r.id) === String(regionId));
+      // ------------------------------------
+
+      if (!region) {
+        // This warning means the regionId from a system doesn't exist in the 'regions' array (typeid=3 items)
+        console.warn(`-- Region data not found for ID: ${regionId}`);
+        return;
+      }
+
+      // Check cache BEFORE creating
       if (!regionLabelCache.has(regionId)) {
-        console.log(`Creating label for region ${region.name} (${regionId})`);
+        console.log(
+          `-- CREATING NEW label for region ${region.name} (ID: ${regionId})`
+        ); // Use region.name here
         const cacheEntry = {};
-
-        // --- Create Label ---
         const avgPosition = new THREE.Vector3();
         positions.forEach((p) => avgPosition.add(p));
         avgPosition.divideScalar(positions.length);
+
+        console.log(
+          `-- > Calculated Position: x=${avgPosition.x.toFixed(2)}, y=${avgPosition.y.toFixed(2)}, z=${avgPosition.z.toFixed(2)}`
+        );
+        if (
+          isNaN(avgPosition.x) ||
+          isNaN(avgPosition.y) ||
+          isNaN(avgPosition.z)
+        ) {
+          console.error(
+            `-- > !!! Position calculation resulted in NaN for region ${region.name}`
+          );
+          return;
+        }
+
         const labelDiv = document.createElement("div");
         labelDiv.className = "region-label";
-        labelDiv.textContent = region.name;
-        labelDiv.style.color = `#${new THREE.Color(region.color).getHexString()}`;
+        labelDiv.textContent = region.name; // Use name from found region object
+        const labelColor = new THREE.Color(region.color);
+        labelDiv.style.color = `#${labelColor.getHexString()}`;
+        console.log(
+          `-- > Assigned Color: ${labelDiv.style.color} (from region data 0x${region.color?.toString(16)})`
+        ); // Log found color
+
         const label = new CSS2DObject(labelDiv);
-        label.position.set(avgPosition.x, 0.1, avgPosition.z); // Position slightly above systems
-        label.userData.regionId = regionId;
-        label.visible = true; // Always visible
+        label.position.copy(avgPosition);
+        label.position.y = 0.1; // Position slightly above systems
+        label.userData.regionId = regionId; // Store the ID used for lookup
+        label.visible = true;
+
         cacheEntry.label = label;
-        cacheEntry.center = new THREE.Vector3(
-          avgPosition.x,
-          0.1,
-          avgPosition.z
-        );
+        cacheEntry.center = avgPosition.clone();
+
         scene.add(label);
+        console.log(`-- > Added label object for ${region.name} to scene.`);
 
         regionLabelCache.set(regionId, cacheEntry);
-        console.log(`Created and cached label for region ${region.name}`);
       } else {
-        // Ensure cached label is visible
+        // Label exists in cache, make sure it's visible (animate loop does this too)
         const cacheEntry = regionLabelCache.get(regionId);
-        cacheEntry.label.visible = true;
+        if (cacheEntry.label) {
+          // Check if label exists in cache entry
+          cacheEntry.label.visible = true;
+          // Optionally update position if needed, but can be complex/slow
+          // const avgPosition = new THREE.Vector3();
+          // positions.forEach(p => avgPosition.add(p));
+          // avgPosition.divideScalar(positions.length);
+          // cacheEntry.label.position.copy(avgPosition);
+          // cacheEntry.label.position.y = 0.1;
+          // console.log(`-- Updated position for cached label ${region.name}`);
+        }
+        // console.log(`-- Label for region ${region.name} exists in cache.`);
       }
     });
-    console.log(`Region labels update complete.`);
+    console.log("CREATE REGION LABELS END.");
   }
 
   // --- CHANGE: Unified Activity Visualization Update ---
@@ -1730,8 +1833,7 @@
       routeLines = null;
       console.log("[calculateRoute] Cleared previous route lines.");
     }
-    dangerWarnings = [];
-    if (dangerTooltip?.parentElement) dangerTooltip.remove();
+    dangerWarningsList = [];
 
     let originId;
     if (isNewRoute || currentRoute.length === 0) {
@@ -1887,8 +1989,10 @@
   // --- CHANGE: Update Route Danger Check to use unified activities ---
 
   function checkRouteForDangers(route) {
-    dangerWarnings = [];
-    let tooltipHtml = "";
+    // Note: Ensure 'dangerWarningsList' is declared as a top-level reactive variable
+    // let dangerWarningsList = []; // <<< Should be declared outside this function
+
+    const newWarnings = []; // Build a new list for this check
     const dangerLinesGroup = new THREE.Group(); // Group for danger lines specifically
 
     for (let i = 0; i < route.length; i++) {
@@ -1899,22 +2003,30 @@
       let systemMarkedDangerous = false;
       let dangerType = "unknown"; // To store the type for coloring the segment
 
+      // Check unified activity markers
       for (const markerObj of activityMarkers.values()) {
         const activity = markerObj.activityData;
         let isActivityHere = false;
         let currentActivityClassification = null;
 
         // Check if activity involves the current route system
+        // Use parseInt for robust comparison if IDs might be strings
+        const currentSystemIdInt = parseInt(systemId);
+        const activitySystemIdInt = activity.systemId
+          ? parseInt(activity.systemId)
+          : NaN;
+        const activityLastSystemIdInt = activity.lastSystem?.id
+          ? parseInt(activity.lastSystem.id)
+          : NaN;
+
         if (
-          // Ensure activity ID is a number before comparing
-          (typeof activity.systemId === "number" &&
-            activity.systemId === systemId) ||
-          (activity.lastSystem &&
-            typeof activity.lastSystem.id === "number" &&
-            activity.lastSystem.id === systemId) ||
+          (!isNaN(activitySystemIdInt) &&
+            activitySystemIdInt === currentSystemIdInt) ||
+          (!isNaN(activityLastSystemIdInt) &&
+            activityLastSystemIdInt === currentSystemIdInt) ||
           (activity.systems &&
             activity.systems.some(
-              (s) => typeof s.id === "number" && s.id === systemId
+              (s) => s.id && parseInt(s.id) === currentSystemIdInt
             ))
         ) {
           isActivityHere = true;
@@ -1930,11 +2042,16 @@
           ) {
             systemMarkedDangerous = true;
             dangerType = currentActivityClassification; // Store the specific type
-            let warningText = "";
-            if (["camp", "smartbomb", "roaming_camp"].includes(dangerType)) {
-              warningText = `<span class="math-inline">\{dangerType\.replace\("\_", " "\)\} \(</span>{Math.round(activity.probability || 0)}% confidence)`;
+
+            let warningText = ""; // Basic text description
+            if (
+              dangerType === "camp" ||
+              dangerType === "smartbomb" ||
+              dangerType === "roaming_camp"
+            ) {
+              warningText = `${dangerType.replace("_", " ")}`; // Will add details in template
             } else if (dangerType === "battle") {
-              warningText = `Battle (${activity.metrics?.partyMetrics?.characters || 0} pilots)`;
+              warningText = `Battle`; // Will add details in template
             }
 
             const warning = {
@@ -1942,38 +2059,48 @@
               systemName: system.data.itemname || `System ${systemId}`,
               details: warningText,
               systemId: systemId,
+              // Add probability/pilot count for template usage
+              probability:
+                dangerType !== "battle" && activity.probability
+                  ? Math.round(activity.probability || 0)
+                  : null,
+              pilots:
+                dangerType === "battle"
+                  ? activity.metrics?.partyMetrics?.characters || 0
+                  : null,
             };
-            // Avoid duplicate warnings for the same system
-            if (!dangerWarnings.some((w) => w.systemId === systemId)) {
-              dangerWarnings.push(warning);
-              tooltipHtml += `<li class="${warning.type}-warning" title="ID: <span class="math-inline">\{warning\.systemId\}"\><strong\></span>{warning.systemName}</strong>: ${warning.details}</li>`;
+            // Avoid duplicate warnings for the same system ID within this check
+            if (!newWarnings.some((w) => w.systemId === systemId)) {
+              newWarnings.push(warning);
             }
-            break; // Mark system as dangerous and move to next system in route
+            break; // Mark system as dangerous and move to next activity marker check for this system
           }
-          // Check if a 'roam' is currently in this system (less critical, but still a warning)
+          // Check if a 'roam' is currently in this system
           else if (
             currentActivityClassification === "roam" &&
-            activity.lastSystem?.id === systemId
+            !isNaN(activityLastSystemIdInt) &&
+            activityLastSystemIdInt === currentSystemIdInt
           ) {
             systemMarkedDangerous = true; // Still mark segment
             dangerType = "roam"; // Specific type for segment color
+
             const warning = {
               type: "roam",
               systemName: system.data.itemname || `System ${systemId}`,
-              details: `Roaming gang (${activity.members?.size || 0} pilots)`,
+              details: `Roaming gang`, // Simple text
               systemId: systemId,
+              pilots: activity.members?.size || 0, // Add pilot count
             };
-            // Avoid duplicate warnings for the same system
-            if (!dangerWarnings.some((w) => w.systemId === systemId)) {
-              dangerWarnings.push(warning);
-              tooltipHtml += `<li class="roam-warning" title="ID: <span class="math-inline">\{warning\.systemId\}"\><strong\></span>{warning.systemName}</strong>: ${warning.details}</li>`;
+            // Avoid duplicate warnings for the same system ID within this check
+            if (!newWarnings.some((w) => w.systemId === systemId)) {
+              newWarnings.push(warning);
             }
-            break; // Mark system as dangerous and move to next system in route
+            break; // Mark system as dangerous and move to next activity marker check for this system
           }
         }
       } // End loop through activityMarkers
 
-      // If the *current* system is marked dangerous, draw the line segment *from previous to current*
+      // If the *current* system (i) is marked dangerous, draw the line segment *from previous (i-1) to current (i)*
       if (systemMarkedDangerous && i > 0) {
         const prevSystem = solarSystems.get(route[i - 1]);
         if (prevSystem) {
@@ -1985,10 +2112,10 @@
             dangerPoints
           );
           let segmentColor = DANGER_ROUTE_COLOR; // Default orange
-          if (dangerType === "roam")
-            segmentColor = ROAM_COLOR; // Blue for roam presence
-          else if (dangerType === "battle")
-            segmentColor = BATTLE_COLOR; // Purple for battle
+
+          // Assign specific colors based on the primary danger type found
+          if (dangerType === "roam") segmentColor = ROAM_COLOR;
+          else if (dangerType === "battle") segmentColor = BATTLE_COLOR;
           else if (dangerType === "smartbomb") segmentColor = SMARTBOMB_COLOR;
           else if (dangerType === "roaming_camp")
             segmentColor = ROAMING_CAMP_COLOR;
@@ -1999,37 +2126,40 @@
             linewidth: 3, // Make danger lines slightly thicker
             transparent: true,
             opacity: 0.9,
-            depthTest: false, // Draw on top
+            depthTest: false, // Draw on top of other lines if possible
           });
           const dangerLine = new THREE.Line(dangerGeometry, dangerMaterial);
-          dangerLine.renderOrder = 1; // Ensure it draws over the base route line
+          dangerLine.renderOrder = 1; // Attempt to render over the base route line
           dangerLinesGroup.add(dangerLine);
         }
       }
     } // End loop through route systems
 
+    // --- UPDATE the reactive variable ---
+    dangerWarningsList = newWarnings; // Assign the newly generated list of warning objects
+
     // Add the group of danger lines to the main routeLines group if it exists
-    if (routeLines && dangerLinesGroup.children.length > 0) {
-      // Add danger lines as a child of the main route group
-      // Ensure old danger lines are removed if route is recalculated
+    if (routeLines) {
+      // Ensure old danger lines are removed first if route is recalculated
       const oldDangerGroup = routeLines.getObjectByName("dangerSegments");
       if (oldDangerGroup) {
         routeLines.remove(oldDangerGroup);
-        disposeObject3D(oldDangerGroup);
+        disposeObject3D(oldDangerGroup); // Dispose old geometry/material
       }
-      dangerLinesGroup.name = "dangerSegments"; // Name it for easy removal later
-      routeLines.add(dangerLinesGroup);
-      console.log(
-        `[checkRouteForDangers] Added ${dangerLinesGroup.children.length} danger segments visualization.`
-      );
-    } else if (!routeLines) {
+      // Add the new group if there are any danger segments
+      if (dangerLinesGroup.children.length > 0) {
+        dangerLinesGroup.name = "dangerSegments"; // Name it for easy removal later
+        routeLines.add(dangerLinesGroup);
+        console.log(
+          `[checkRouteForDangers] Added ${dangerLinesGroup.children.length} danger segments visualization.`
+        );
+      }
+    } else if (newWarnings.length > 0) {
+      // Only warn if there were dangers but no route line to attach to
       console.warn(
-        "[checkRouteForDangers] routeLines group does not exist, cannot add danger segments."
+        "[checkRouteForDangers] routeLines group does not exist, cannot add danger segments visualization."
       );
     }
-
-    if (dangerWarnings.length > 0) showDangerWarnings(tooltipHtml);
-    else if (dangerTooltip?.parentElement) dangerTooltip.remove();
   }
   // --- END CHANGE ---
   function showDangerWarnings(warningsHtmlList) {
@@ -2136,71 +2266,44 @@
     if (security > 0.0) return "Low Security";
     return "Null Security";
   }
-  function toggleColorMode() {
+  // In your NEWEST code file, replace the toggleColorMode function with this OLD logic:
+  async function toggleColorMode() {
+    // Added async for potential future use, not strictly needed now
     colorByRegion = !colorByRegion;
-    // Update system point colors
-    const pointsObject = scene?.children.find(
-      (child) => child.userData?.isSystemPoints
+    console.log(
+      `[UniverseMap] Toggled color mode. Color by region: ${colorByRegion}`
     );
-    if (pointsObject && pointsObject.geometry.attributes.color) {
-      const colors = pointsObject.geometry.attributes.color;
-      solarSystems.forEach((system, systemId) => {
-        const color = colorByRegion
-          ? new THREE.Color(system.regionColor)
-          : new THREE.Color(system.securityColor);
-        colors.setXYZ(system.index, color.r, color.g, color.b);
-      });
-      colors.needsUpdate = true;
-    }
-    // Update connection colors
-    stargateConnections.forEach((line) => {
-      scene.remove(line);
-      disposeObject3D(line);
-    });
-    stargateConnections = [];
-    const solarSystemsData = mapData.filter((item) => item.typeid === 5);
-    const stargatesData = mapData.filter((item) => item.groupid === 10);
-    const processedConnections = new Set();
-    stargatesData.forEach((sourceGate) => {
-      if (!sourceGate.solarsystemid || !sourceGate.itemname) return;
-      const match = sourceGate.itemname.match(/Stargate \(([^)]+)\)/);
-      if (!match) return;
-      const destinationName = match[1];
-      const destinationSystem = solarSystemsData.find(
-        (sys) => sys.itemname === destinationName
-      );
-      if (!destinationSystem) return;
-      const sourceSystem = solarSystemsData.find(
-        (sys) => sys.itemid === sourceGate.solarsystemid
-      );
-      if (!sourceSystem) return;
-      const connectionId = [sourceSystem.itemid, destinationSystem.itemid]
-        .sort()
-        .join("-");
-      if (processedConnections.has(connectionId)) return;
-      processedConnections.add(connectionId);
-      if (
-        solarSystems.has(sourceSystem.itemid) &&
-        solarSystems.has(destinationSystem.itemid)
-      ) {
-        const connection = createConnectionLine(
-          sourceSystem,
-          destinationSystem
+
+    if (mapData && mapData.length > 0) {
+      console.log("[UniverseMap] Rebuilding map for color toggle...");
+      buildMap(mapData); // Call buildMap to apply new colors correctly
+
+      // Re-apply route visualization if a route exists
+      if (currentRoute.length > 0) {
+        console.log(
+          "[UniverseMap] Re-applying route visualization after color toggle."
         );
-        if (connection) {
-          scene.add(connection);
-          stargateConnections.push(connection);
-        }
+        createRouteVisualization(currentRoute);
+        checkRouteForDangers(currentRoute); // Re-check dangers and apply overlays
       }
-    });
-
-    // Region labels are always visible, no toggling needed
-    // Region backgrounds removed, no toggling needed
-
-    // Re-evaluate route colors if a route is active
-    if (routeLines && currentRoute.length > 0) {
-      createRouteVisualization(currentRoute); // Redraw with potentially new connection colors
-      checkRouteForDangers(currentRoute);
+      // Re-apply user location marker visualization
+      if (userLocation) {
+        console.log(
+          "[UniverseMap] Re-applying user location marker after color toggle."
+        );
+        updateUserLocationMarker(userLocation); // Ensure marker is present
+      }
+      // Re-apply activity markers
+      if (activities && activities.length > 0) {
+        console.log(
+          "[UniverseMap] Re-applying activity markers after color toggle."
+        );
+        updateActivityVisualizations(activities); // Redraw activities
+      }
+    } else {
+      console.warn(
+        "[UniverseMap] Cannot rebuild map for color toggle: mapData is missing."
+      );
     }
   }
 
@@ -2677,16 +2780,39 @@
       </div>
     </div>
   {/if}
-  <div class="map-view" bind:this={container}>
-    {#if isLoading}
-      <div class="loading">Loading universe map...</div>
-    {:else if isCalculatingRoute}
-      <div class="loading">Setting route...</div>
-    {/if}
-    {#if error && !isCalculatingRoute}
-      <div class="error">Error: {error}</div>
-    {/if}
-  </div>
+  <div class="map-view" bind:this={container}></div>
+
+  {#if dangerWarningsList.length > 0}
+    <div class="danger-tooltip-reactive">
+      <div class="danger-header">
+        ⚠️ Route Dangers
+        <button
+          class="close-danger"
+          on:click={() => (dangerWarningsList = [])}
+          title="Dismiss Warnings">×</button
+        >
+      </div>
+      <ul class="danger-list">
+        {#each dangerWarningsList as warning (warning.systemId)}
+          <li
+            class="{warning.type}-warning"
+            title="System ID: {warning.systemId}"
+          >
+            <strong>{warning.systemName}:</strong>
+            {#if warning.type === "camp" || warning.type === "smartbomb" || warning.type === "roaming_camp"}
+              {warning.details} ({warning.probability}% confidence)
+            {:else if warning.type === "battle"}
+              {warning.details} ({warning.pilots} pilots)
+            {:else if warning.type === "roam"}
+              {warning.details} ({warning.pilots} pilots)
+            {:else}
+              {warning.details}
+            {/if}
+          </li>
+        {/each}
+      </ul>
+    </div>
+  {/if}
 </div>
 
 <ContextMenu
@@ -2698,336 +2824,355 @@
 />
 
 <style>
-  /* --- Styles (remain mostly the same, added indicator styles) --- */
+  /* --- Base Container & Controls --- */
   .universe-map-container {
-    /* */
-    position: relative; /* Needed for absolute positioning of children */ /* */
-    width: 100%; /* */
-    height: 100%; /* */
-    overflow: hidden; /* */
+    position: relative; /* Needed for absolute positioning of children */
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
   }
   .controls {
-    /* */
-    position: absolute; /* */
-    top: 20px; /* */
-    left: 20px; /* */
-    z-index: 10; /* Ensure controls are above map */ /* */
-    display: flex; /* */
-    flex-direction: column; /* */
-    gap: 10px; /* */
+    position: absolute;
+    top: 20px;
+    left: 20px;
+    z-index: 10; /* Ensure controls are above map */
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
   }
   .control-panel {
-    /* */
-    background-color: rgba(0, 0, 0, 0.7); /* */
-    border: 1px solid rgba(0, 255, 255, 0.3); /* */
-    border-radius: 8px; /* */
-    padding: 12px; /* */
-    display: flex; /* */
-    flex-direction: column; /* */
-    gap: 10px; /* */
+    background-color: rgba(0, 0, 0, 0.7);
+    border: 1px solid rgba(0, 255, 255, 0.3);
+    border-radius: 8px;
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
   }
   .search-box input {
-    /* */
-    background-color: rgba(30, 30, 30, 0.7); /* */
-    color: white; /* */
-    border: 1px solid rgba(0, 255, 255, 0.5); /* */
-    padding: 8px 12px; /* */
-    border-radius: 4px; /* */
-    width: 100%; /* */
+    background-color: rgba(30, 30, 30, 0.7);
+    color: white;
+    border: 1px solid rgba(0, 255, 255, 0.5);
+    padding: 8px 12px;
+    border-radius: 4px;
+    width: 100%; /* Use available width */
+    box-sizing: border-box; /* Include padding/border in width */
   }
   .color-toggle {
-    /* */
-    background-color: rgba(0, 100, 100, 0.7); /* */
-    color: white; /* */
-    border: 1px solid #00ffff; /* */
-    padding: 8px 16px; /* */
-    cursor: pointer; /* */
-    border-radius: 4px; /* */
-    transition: background-color 0.2s; /* */
+    background-color: rgba(0, 100, 100, 0.7);
+    color: white;
+    border: 1px solid #00ffff;
+    padding: 8px 16px;
+    cursor: pointer;
+    border-radius: 4px;
+    transition: background-color 0.2s;
   }
   .color-toggle:hover {
-    /* */
-    background-color: rgba(0, 150, 150, 0.7); /* */
+    background-color: rgba(0, 150, 150, 0.7);
   }
   .fullscreen-toggle {
-    /* */
-    background-color: rgba(50, 50, 150, 0.7); /* */
-    border: 1px solid #aaaaff; /* */
-    color: white; /* */
-    padding: 8px 16px; /* */
-    cursor: pointer; /* */
-    border-radius: 4px; /* */
-    transition: background-color 0.2s; /* */
-    margin-top: 5px; /* */
-    display: inline-flex; /* */
-    align-items: center; /* */
-    justify-content: center; /* */
+    background-color: rgba(50, 50, 150, 0.7);
+    border: 1px solid #aaaaff;
+    color: white;
+    padding: 8px 16px;
+    cursor: pointer;
+    border-radius: 4px;
+    transition: background-color 0.2s;
+    margin-top: 5px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
   }
   .fullscreen-toggle:hover {
-    /* */
-    background-color: rgba(70, 70, 180, 0.7); /* */
+    background-color: rgba(70, 70, 180, 0.7);
   }
 
-  /* Info Panel Styling */
+  /* --- Info Panel Styling (Bottom Left) --- */
   .system-info-panel {
-    /* */
-    position: absolute; /* */
-    bottom: 20px; /* */
-    left: 20px; /* */
-    z-index: 100; /* High z-index */ /* */
-    background-color: rgba(0, 0, 0, 0.8); /* */
-    border: 1px solid rgba(0, 255, 255, 0.3); /* */
-    border-radius: 8px; /* */
-    padding: 15px; /* */
-    min-width: 250px; /* */
-    max-width: 300px; /* */
-    color: white; /* */
+    position: absolute;
+    bottom: 20px;
+    left: 20px;
+    z-index: 100; /* High z-index */
+    background-color: rgba(0, 0, 0, 0.8);
+    border: 1px solid rgba(0, 255, 255, 0.3);
+    border-radius: 8px;
+    padding: 15px;
+    min-width: 250px;
+    max-width: 300px;
+    color: white;
+    box-shadow: 0 0 15px rgba(0, 255, 255, 0.2);
+    backdrop-filter: blur(2px); /* Optional blur */
   }
   .close-btn {
-    /* */
-    position: absolute; /* */
-    top: 10px; /* */
-    right: 10px; /* */
-    width: 20px; /* */
-    height: 20px; /* */
-    background-color: rgba(255, 100, 100, 0.7); /* */
-    color: white; /* */
-    border-radius: 50%; /* */
-    display: flex; /* */
-    align-items: center; /* */
-    justify-content: center; /* */
-    cursor: pointer; /* */
-    border: none; /* */
-    line-height: 1; /* */
-    padding: 0; /* */
+    position: absolute;
+    top: 8px; /* Adjust position */
+    right: 8px; /* Adjust position */
+    width: 22px;
+    height: 22px;
+    background-color: rgba(150, 50, 50, 0.7); /* Less intense red */
+    color: white;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    border: 1px solid rgba(255, 100, 100, 0.5);
+    line-height: 1;
+    padding: 0;
+    font-size: 16px;
+    font-weight: bold;
+    transition: background-color 0.2s;
+  }
+  .close-btn:hover {
+    background-color: rgba(200, 50, 50, 0.9);
   }
   .system-info-panel h3 {
-    /* */
-    color: #00ffff; /* */
-    margin: 0 0 10px 0; /* */
-    font-size: 16px; /* */
+    color: #00ffff;
+    margin: 0 0 12px 0; /* Increased bottom margin */
+    padding-right: 25px; /* Space for close button */
+    font-size: 17px; /* Slightly larger */
+    border-bottom: 1px solid rgba(0, 255, 255, 0.2); /* Separator */
+    padding-bottom: 8px; /* Space below title */
   }
   .info-row {
-    /* */
-    display: flex; /* */
-    justify-content: space-between; /* */
-    margin-bottom: 5px; /* */
-    font-size: 14px; /* */
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 6px; /* Slightly more space */
+    font-size: 14px;
   }
   .info-row span:first-child {
-    /* */
-    color: #888; /* */
+    color: #aaa; /* Dimmer label */
+    margin-right: 10px;
   }
   .info-row span:last-child {
-    /* */
-    color: white; /* */
+    color: white;
+    text-align: right;
   }
-  .camp-indicator {
-    /* */
-    color: #ff3333; /* */
-    font-weight: bold; /* */
+  /* Activity Indicator Styles within Info Panel */
+  .info-row.danger {
+    /* Style the row containing activity */
+    background-color: rgba(50, 50, 50, 0.2); /* Subtle background */
+    padding: 4px 6px;
+    border-radius: 4px;
+    margin-top: 8px;
+    border-left: 3px solid; /* Add left border color dynamically */
   }
+  .camp-indicator,
+  .smartbomb-indicator,
+  .roaming_camp-indicator,
+  .battle-indicator,
   .roam-indicator {
-    /* */
-    color: #3333ff; /* Roam color */ /* */
-    font-weight: bold; /* */
+    display: inline-flex;
+    align-items: center;
+    font-weight: bold;
+    /* Colors applied via specific classes below */
   }
-  .danger {
-    /* */
-    background-color: rgba(255, 0, 0, 0.2); /* */
-    border-radius: 4px; /* */
-    padding: 2px 4px; /* */
+  .info-row.danger.camp-indicator {
+    border-left-color: #ff3333;
   }
-  .warning {
-    /* */
-    background-color: rgba(
-      255,
-      165,
-      0,
-      0.2
-    ); /* Use roam color for warning */ /* */
-    border-radius: 4px; /* */
-    padding: 2px 4px; /* */
+  .info-row.danger.smartbomb-indicator {
+    border-left-color: #ff9933;
   }
+  .info-row.danger.roaming_camp-indicator {
+    border-left-color: #ff8c00;
+  }
+  .info-row.danger.battle-indicator {
+    border-left-color: #cc00cc;
+  }
+  .info-row.danger.roam-indicator {
+    border-left-color: #3333ff;
+  }
+
+  .camp-indicator span {
+    color: #ff3333;
+  }
+  .smartbomb-indicator span {
+    color: #ff9933;
+  }
+  .roaming_camp-indicator span {
+    color: #ff8c00;
+  }
+  .battle-indicator span {
+    color: #cc00cc;
+  }
+  .roam-indicator span {
+    color: #3333ff;
+  }
+
+  .icon {
+    margin-right: 6px;
+    font-size: 1.1em;
+    line-height: 1; /* Prevent extra vertical space */
+  }
+  /* Action Buttons */
   .action-buttons {
-    /* */
-    margin-top: 15px; /* */
-    display: flex; /* */
-    gap: 10px; /* */
+    margin-top: 15px;
+    display: flex;
+    gap: 10px;
+    border-top: 1px solid rgba(0, 255, 255, 0.2); /* Separator */
+    padding-top: 15px; /* Space above buttons */
   }
   .action-buttons button {
-    /* */
-    flex-grow: 1; /* */
-    background-color: rgba(0, 255, 255, 0.2); /* */
-    color: #00ffff; /* */
-    border: 1px solid rgba(0, 255, 255, 0.5); /* */
-    padding: 6px 10px; /* */
-    border-radius: 4px; /* */
-    cursor: pointer; /* */
-    font-size: 13px; /* */
-    transition: background-color 0.2s; /* */
+    flex-grow: 1;
+    background-color: rgba(0, 255, 255, 0.2);
+    color: #00ffff;
+    border: 1px solid rgba(0, 255, 255, 0.5);
+    padding: 7px 10px; /* Slightly adjusted padding */
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 13px;
+    transition:
+      background-color 0.2s,
+      color 0.2s;
   }
-  .action-buttons button:hover {
-    /* */
-    background-color: rgba(0, 255, 255, 0.4); /* */
+  .action-buttons button:hover:not(:disabled) {
+    background-color: rgba(0, 255, 255, 0.4);
+    color: #ffffff;
   }
   .action-buttons button:disabled {
-    /* */
-    opacity: 0.5; /* */
-    cursor: not-allowed; /* */
+    opacity: 0.5;
+    cursor: not-allowed;
+    background-color: rgba(100, 100, 100, 0.2);
+    border-color: rgba(100, 100, 100, 0.5);
+    color: #888;
   }
 
-  /* --- NEW: Indicator Styles --- */
-  .camp-indicator, /* */
-    .smartbomb-indicator, /* */
-    .roaming_camp-indicator, /* */
-    .battle-indicator, /* */
-    .roam-indicator {
-    /* */
-    display: inline-flex; /* */
-    align-items: center; /* */
-    font-weight: bold; /* */
-  }
-  .camp-indicator {
-    /* */
-    color: #ff3333; /* */
-  }
-  .smartbomb-indicator {
-    /* */
-    color: #ff9933; /* */
-  }
-  .roaming_camp-indicator {
-    /* */
-    color: #ff8c00; /* */
-  }
-  .battle-indicator {
-    /* */
-    color: #cc00cc; /* */
-  }
-  .roam-indicator {
-    /* */
-    color: #3333ff; /* */
-  }
-  .icon {
-    /* */
-    margin-right: 5px; /* */
-    font-size: 1.1em; /* */
-  }
-  /* --- END NEW --- */
-
+  /* --- Map View & Loading/Error States --- */
   .map-view {
-    /* */
-    width: 100%; /* */
-    height: 100%; /* */
-    background-color: #000; /* */
+    width: 100%;
+    height: 100%;
+    background-color: #000; /* Base background */
   }
-  .loading, /* */
-    .error {
-    /* */
-    position: absolute; /* */
-    top: 50%; /* */
-    left: 50%; /* */
-    transform: translate(-50%, -50%); /* */
-    color: white; /* */
-    background-color: rgba(0, 0, 0, 0.7); /* */
-    padding: 20px; /* */
-    border-radius: 8px; /* */
-    z-index: 20; /* */
+  .loading,
+  .error {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    color: white;
+    background-color: rgba(0, 0, 0, 0.8); /* Darker background */
+    padding: 20px 30px; /* More padding */
+    border-radius: 8px;
+    z-index: 20;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
+    text-align: center;
   }
   .error {
-    /* */
-    color: #ff6b6b; /* */
+    color: #ff6b6b; /* Error color */
+    border-color: rgba(255, 107, 107, 0.5);
   }
 
+  /* --- THREE.js CSS2D Labels --- */
   :global(.system-label) {
-    /* */
-    color: white; /* */
-    font-size: 12px; /* */
-    padding: 2px 5px; /* */
-    background-color: rgba(0, 0, 0, 0.7); /* */
-    border-radius: 3px; /* */
-    white-space: nowrap; /* */
-    pointer-events: none; /* */
-    user-select: none; /* */
+    color: white;
+    font-size: 11px; /* Slightly smaller */
+    padding: 1px 4px; /* Tighter padding */
+    background-color: rgba(0, 0, 0, 0.75); /* More opaque */
+    border-radius: 3px;
+    white-space: nowrap;
+    pointer-events: none; /* Allow clicks to pass through */
+    user-select: none; /* Prevent text selection */
+    border: 1px solid rgba(255, 255, 255, 0.2); /* Subtle border */
   }
   :global(.region-label) {
-    /* */
-    font-size: 16px; /* */
-    font-weight: bold; /* */
-    padding: 3px 6px; /* */
-    background-color: rgba(0, 0, 0, 0.5); /* */
-    border-radius: 4px; /* */
-    white-space: nowrap; /* */
-    pointer-events: none; /* */
-    user-select: none; /* */
-    text-shadow: /* */
-      0 0 3px black,
-      /* */ 0 0 3px black; /* */
+    font-size: 18px; /* Larger region labels */
+    font-weight: bold;
+    padding: 4px 8px;
+    background-color: rgba(0, 0, 0, 0.6); /* Background for contrast */
+    border-radius: 4px;
+    white-space: nowrap;
+    pointer-events: none;
+    user-select: none;
+    text-shadow:
+      0 0 4px black,
+      0 0 4px black; /* Stronger shadow */
+    /* Color is set dynamically via style attribute */
+    border: 1px solid rgba(255, 255, 255, 0.1); /* Very subtle border */
   }
 
-  :global(.danger-tooltip) {
-    /* */
-    position: absolute; /* */
-    bottom: 20px; /* */
-    left: 20px; /* */
-    background: rgba(0, 0, 0, 0.8); /* */
-    border: 1px solid #ff6600; /* */
-    border-radius: 4px; /* */
-    padding: 10px; /* */
-    color: white; /* */
-    font-family: sans-serif; /* */
-    max-width: 300px; /* */
-    z-index: 1000; /* */
+  /* --- Reactive Danger Warnings Box (Bottom Right) --- */
+  .danger-tooltip-reactive {
+    position: absolute;
+    bottom: 20px;
+    right: 20px;
+    background: rgba(10, 0, 0, 0.85); /* Darker background */
+    border: 1px solid #ff6600;
+    border-radius: 5px;
+    padding: 10px 15px;
+    color: #ddd;
+    font-family: sans-serif;
+    font-size: 13px;
+    max-width: 300px;
+    max-height: 200px; /* Limit height */
+    overflow-y: auto; /* Add scrollbar if needed */
+    z-index: 1000;
+    box-shadow: 0 0 10px rgba(255, 102, 0, 0.5);
+    backdrop-filter: blur(2px);
   }
-  :global(.danger-header) {
-    /* */
-    font-weight: bold; /* */
-    font-size: 16px; /* */
-    margin-bottom: 8px; /* */
-    color: #ff6600; /* */
+  .danger-header {
+    font-weight: bold;
+    font-size: 16px;
+    margin-bottom: 8px;
+    color: #ffaa00; /* Header color */
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding-bottom: 5px;
+    border-bottom: 1px solid rgba(255, 102, 0, 0.3); /* Separator line */
   }
-  :global(.danger-list) {
-    /* */
-    margin: 0; /* */
-    padding: 0 0 0 20px; /* */
-    list-style: none; /* */
+  .close-danger {
+    background: none;
+    border: none;
+    color: #aaa;
+    font-size: 20px;
+    line-height: 1;
+    padding: 0 5px;
+    cursor: pointer;
+    transition: color 0.2s;
   }
-  :global(.danger-list li) {
-    /* */
-    margin-bottom: 4px; /* */
-    position: relative; /* */
-    padding-left: 15px; /* */
+  .close-danger:hover {
+    color: white;
   }
-
-  :global(.danger-list li::before) {
+  .danger-list {
+    margin: 0;
+    padding: 0 0 0 5px; /* List padding */
+    list-style: none;
+  }
+  .danger-list li {
+    margin-bottom: 5px; /* Space between items */
+    position: relative;
+    padding-left: 15px; /* Space for the colored dot */
+    line-height: 1.4;
+  }
+  /* Colored dot marker for each list item */
+  .danger-list li::before {
     content: "";
     position: absolute;
     left: 0;
-    top: 5px;
+    top: 6px; /* Align dot vertically */
     width: 8px;
     height: 8px;
     border-radius: 50%;
+    background-color: #ff3333; /* Default: Camp color */
   }
-  :global(.camp-warning::before),
-  :global(.smartbomb-warning::before),
-  :global(.roaming_camp-warning::before),
-  :global(.battle-warning::before) {
-    background-color: #ff3333; /* Default danger color */
-  }
-  :global(.smartbomb-warning::before) {
+  /* Specific dot colors for different warning types */
+  .smartbomb-warning::before {
     background-color: #ff9933;
-  }
-  :global(.roaming_camp-warning::before) {
+  } /* SMARTBOMB_COLOR */
+  .roaming_camp-warning::before {
     background-color: #ff8c00;
-  }
-  :global(.battle-warning::before) {
+  } /* ROAMING_CAMP_COLOR */
+  .battle-warning::before {
     background-color: #cc00cc;
-  }
-  :global(.roam-warning::before) {
+  } /* BATTLE_COLOR */
+  .roam-warning::before {
     background-color: #3333ff;
-  } /* Roam color */
-  :global(.danger-list strong) {
-    color: white;
-    font-weight: bold;
+  } /* ROAM_COLOR */
+
+  .danger-list strong {
+    color: #eee; /* System name color */
+    font-weight: 600;
+    margin-right: 4px;
   }
 </style>

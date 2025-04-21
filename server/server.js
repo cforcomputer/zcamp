@@ -804,21 +804,24 @@ app.get("/api/trophy/:characterId", async (req, res) => {
   }
 });
 
-// universe map data
 // This endpoint fetches map data from the database and returns it to the client
 app.get("/api/map-data", async (req, res) => {
   try {
     console.log("API: Received request for map data");
 
-    // Only fetch relevant data (regions, systems, stargates)
+    // Fetch ALL Region definitions (typeID=3)
+    // Fetch only K-Space Systems (typeID=5 AND regionID < 11000000)
+    // Fetch only K-Space Stargates (groupID=10 AND regionID < 11000000)
     const { rows } = await pool.query(`
-      SELECT * FROM map_denormalize
-      WHERE (typeID = 3 AND regionID < 11000000) -- K-Space Regions
-         OR (typeID = 5 AND regionID < 11000000) -- K-Space Solar Systems
-         OR (groupID = 10 AND regionID < 11000000) -- K-Space Other
-    `);
+          SELECT * FROM map_denormalize
+          WHERE typeID = 3
+             OR (typeID = 5 AND regionID < 11000000)
+             OR (groupID = 10 AND regionID < 11000000)
+      `);
+    // --- END CORRECTED QUERY ---
 
     console.log(`API: Found ${rows.length} total map entries`);
+    // These logs will now correctly reflect the number of regions found by the query
     console.log(
       `API: Regions: ${rows.filter((item) => item.typeid === 3).length}`
     );
@@ -830,7 +833,9 @@ app.get("/api/map-data", async (req, res) => {
     );
 
     if (rows.length > 0) {
-      console.log("API: Sample entry:", rows[0]);
+      // Find a sample that ISN'T a region if possible for better context
+      const sampleEntry = rows.find((item) => item.typeid === 5) || rows[0];
+      console.log("API: Sample entry:", sampleEntry);
     }
 
     res.json(rows);
