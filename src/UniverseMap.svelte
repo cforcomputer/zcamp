@@ -1313,17 +1313,26 @@
     group.add(glowSprite); //
 
     // Secondary Glow (Positioned at the primary system for camps/SB, last system for roaming/battle)
-    const lastSystemIdInt = parseInt(activity.lastSystem?.id); // <<< DEBUG Check ID parsing
-    const secondaryGlowTargetSystem =
-      (activity.classification === "roaming_camp" || //
-        activity.classification === "battle") && //
-      activity.lastSystem &&
-      !isNaN(lastSystemIdInt) // <<< DEBUG Check ID is valid
-        ? solarSystems.get(lastSystemIdInt) //
-        : system; // Fallback to primary system //
-    const secondaryGlowPosition =
-      secondaryGlowTargetSystem?.position || system.position; // Use primary if lookup fails //
+    const lastSystemIdStr = activity.lastSystem?.id;
+    const lastSystemIdInt = lastSystemIdStr ? parseInt(lastSystemIdStr) : NaN;
 
+    let secondaryGlowTargetSystem = system; // Default to primary system (where the group is anchored)
+    if (
+      (activity.classification === "roaming_camp" ||
+        activity.classification === "battle") &&
+      !isNaN(lastSystemIdInt) &&
+      solarSystems.has(lastSystemIdInt)
+    ) {
+      secondaryGlowTargetSystem = solarSystems.get(lastSystemIdInt);
+    } else if (
+      (activity.classification === "roaming_camp" ||
+        activity.classification === "battle") &&
+      !isNaN(lastSystemIdInt)
+    ) {
+      console.warn(
+        `[UniverseMap] Last system ${lastSystemIdInt} for secondary glow (Activity ${activity.id}) not found in rendered map. Using primary system ${systemId}.`
+      );
+    }
     const secondaryGlowSize = baseGlowSize * 10.0; //
     const secondaryGlowMaterial = new THREE.SpriteMaterial({
       //
@@ -1337,6 +1346,16 @@
     const secondaryGlowSprite = new THREE.Sprite(secondaryGlowMaterial); //
     secondaryGlowSprite.scale.set(secondaryGlowSize, secondaryGlowSize, 1); //
     secondaryGlowSprite.renderOrder = -1; //
+
+    // The group is positioned at 'system.position'.
+    // We want the sprite to appear at 'secondaryGlowTargetSystem.position' in world space.
+    // So, the sprite's local position within the group needs to be the difference.
+    const relativePosition = new THREE.Vector3().subVectors(
+      secondaryGlowTargetSystem.position, // Target world position
+      system.position // Group's world position (origin)
+    );
+    secondaryGlowSprite.position.copy(relativePosition);
+
     group.add(secondaryGlowSprite); // Add to the main group
 
     // Animation Mixer
@@ -1446,11 +1465,10 @@
           curve.getPoints(Math.max(64, points.length * 8)) //
         );
         const material = new THREE.LineBasicMaterial({
-          //
-          color: new THREE.Color(ROAM_COLOR).multiplyScalar(1.5), //
-          linewidth: 2, //
-          transparent: true, //
-          opacity: 0.7, //
+          color: new THREE.Color(ROAM_COLOR).multiplyScalar(1.5), // Keep color bright
+          linewidth: 2.5, // Slightly thicker
+          transparent: true,
+          opacity: 0.85,
         });
         material.userData = { baseColor: new THREE.Color(ROAM_COLOR) }; // Store base color
         lineObject = new THREE.Line(geometry, material); //
@@ -1651,7 +1669,7 @@
       `[fetchEsiRoute] Fetching route via SERVER PROXY from ${originId} to ${destinationId}` //
     );
     // Construct the relative URL for the server proxy
-    const url = `/api/route/<span class="math-inline">\{originId\}/</span>{destinationId}?flag=shortest`; //
+    const url = `/api/route/${originId}/${destinationId}?flag=shortest`;
     console.log(`[fetchEsiRoute] Request URL (proxy): ${url}`); //
     try {
       // Use fetch to call the local server endpoint
@@ -1809,15 +1827,7 @@
       await tick();
     }
   }
-  function findSystemByPosition(x, y, z, tolerance = 0.0001) {
-    for (const system of solarSystems.values()) {
-      const dx = Math.abs(system.position.x - x);
-      const dy = Math.abs(system.position.y - y);
-      const dz = Math.abs(system.position.z - z);
-      if (dx < tolerance && dy < tolerance && dz < tolerance) return system;
-    }
-    return null;
-  }
+
   function createRouteVisualization(route) {
     // Accepts array of system IDs
     if (routeLines) {
@@ -1828,68 +1838,45 @@
 
     const group = new THREE.Group();
     const points = [];
-    const dangerSegmentsIndices = [];
+    // const dangerSegmentsIndices = []; // <<< REMOVE THIS LINE
+
     for (let i = 0; i < route.length; i++) {
       const system = solarSystems.get(route[i]);
       if (system) {
         points.push(system.position.clone());
-        let isDangerous = false;
-        if (campMarkers.has(route[i])) isDangerous = true;
-        else {
-          for (const pathObj of roamPaths.values()) {
-            if (
-              pathObj.roamData.systems?.some((s) => parseInt(s.id) === route[i])
-            ) {
-              isDangerous = true;
-              break;
-            }
-          }
-        }
-        if (isDangerous && i < route.length - 1) dangerSegmentsIndices.push(i);
       } else {
         console.warn(
           `System ID ${route[i]} not found in rendered map for route.`
         );
       }
     }
+
     if (points.length < 2) {
       console.warn("Not enough points to draw route visualization.");
       return;
     }
+
     const routeGeometry = new THREE.BufferGeometry().setFromPoints(points);
     const routeMaterial = new THREE.LineBasicMaterial({
       color: ROUTE_COLOR,
-      linewidth: 2,
+      linewidth: 2, // Note: linewidth > 1 might not work on all systems with WebGLRenderer
       transparent: true,
       opacity: 0.7,
     });
     const routeLine = new THREE.Line(routeGeometry, routeMaterial);
     group.add(routeLine);
-    dangerSegmentsIndices.forEach((i) => {
-      if (i + 1 < points.length) {
-        const dangerPoints = [points[i], points[i + 1]];
-        const dangerGeometry = new THREE.BufferGeometry().setFromPoints(
-          dangerPoints
-        );
-        const dangerMaterial = new THREE.LineBasicMaterial({
-          color: DANGER_ROUTE_COLOR,
-          linewidth: 3,
-          transparent: true,
-          opacity: 0.9,
-        });
-        const dangerLine = new THREE.Line(dangerGeometry, dangerMaterial);
-        group.add(dangerLine);
-      }
-    });
+
     if (points.length > 0) {
-      const startMarker = createRouteMarker(points[0], 0x00ff00);
-      const endMarker = createRouteMarker(points[points.length - 1], 0xff0000);
+      const startMarker = createRouteMarker(points[0], 0x00ff00); // Green
+      const endMarker = createRouteMarker(points[points.length - 1], 0xffaa00); // Orange/Yellow for end
       group.add(startMarker);
       group.add(endMarker);
     }
+
     scene.add(group);
     routeLines = group; // Assign the new group
   }
+
   function createRouteMarker(position, color) {
     const markerGeometry = new THREE.SphereGeometry(SYSTEM_SIZE * 0.5);
     const markerMaterial = new THREE.MeshBasicMaterial({ color });
@@ -1898,86 +1885,152 @@
     return marker;
   }
   // --- CHANGE: Update Route Danger Check to use unified activities ---
-  function checkRouteForDangers(route) {
-    //
-    dangerWarnings = []; //
-    let tooltipHtml = ""; //
-    for (let i = 0; i < route.length; i++) {
-      //
-      const systemId = route[i]; //
-      const system = solarSystems.get(systemId); //
-      if (!system) continue; //
 
-      let systemMarkedDangerous = false; //
-      // Check unified activity markers
+  function checkRouteForDangers(route) {
+    dangerWarnings = [];
+    let tooltipHtml = "";
+    const dangerLinesGroup = new THREE.Group(); // Group for danger lines specifically
+
+    for (let i = 0; i < route.length; i++) {
+      const systemId = route[i];
+      const system = solarSystems.get(systemId);
+      if (!system) continue;
+
+      let systemMarkedDangerous = false;
+      let dangerType = "unknown"; // To store the type for coloring the segment
+
       for (const markerObj of activityMarkers.values()) {
-        //
-        const activity = markerObj.activityData; //
-        // Check if activity is in the current route system
+        const activity = markerObj.activityData;
+        let isActivityHere = false;
+        let currentActivityClassification = null;
+
+        // Check if activity involves the current route system
         if (
-          //
-          activity.systemId === systemId || //
-          activity.lastSystem?.id === systemId || //
-          activity.systems?.some((s) => s.id === systemId) //
+          // Ensure activity ID is a number before comparing
+          (typeof activity.systemId === "number" &&
+            activity.systemId === systemId) ||
+          (activity.lastSystem &&
+            typeof activity.lastSystem.id === "number" &&
+            activity.lastSystem.id === systemId) ||
+          (activity.systems &&
+            activity.systems.some(
+              (s) => typeof s.id === "number" && s.id === systemId
+            ))
         ) {
+          isActivityHere = true;
+          currentActivityClassification = activity.classification;
+        }
+
+        if (isActivityHere) {
           // Check if it's a dangerous classification
           if (
-            //
             ["camp", "smartbomb", "roaming_camp", "battle"].includes(
-              //
-              activity.classification //
+              currentActivityClassification
             )
           ) {
-            let warningText = ""; //
-            if (
-              //
-              activity.classification === "camp" || //
-              activity.classification === "smartbomb" || //
-              activity.classification === "roaming_camp" //
-            ) {
-              warningText = `<span class="math-inline">\{activity\.classification\.replace\("\_", " "\)\} \(</span>{Math.round(activity.probability || 0)}% confidence)`; // Use default 0 //
-            } else if (activity.classification === "battle") {
-              //
-              warningText = `Battle (${activity.metrics?.partyMetrics?.characters || 0} pilots)`; //
+            systemMarkedDangerous = true;
+            dangerType = currentActivityClassification; // Store the specific type
+            let warningText = "";
+            if (["camp", "smartbomb", "roaming_camp"].includes(dangerType)) {
+              warningText = `<span class="math-inline">\{dangerType\.replace\("\_", " "\)\} \(</span>{Math.round(activity.probability || 0)}% confidence)`;
+            } else if (dangerType === "battle") {
+              warningText = `Battle (${activity.metrics?.partyMetrics?.characters || 0} pilots)`;
             }
 
             const warning = {
-              //
-              type: activity.classification, //
-              systemName: system.data.itemname || `System ${systemId}`, //
-              details: warningText, //
-              systemId: systemId, //
+              type: dangerType,
+              systemName: system.data.itemname || `System ${systemId}`,
+              details: warningText,
+              systemId: systemId,
             };
-            dangerWarnings.push(warning); //
-            systemMarkedDangerous = true; //
-            tooltipHtml += `<li class="${warning.type}-warning" title="ID: <span class="math-inline">\{warning\.systemId\}"\><strong\></span>{warning.systemName}</strong>: ${warning.details}</li>`; //
+            // Avoid duplicate warnings for the same system
+            if (!dangerWarnings.some((w) => w.systemId === systemId)) {
+              dangerWarnings.push(warning);
+              tooltipHtml += `<li class="${warning.type}-warning" title="ID: <span class="math-inline">\{warning\.systemId\}"\><strong\></span>{warning.systemName}</strong>: ${warning.details}</li>`;
+            }
             break; // Mark system as dangerous and move to next system in route
           }
-          // Check if a 'roam' is currently in this system
+          // Check if a 'roam' is currently in this system (less critical, but still a warning)
           else if (
-            //
-            activity.classification === "roam" && //
-            activity.lastSystem?.id === systemId //
+            currentActivityClassification === "roam" &&
+            activity.lastSystem?.id === systemId
           ) {
+            systemMarkedDangerous = true; // Still mark segment
+            dangerType = "roam"; // Specific type for segment color
             const warning = {
-              //
-              type: "roam", //
-              systemName: system.data.itemname || `System ${systemId}`, //
-              details: `Roaming gang (${activity.members?.size || 0} pilots)`, //
-              systemId: systemId, //
+              type: "roam",
+              systemName: system.data.itemname || `System ${systemId}`,
+              details: `Roaming gang (${activity.members?.size || 0} pilots)`,
+              systemId: systemId,
             };
-            dangerWarnings.push(warning); //
-            systemMarkedDangerous = true; //
-            tooltipHtml += `<li class="roam-warning" title="ID: <span class="math-inline">\{warning\.systemId\}"\><strong\></span>{warning.systemName}</strong>: ${warning.details}</li>`; //
+            // Avoid duplicate warnings for the same system
+            if (!dangerWarnings.some((w) => w.systemId === systemId)) {
+              dangerWarnings.push(warning);
+              tooltipHtml += `<li class="roam-warning" title="ID: <span class="math-inline">\{warning\.systemId\}"\><strong\></span>{warning.systemName}</strong>: ${warning.details}</li>`;
+            }
             break; // Mark system as dangerous and move to next system in route
           }
         }
+      } // End loop through activityMarkers
+
+      // If the *current* system is marked dangerous, draw the line segment *from previous to current*
+      if (systemMarkedDangerous && i > 0) {
+        const prevSystem = solarSystems.get(route[i - 1]);
+        if (prevSystem) {
+          const dangerPoints = [
+            prevSystem.position.clone(),
+            system.position.clone(),
+          ];
+          const dangerGeometry = new THREE.BufferGeometry().setFromPoints(
+            dangerPoints
+          );
+          let segmentColor = DANGER_ROUTE_COLOR; // Default orange
+          if (dangerType === "roam")
+            segmentColor = ROAM_COLOR; // Blue for roam presence
+          else if (dangerType === "battle")
+            segmentColor = BATTLE_COLOR; // Purple for battle
+          else if (dangerType === "smartbomb") segmentColor = SMARTBOMB_COLOR;
+          else if (dangerType === "roaming_camp")
+            segmentColor = ROAMING_CAMP_COLOR;
+          // Camp uses default DANGER_ROUTE_COLOR
+
+          const dangerMaterial = new THREE.LineBasicMaterial({
+            color: segmentColor,
+            linewidth: 3, // Make danger lines slightly thicker
+            transparent: true,
+            opacity: 0.9,
+            depthTest: false, // Draw on top
+          });
+          const dangerLine = new THREE.Line(dangerGeometry, dangerMaterial);
+          dangerLine.renderOrder = 1; // Ensure it draws over the base route line
+          dangerLinesGroup.add(dangerLine);
+        }
       }
+    } // End loop through route systems
+
+    // Add the group of danger lines to the main routeLines group if it exists
+    if (routeLines && dangerLinesGroup.children.length > 0) {
+      // Add danger lines as a child of the main route group
+      // Ensure old danger lines are removed if route is recalculated
+      const oldDangerGroup = routeLines.getObjectByName("dangerSegments");
+      if (oldDangerGroup) {
+        routeLines.remove(oldDangerGroup);
+        disposeObject3D(oldDangerGroup);
+      }
+      dangerLinesGroup.name = "dangerSegments"; // Name it for easy removal later
+      routeLines.add(dangerLinesGroup);
+      console.log(
+        `[checkRouteForDangers] Added ${dangerLinesGroup.children.length} danger segments visualization.`
+      );
+    } else if (!routeLines) {
+      console.warn(
+        "[checkRouteForDangers] routeLines group does not exist, cannot add danger segments."
+      );
     }
-    if (dangerWarnings.length > 0)
-      showDangerWarnings(tooltipHtml); //
-    else if (dangerTooltip?.parentElement) dangerTooltip.remove(); //
-  } //
+
+    if (dangerWarnings.length > 0) showDangerWarnings(tooltipHtml);
+    else if (dangerTooltip?.parentElement) dangerTooltip.remove();
+  }
   // --- END CHANGE ---
   function showDangerWarnings(warningsHtmlList) {
     if (!dangerTooltip) return;
@@ -2467,15 +2520,15 @@
             (activity?.probability || 0) / 100 // Safely access probability //
           );
         } else if (lineMat) {
-          //
           // Roam markers
-          const pulseFactor = (Math.sin(now * 4) + 1) / 2; // Pulse speed //
-          lineMat.opacity = 0.7 + pulseFactor * 0.3; // Pulse opacity //
+          const pulseFactor = (Math.sin(now * 4) + 1) / 2; // Pulse speed
+
+          lineMat.opacity = 0.8 + pulseFactor * 0.2; // Pulse 0.8 to 1.0
+
           lineMat.color.lerpColors(
-            //
-            new THREE.Color(baseColor), //
-            new THREE.Color(0xffffff), //
-            pulseFactor * 0.9 // Pulse color towards white // Increase brightness intensity further //
+            new THREE.Color(baseColor), // Base Roam Color
+            new THREE.Color(0xffffff), // Pulse towards white
+            pulseFactor * 0.9 // Keep intensity high
           );
         }
 
@@ -2550,6 +2603,8 @@
 
   {#if selectedSystem}
     <div class="system-info-panel">
+      <!-- svelte-ignore a11y-click-events-have-key-events -->
+      <!-- svelte-ignore a11y-no-static-element-interactions -->
       <div class="close-btn" on:click={clearSelection}>×</div>
       <h3>{selectedSystem.itemname}</h3>
       <div class="info-row">
