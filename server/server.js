@@ -306,6 +306,18 @@ async function initializeDatabase() {
       }
     }
 
+    // Duplicate killmails check table
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS processed_kill_ids (
+        kill_id INTEGER PRIMARY KEY,
+        processed_at TIMESTAMPTZ DEFAULT NOW() NOT NULL
+      );
+    `);
+    await client.query(
+      `CREATE INDEX IF NOT EXISTS idx_processed_kill_ids_time ON processed_kill_ids(processed_at);`
+    );
+    console.log("Ensured 'processed_kill_ids' table exists.");
+
     // Add index for users table - Cleaned whitespace
     await client.query(
       `CREATE INDEX IF NOT EXISTS idx_users_character_id ON users(character_id);` // Ensure no non-standard spaces/chars here
@@ -448,6 +460,27 @@ async function initializeDatabase() {
     await client.query(
       `CREATE INDEX IF NOT EXISTS idx_pinned_systems_user_id ON pinned_systems(user_id);`
     );
+    try {
+      await client.query(`
+        ALTER TABLE pinned_systems
+        ADD COLUMN IF NOT EXISTS system_name VARCHAR(255);
+      `);
+      console.log("Ensured 'system_name' column exists in 'pinned_systems'.");
+    } catch (alterErr) {
+      if (alterErr.code !== "42701") {
+        // Ignore "duplicate column" error (already exists)
+        console.error(
+          "Error attempting to add 'system_name' column to pinned_systems:",
+          alterErr
+        );
+        // Decide if you want to throw the error or just log it
+        // throw alterErr;
+      } else {
+        console.log(
+          "'system_name' column likely already exists in pinned_systems."
+        );
+      }
+    }
     await client.query(`
       CREATE TABLE IF NOT EXISTS expired_camps (
         id SERIAL PRIMARY KEY,
@@ -779,8 +812,10 @@ app.get("/api/map-data", async (req, res) => {
 
     // Only fetch relevant data (regions, systems, stargates)
     const { rows } = await pool.query(`
-      SELECT * FROM map_denormalize 
-      WHERE typeID IN (3, 5) OR groupID = 10
+      SELECT * FROM map_denormalize
+      WHERE (typeID = 3 AND regionID < 11000000) -- K-Space Regions
+         OR (typeID = 5 AND regionID < 11000000) -- K-Space Solar Systems
+         OR (groupID = 10 AND regionID < 11000000) -- K-Space Other
     `);
 
     console.log(`API: Found ${rows.length} total map entries`);
@@ -824,42 +859,123 @@ app.get("/api/pinned-systems", async (req, res) => {
 });
 
 // Add a new pinned system
+// Add a new pinned system
 app.post("/api/pinned-systems", async (req, res) => {
+  // 1. Authentication Check
   if (!req.session?.user?.id) {
+    console.error(
+      "[Pin System] Error: User not authenticated for POST /api/pinned-systems"
+    );
     return res.status(401).json({ error: "Not authenticated" });
   }
 
-  const { system_id, stargate_name } = req.body;
+  // 2. Extract Data from Request Body (including system_name)
+  const { system_id, stargate_name, system_name } = req.body; // <-- Added system_name
+  const userId = req.session.user.id;
 
+  console.log(
+    `[Pin System] Received request: userId=${userId}, systemId=${system_id}, gate=${stargate_name}, systemName=${system_name} (from client)`
+  );
+
+  // 3. Input Validation (including system_name)
+  if (
+    !system_id ||
+    typeof system_id !== "number" ||
+    !stargate_name ||
+    typeof stargate_name !== "string" ||
+    stargate_name.trim() === "" ||
+    (system_name !== null && typeof system_name !== "string") || // Allow null, but if present must be string
+    (typeof system_name === "string" && system_name.length > 255) // Optional: Length check
+  ) {
+    console.error(
+      `[Pin System] Invalid input: system_id=${system_id} (type: ${typeof system_id}), stargate_name=${stargate_name} (type: ${typeof stargate_name}), system_name=${system_name} (type: ${typeof system_name})`
+    );
+    return res.status(400).json({
+      error: "Missing or invalid system_id, stargate_name, or system_name",
+    });
+  }
+
+  // 4. Use the system_name provided by the client directly
+  const finalSystemName = system_name; // Use the validated name (could be null)
+
+  // 5. Database Interaction
   try {
-    const { rows } = await pool.query(
-      `INSERT INTO pinned_systems (user_id, system_id, stargate_name) 
-       VALUES ($1, $2, $3) 
-       ON CONFLICT (user_id, system_id, stargate_name) DO NOTHING
-       RETURNING id`,
-      [req.session.user.id, system_id, stargate_name]
+    console.log(
+      `[Pin System] Attempting to insert/find pin using client-provided name: userId=${userId}, systemId=${system_id}, gate=${stargate_name}, systemName=${finalSystemName}`
     );
 
-    if (rows.length > 0) {
-      const newPin = {
-        id: rows[0].id,
-        user_id: req.session.user.id,
-        system_id,
-        stargate_name,
-        created_at: new Date().toISOString(),
-      };
+    // Attempt INSERT, returning the full row if successful
+    const { rows: insertRows } = await pool.query(
+      `INSERT INTO pinned_systems (user_id, system_id, stargate_name, system_name)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT (user_id, system_id, stargate_name) DO NOTHING
+       RETURNING id, user_id, system_id, stargate_name, system_name, created_at`, // <-- Return all columns
+      [userId, system_id, stargate_name, finalSystemName] // <-- Use client-provided name
+    );
 
-      // Make sure to emit to all sockets for this user
-      const userRoomId = req.session.user.id.toString();
-      io.to(userRoomId).emit("systemPinned", newPin);
+    if (insertRows.length > 0) {
+      // Pin was newly created, use the data returned from INSERT
+      const newPin = insertRows[0];
+      console.log("[Pin System] Pin created successfully:", newPin);
 
-      res.status(201).json(newPin);
+      // Emit update to user sockets (wrapped in try-catch)
+      try {
+        const userRoomId = userId.toString();
+        console.log(
+          `[Pin System] Emitting 'systemPinned' to room: ${userRoomId}`
+        );
+        io.to(userRoomId).emit("systemPinned", newPin); // Emit the complete pin data
+      } catch (emitError) {
+        console.error(
+          `[Pin System] Error emitting 'systemPinned' after pin creation:`,
+          emitError
+        );
+      }
+
+      res.status(201).json(newPin); // Respond with the complete pin data (201 Created)
     } else {
-      res.status(200).json({ message: "System already pinned" });
+      // Pin already existed (ON CONFLICT DO NOTHING was triggered)
+      // Fetch the existing pin data to return it
+      console.log(
+        `[Pin System] Pin already exists for userId=${userId}, systemId=${system_id}, gate=${stargate_name}. Fetching existing.`
+      );
+      const { rows: existingRows } = await pool.query(
+        `SELECT id, user_id, system_id, stargate_name, system_name, created_at
+           FROM pinned_systems
+           WHERE user_id = $1 AND system_id = $2 AND stargate_name = $3`,
+        [userId, system_id, stargate_name]
+      );
+
+      if (existingRows.length > 0) {
+        res.status(200).json(existingRows[0]); // Return existing pin data (200 OK)
+      } else {
+        // This case should ideally not happen if ON CONFLICT worked correctly
+        console.error(
+          "[Pin System] Conflict occurred but could not fetch existing pin."
+        );
+        res
+          .status(409)
+          .json({ message: "Pin already exists but could not be retrieved." }); // 409 Conflict
+      }
     }
   } catch (error) {
-    console.error("Error pinning system:", error);
-    res.status(500).json({ error: "Server error" });
+    // Enhanced CATCH BLOCK
+    console.error("--------------------------------------------------");
+    console.error("[Pin System] !!! DATABASE ERROR in /api/pinned-systems !!!");
+    console.error("Timestamp:", new Date().toISOString());
+    console.error("Request Body:", req.body);
+    console.error("User Session ID:", req.session?.user?.id);
+    console.error("Error Message:", error.message);
+    console.error("Error Code:", error.code); // Log specific DB error code if available
+    console.error("Error Detail:", error.detail); // Log specific DB error details if available
+    console.error("Error Stack Trace:", error.stack);
+    console.error("--------------------------------------------------");
+
+    // Send a generic 500 response, log details server-side
+    res.status(500).json({
+      error:
+        "Server error while pinning system. Check server logs for details.",
+    });
   }
 });
 
@@ -1524,8 +1640,38 @@ async function cleanupCelestialData() {
   `);
 }
 
+async function cleanupProcessedKillIds() {
+  console.log(
+    "[DB Cleanup] Cleaning up processed kill IDs older than 12 hours..."
+  );
+  try {
+    const result = await pool.query(`
+      DELETE FROM processed_kill_ids
+      WHERE processed_at < NOW() - INTERVAL '12 hours'
+      `);
+    console.log(
+      `[DB Cleanup] Removed ${result.rowCount} old processed kill IDs.`
+    );
+  } catch (err) {
+    console.error("[DB Cleanup] Error cleaning processed kill IDs:", err);
+  }
+}
+
 // Run cleanup daily
 setInterval(cleanupCelestialData, 24 * 60 * 60 * 1000);
+
+const CLEANUP_KILLMAIL_INTERVAL = 10 * 60 * 1000; // Example: Run every 10 minutes
+
+setInterval(() => {
+  const originalCount = killmails.length;
+  killmails = cleanKillmailsCache(killmails); // Reassign the filtered array back
+  const removedCount = originalCount - killmails.length;
+  if (removedCount > 0) {
+    console.log(
+      `[Killmail Cleanup] Removed ${removedCount} old killmails. Cache size: ${killmails.length}`
+    );
+  }
+}, CLEANUP_KILLMAIL_INTERVAL);
 
 async function cleanupShipTypes() {
   await pool.query(`
@@ -3556,19 +3702,42 @@ io.on("connection", (socket) => {
 });
 
 // Function to poll for new killmails from RedisQ
-// Modify the polling function to use processKillmail
 async function pollRedisQ() {
   try {
     const response = await axios.get(REDISQ_URL, { timeout: 30000 });
-
     if (response.status === 200 && response.data.package) {
       const killmail = response.data.package;
+      const killID = killmail.killID; // Get the ID
 
-      if (
-        !isDuplicateKillmail(killmail, killmails) &&
-        isWithinLast6Hours(killmail.killmail.killmail_time)
-      ) {
-        // Enqueue processing
+      // --- Database Duplicate Check ---
+      let isNewKill = false;
+      try {
+        // Attempt to insert the killID. If it succeeds, it's new.
+        await pool.query(
+          "INSERT INTO processed_kill_ids (kill_id) VALUES ($1)",
+          [killID]
+        );
+        isNewKill = true;
+        // console.log(`Kill ID ${killID} is new, inserting into processed_kill_ids.`);
+      } catch (dbError) {
+        if (dbError.code === "23505") {
+          // PostgreSQL unique violation code
+          // Kill ID already exists, it's a duplicate according to the DB
+          // console.log(`Kill ID ${killID} already processed (DB check).`);
+          isNewKill = false;
+        } else {
+          // Different database error, log it but maybe still try processing?
+          // Or treat as duplicate to be safe? Let's log and skip.
+          console.error(`Database error checking kill ID ${killID}:`, dbError);
+          isNewKill = false; // Treat DB error as potentially processed
+        }
+      }
+      // --- End Database Check ---
+
+      // Proceed only if it's a new kill according to the DB AND within time window
+      if (isNewKill && isWithinLast6Hours(killmail.killmail.killmail_time)) {
+        // Check recency *after* DB check
+        // Enqueue processing (no need for the in-memory processingKillIDs Set anymore)
         killmailProcessingQueue
           .enqueue(async () => {
             try {
@@ -3576,33 +3745,36 @@ async function pollRedisQ() {
               const processedKillmail = await processKillmailData(killmail);
 
               // Add to in-memory cache only if successfully processed
+              // Note: processKillmailData should ideally contain its own final duplicate check
+              // against the 'killmails' array before push/emit as a last safeguard,
+              // but the DB check prevents most duplicates from even reaching here.
               if (processedKillmail) {
-                killmails.push(processedKillmail);
-                // Clean cache periodically or based on size, not necessarily here
+                // Assuming processKillmailData handles adding to 'killmails' and emitting
+                // (The original code did this)
               }
             } catch (error) {
-              console.error("Error processing killmail in queue:", error);
+              console.error(
+                `Error processing killmail ${killID} in queue:`,
+                error
+              );
+              // Should we remove from processed_kill_ids if processing fails catastrophically?
+              // Potentially, but for simplicity, we leave it, assuming the error isn't recoverable by reprocessing.
             }
+            // No 'finally' block needed here to remove from a Set
           })
           .catch((err) => {
-            console.error("Error enqueueing killmail task:", err);
+            console.error(`Error enqueueing killmail task for ${killID}:`, err);
+            // If enqueueing fails, the ID is already in the DB, preventing reprocessing later.
           });
       }
     }
   } catch (error) {
-    // Ignore timeout errors, log others
     if (error.code !== "ECONNABORTED" && error.code !== "ETIMEDOUT") {
       console.error("Error polling RedisQ:", error.message);
     }
   } finally {
-    // Schedule next poll regardless of outcome
-    setTimeout(pollRedisQ, 50); // Poll slightly less aggressively
+    setTimeout(pollRedisQ, 50); // Schedule next poll
   }
-}
-
-// There are sometimes duplicate killmails in the RedisQ
-function isDuplicate(killmail) {
-  return killmails.some((km) => km.killID === killmail.killID);
 }
 
 function cleanKillmailsCache(killmails) {
@@ -3621,23 +3793,28 @@ async function startServer() {
     isDatabaseInitialized = true;
 
     console.log("Starting server...");
+    pollRedisQ(); // Start RedisQ polling
 
-    // Start RedisQ polling
-    pollRedisQ();
+    setInterval(cleanupProcessedKillIds, 24 * 60 * 60 * 1000); // Run daily
+    cleanupProcessedKillIds(); // Run once on startup as well
 
     return new Promise((resolve, reject) => {
+      //
       server
         .listen(PORT, "0.0.0.0", () => {
-          console.log(`Server running on 0.0.0.0:${PORT}`);
-          resolve();
+          //
+          console.log(`Server running on 0.0.0.0:${PORT}`); //
+          resolve(); //
         })
         .on("error", (err) => {
-          reject(err);
+          //
+          reject(err); //
         });
     });
   } catch (err) {
-    console.error("Error starting server:", err);
-    process.exit(1);
+    //
+    console.error("Error starting server:", err); //
+    process.exit(1); //
   }
 }
 

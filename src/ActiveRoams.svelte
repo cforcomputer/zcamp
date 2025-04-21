@@ -26,34 +26,26 @@
     roam: "Roaming Gang",
     activity: "Unclassified Activity",
   };
-  // --- END NEW ---
 
-  // --- MODIFIED: Subscribe to activeActivities ---
   $: allActivities = $activeActivities || [];
 
-  // Filter activities based on classification and roaming setting
-  $: filteredActivities = allActivities
-    .filter((activity) => {
-      const isRoamingType = ["roam", "roaming_camp", "battle"].includes(
-        activity.classification
-      );
-      const hasVisitedMultipleSystems =
-        (activity.visitedSystems?.size || 1) > 1; // Check visitedSystems size
+  $: filteredActivities = allActivities.filter((activity) => {
+    const isRoamingType = ["roam", "roaming_camp", "battle"].includes(
+      activity.classification
+    );
 
-      if (showOnlyRoaming) {
-        // Must be a roaming type AND have visited multiple systems
-        return isRoamingType && hasVisitedMultipleSystems;
-      } else {
-        // Show all roaming types, regardless of system count
-        return isRoamingType;
-      }
-    })
-    .sort(
-      (a, b) =>
-        new Date(b.lastActivity || b.lastKill) -
-        new Date(a.lastActivity || a.lastKill)
-    ); // Sort by last activity
-  // --- END MODIFIED ---
+    if (showOnlyRoaming) {
+      // Check if it's a roaming type AND has more than one system entry OR visitedSystems size > 1
+      // Choose the check that accurately reflects multi-system activity based on your data structure
+      const hasVisitedMultipleSystems =
+        (activity.visitedSystems?.size || 0) > 1 ||
+        (activity.systems?.length || 0) > 1;
+      return isRoamingType && hasVisitedMultipleSystems;
+    } else {
+      // Show all roaming types, regardless of system count
+      return isRoamingType;
+    }
+  });
 
   let isLoading = true;
   let mounted = false;
@@ -247,13 +239,13 @@
     <div class="flex justify-between items-center mb-4">
       <h2 class="text-2xl font-bold text-eve-accent">Active Roams & Battles</h2>
       <div class="flex items-center gap-4">
-        <label class="flex items-center gap-2 text-white">
+        <label class="flex items-center gap-2 text-white cursor-pointer">
           <input
             type="checkbox"
             bind:checked={showOnlyRoaming}
-            class="form-checkbox"
+            class="appearance-none h-5 w-5 border border-eve-accent/50 rounded-md bg-eve-secondary checked:bg-eve-accent checked:border-transparent focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-eve-dark focus:ring-eve-accent transition duration-200 cursor-pointer"
           />
-          <span>Show only multi-system</span>
+          <span>Roaming only</span>
         </label>
         <div class="flex gap-2">
           <button

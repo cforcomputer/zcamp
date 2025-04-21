@@ -200,30 +200,86 @@
   async function pinSystem(activity) {
     if (!isLoggedIn) return;
     try {
+      // --- FIX 1: Get the system name ---
+      // Use the same logic as before to get the name from the activity
+      const systemName =
+        activity.kills?.[0]?.pinpoints?.celestialData?.solarsystemname ||
+        activity.systemName || // Add fallback if name might be directly on activity
+        null; // Send null if truly not found client-side
+
+      // Check if we actually found a name before sending potentially bad data
+      if (!activity.systemId || !activity.stargateName) {
+        console.error(
+          "Cannot pin: Missing systemId or stargateName in activity",
+          activity
+        );
+        alert("Cannot pin this item: missing required data.");
+        return;
+      }
+      // Optional: You might want to prevent pinning if systemName is null client-side,
+      // or let the backend handle potential nulls if you prefer.
+      // if (!systemName) {
+      //    console.warn("Attempting to pin without a client-side system name for:", activity.systemId);
+      // }
+
       const response = await fetch("/api/pinned-systems", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
         body: JSON.stringify({
           system_id: activity.systemId,
-          stargate_name: activity.stargateName, // Assuming camps still have stargateName
+          stargate_name: activity.stargateName,
+          system_name: systemName, // *** ADD system_name TO THE REQUEST BODY ***
         }),
       });
+
       if (response.ok) {
         const data = await response.json();
         if (data.id) {
+          // Call the PinnedSystemsList component's function
+          // Note: Now we pass the systemName we determined above directly
           pinnedSystemsComponent?.pinSystem({
             id: data.id,
-            user_id: data.user_id,
+            user_id: data.user_id || null,
             system_id: activity.systemId,
             stargate_name: activity.stargateName,
-            activeCamp: activity, // Pass the whole activity
+            system_name: systemName || `System ${activity.systemId}`, // Still need fallback *here* for optimistic UI just in case API modifies it? Or trust API response? Let's trust API if possible.
+            // Let's refine this: The API response *should* now include the name we sent or null.
+            // Best practice: Use the name confirmed by the API response if available, otherwise use the name we sent.
+            created_at: data.created_at || new Date().toISOString(),
             probability: activity.probability,
           });
+
+          // Refined call using name from API response (if backend includes it in response)
+          // If your backend POST response now includes the system_name used:
+          /*
+        pinnedSystemsComponent?.pinSystem({
+          id: data.id,
+          user_id: data.user_id,
+          system_id: data.system_id, // Use data from response if available
+          stargate_name: data.stargate_name, // Use data from response if available
+          system_name: data.system_name || `System ${data.system_id}`, // Use name from response!
+          created_at: data.created_at,
+          probability: activity.probability, // Probability still comes from original activity
+        });
+        */
+        } else {
+          console.error(
+            "Pin API call succeeded but did not return expected data.",
+            data
+          );
         }
+      } else {
+        console.error(
+          "Failed to pin system via API:",
+          response.status,
+          await response.text()
+        );
+        // Optional: Show error to user
       }
     } catch (error) {
       console.error("Error pinning system:", error);
+      // Optional: Show error to user
     }
   }
   function formatValue(value) {
@@ -547,7 +603,8 @@
                       {#if activity.metrics?.partyMetrics}
                         {activity.metrics.partyMetrics.characters} pilots
                         {#if activity.metrics.partyMetrics.corporations > 0}
-                          from {activity.metrics.partyMetrics.corporations} corps{#if activity.metrics.partyMetrics.alliances > 0}
+                          from {activity.metrics.partyMetrics.corporations} corps
+                          {#if activity.metrics.partyMetrics.alliances > 0}
                             in {activity.metrics.partyMetrics.alliances} alliances{/if}{/if}
                       {:else if activity.composition}
                         {activity.composition.activeCount || 0}/{activity

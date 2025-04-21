@@ -174,22 +174,37 @@
   // --- END CHANGE ---
   $: userLocation = $currentLocation; //
   // --- CHANGE: Single reactive block for activities with mapReady check ---
-  $: if (mounted && mapReady && activities !== undefined && scene) {
-    // <<< Added mapReady check
-    console.log(
-      "[UniverseMap] Map ready, updating activity visualizations...",
-      {
-        // <<< DEBUG
-        mounted, // <<< DEBUG
-        mapReady, // <<< DEBUG
-        activitiesDefined: activities !== undefined, // <<< DEBUG
-        activitiesLength: activities?.length, // <<< DEBUG
-        sceneExists: !!scene, // <<< DEBUG
+  // This block will run whenever 'mounted', 'mapReady', 'scene', or 'userLocation' changes
+  $: if (mounted && mapReady && scene) {
+    // Check if map base is built and scene exists
+    if (userLocation) {
+      // If we have location data, update the marker
+      console.log(
+        "[UniverseMap Reactive] User location updated:",
+        userLocation
+      ); // Optional debug log
+      updateUserLocationMarker(userLocation); // Call your existing update function
+    } else {
+      // If location is null (e.g., tracking stopped), remove the marker
+      if (userLocationMarker.group) {
+        console.log(
+          "[UniverseMap Reactive] User location null, removing marker."
+        ); // Optional debug log
+        scene.remove(userLocationMarker.group);
+        disposeObject3D(userLocationMarker.group); // Assuming you have disposeObject3D
+        userLocationMarker = { group: null, mixer: null };
       }
-    );
-    updateActivityVisualizations(activities); //
+    }
   }
-  // --- END CHANGE ---
+  $: if (mounted && mapReady && scene) {
+    if (activities !== undefined) {
+      // Check if activities array is defined
+      console.log(
+        `[UniverseMap Reactive] Activity store updated with ${activities.length} activities. Calling visualization update.`
+      ); // Optional debug
+      updateActivityVisualizations(activities); // Call the function to draw markers
+    }
+  }
 
   // Info panel reactive data
   $: selectedActivityData = selectedSystem //
@@ -424,35 +439,99 @@
       return false;
     }
   }
-  function showSystemActivity(system) {
-    const systemCamps = Array.from(campMarkers.values())
-      .filter((marker) => parseInt(marker.campData.systemId) === system.itemid)
-      .map((marker) => marker.campData);
-    const systemRoams = Array.from(roamPaths.values())
-      .filter((path) =>
-        path.roamData.systems?.some((s) => parseInt(s.id) === system.itemid)
-      )
-      .map((path) => path.roamData);
-    if (systemCamps.length > 0) {
-      const sortedCamps = [...systemCamps].sort(
-        (a, b) => b.probability - a.probability
+  // --- CORRECTED showSystemActivity function ---
+  function showSystemActivity(selectedSystemData) {
+    if (
+      !selectedSystemData ||
+      typeof selectedSystemData.itemid === "undefined"
+    ) {
+      console.error(
+        "showSystemActivity: Invalid selected system data",
+        selectedSystemData
       );
-      const latestKill = sortedCamps[0].kills[sortedCamps[0].kills.length - 1];
-      if (latestKill)
-        window.open(
-          `https://zkillboard.com/kill/${latestKill.killID}/`,
-          "_blank"
-        );
-    } else if (systemRoams.length > 0) {
-      const sortedRoams = [...systemRoams].sort(
-        (a, b) => new Date(b.lastActivity) - new Date(a.lastActivity)
+      return;
+    }
+
+    const systemIdToFind = selectedSystemData.itemid;
+
+    // Find *all* activities associated with the selected system ID
+    // Activities might be linked via systemId (camps) or lastSystem.id (roams/battles currently there)
+    // or within the systems array (roams/battles that passed through)
+    const relevantActivities = Array.from(activityMarkers.values())
+      .map((marker) => marker.activityData) // Get the actual activity data
+      .filter((activity) => {
+        if (!activity) return false;
+        // Check primary system ID (for camps, maybe battles)
+        if (activity.systemId === systemIdToFind) return true;
+        // Check last known system ID (for roams, battles)
+        if (activity.lastSystem?.id === systemIdToFind) return true;
+        // Check if the system is in the path history (for roams)
+        if (activity.systems?.some((sys) => sys.id === systemIdToFind))
+          return true;
+        return false;
+      });
+
+    if (relevantActivities.length === 0) {
+      console.log(
+        `showSystemActivity: No active activity found for system ${systemIdToFind}`
       );
-      const latestKill = sortedRoams[0].kills[sortedRoams[0].kills.length - 1];
-      if (latestKill)
-        window.open(
-          `https://zkillboard.com/kill/${latestKill.killID}/`,
-          "_blank"
-        );
+      // Optionally inform the user, e.g., alert("No recent activity found for this system.");
+      return;
+    }
+
+    // Sort activities to prioritize (e.g., battles > camps > roams, then by time/probability)
+    relevantActivities.sort((a, b) => {
+      const priority = {
+        battle: 5,
+        smartbomb: 4,
+        camp: 3,
+        roaming_camp: 2,
+        roam: 1,
+        activity: 0,
+      };
+      const priorityA = priority[a.classification] ?? 0;
+      const priorityB = priority[b.classification] ?? 0;
+      if (priorityA !== priorityB) return priorityB - priorityA;
+
+      // Secondary sort by last activity time (most recent first)
+      const timeA = new Date(a.lastActivity || a.lastKill || 0).getTime();
+      const timeB = new Date(b.lastActivity || b.lastKill || 0).getTime();
+      return timeB - timeA;
+    });
+
+    // Get the most relevant activity and its latest kill
+    const bestActivity = relevantActivities[0];
+    if (!bestActivity.kills || bestActivity.kills.length === 0) {
+      console.warn(
+        `showSystemActivity: Selected activity ${bestActivity.id} has no kill data.`
+      );
+      return;
+    }
+
+    // Sort kills within the best activity to find the absolute latest
+    const sortedKills = [...bestActivity.kills].sort(
+      (ka, kb) =>
+        new Date(kb.killmail.killmail_time) -
+        new Date(ka.killmail.killmail_time)
+    );
+    const latestKill = sortedKills[0];
+
+    if (latestKill && latestKill.killID) {
+      // Open ZKillboard link for the latest kill of the most relevant activity
+      const killTime = new Date(latestKill.killmail.killmail_time);
+      const formattedTime = `${killTime.getUTCFullYear()}${String(killTime.getUTCMonth() + 1).padStart(2, "0")}${String(killTime.getUTCDate()).padStart(2, "0")}${String(killTime.getUTCHours()).padStart(2, "0")}${String(killTime.getUTCMinutes()).padStart(2, "0")}`;
+      const systemToLink =
+        bestActivity.lastSystem?.id || bestActivity.systemId || systemIdToFind; // Use best available system ID
+
+      window.open(
+        // Link to the related page for context, centered on the activity's primary/last system
+        `https://zkillboard.com/related/${systemToLink}/${formattedTime}/`,
+        "_blank"
+      );
+    } else {
+      console.warn(
+        `showSystemActivity: Could not find a valid killID for activity ${bestActivity.id}`
+      );
     }
   }
 
