@@ -30,6 +30,8 @@
   let mounted = false; //
   let mapReady = false; // <<< *** ADDED: Flag to indicate base map is built ***
   let regionLabelCache = new Map(); // Cache only for region labels now
+  let loadingEllipsis = ".";
+  let ellipsisInterval = null;
 
   // Galaxy bounds tracking
   let galaxyCenter = new THREE.Vector3(); //
@@ -244,6 +246,9 @@
     //
     try {
       console.log("[UniverseMap] Component mounting..."); // <<< DEBUG
+      if (isLoading) {
+        startEllipsisAnimation();
+      }
       circleTexture = createCircleTexture(); //
       glowTexture = createGlowTexture(); //
 
@@ -262,6 +267,7 @@
     } catch (err) {
       console.error("[UniverseMap] Error initializing map:", err); // <<< DEBUG
       error = err.message || "Failed to initialize map"; //
+      stopEllipsisAnimation();
       if (errorTimeout) clearTimeout(errorTimeout); //
       errorTimeout = setTimeout(() => {
         //
@@ -274,7 +280,7 @@
 
   let frameId; //
   onDestroy(() => {
-    //
+    stopEllipsisAnimation();
     console.log("[UniverseMap] Component destroying..."); // <<< DEBUG
     mounted = false; //
     if (frameId) cancelAnimationFrame(frameId); //
@@ -328,6 +334,15 @@
 
     console.log("[UniverseMap] Component destroyed."); // <<< DEBUG
   }); //
+
+  // Add a reactive statement to stop the animation when loading finishes
+  $: if (!isLoading && ellipsisInterval) {
+    stopEllipsisAnimation();
+  }
+  // Add a reactive statement to start the animation if isLoading becomes true after mount (less common but safe)
+  $: if (isLoading && !ellipsisInterval && mounted) {
+    startEllipsisAnimation();
+  }
 
   async function toggleFullscreen() {
     const mainContainer = container.closest(".universe-map-container");
@@ -526,6 +541,9 @@
 
     try {
       isLoading = true;
+      if (!ellipsisInterval && mounted) {
+        startEllipsisAnimation();
+      }
       error = null;
       mapReady = false;
       console.log("[UniverseMap] Fetching /api/map-data...");
@@ -596,6 +614,7 @@
     } catch (err) {
       console.error("[UniverseMap] Error during initializeMap:", err);
       error = err.message || "Failed to initialize map";
+      stopEllipsisAnimation();
       if (errorTimeout) clearTimeout(errorTimeout);
       errorTimeout = setTimeout(() => {
         error = null;
@@ -1299,19 +1318,37 @@
         markerObj.secondaryGlow && //
         activity.lastSystem //
       ) {
-        const systemIdInt = parseInt(activity.lastSystem.id); //
-        if (!isNaN(systemIdInt)) {
-          // <<< DEBUG Check if ID is valid number
-          const system = solarSystems.get(systemIdInt); //
-          if (system)
-            markerObj.secondaryGlow.position.copy(system.position); //
-          else
+        const lastSystemIdStr = activity.lastSystem.id;
+        const lastSystemIdInt = lastSystemIdStr
+          ? parseInt(lastSystemIdStr)
+          : NaN; // Ensure parsing
+
+        if (!isNaN(lastSystemIdInt)) {
+          // <<< Check if ID is valid number
+          const secondaryGlowTargetSystem = solarSystems.get(lastSystemIdInt); // The system where the secondary glow SHOULD be centered
+
+          if (secondaryGlowTargetSystem) {
+            // We need the position of the group (which is anchored at the primary system)
+            const primarySystemPosition = markerObj.group.position; // Get the group's world position
+
+            // Calculate the position of the secondary glow RELATIVE to the group's origin
+            const relativePosition = new THREE.Vector3().subVectors(
+              secondaryGlowTargetSystem.position, // Target world position
+              primarySystemPosition // Group's world position (origin)
+            );
+
+            // Apply the calculated RELATIVE position to the secondary glow sprite
+            markerObj.secondaryGlow.position.copy(relativePosition);
+          } else {
             console.warn(
-              `[UniverseMap] System ${systemIdInt} not found for secondary glow.`
+              `[UniverseMap] System ${lastSystemIdInt} not found for secondary glow update (Activity ${activity.id}).`
             ); // <<< DEBUG
+            // Optional: You might want to hide or reset the secondary glow position if the target system isn't found
+            // markerObj.secondaryGlow.position.set(0, 0, 0); // Or hide: markerObj.secondaryGlow.visible = false;
+          }
         } else {
           console.warn(
-            `[UniverseMap] Invalid lastSystem ID for secondary glow: ${activity.lastSystem.id}`
+            `[UniverseMap] Invalid lastSystem ID for secondary glow update: ${activity.lastSystem.id}`
           ); // <<< DEBUG
         }
       }
@@ -1571,7 +1608,7 @@
           color: new THREE.Color(ROAM_COLOR).multiplyScalar(1.5), // Keep color bright
           linewidth: 2.5, // Slightly thicker
           transparent: true,
-          opacity: 0.85,
+          opacity: 0.98,
         });
         material.userData = { baseColor: new THREE.Color(ROAM_COLOR) }; // Store base color
         lineObject = new THREE.Line(geometry, material); //
@@ -2397,6 +2434,27 @@
       console.log("Selection cleared");
     }
   }
+
+  function startEllipsisAnimation() {
+    if (ellipsisInterval) clearInterval(ellipsisInterval); // Clear previous interval if any
+    loadingEllipsis = "."; // Reset to initial state
+    ellipsisInterval = setInterval(() => {
+      // Cycle through '.', '..', '...'
+      if (loadingEllipsis.length < 3) {
+        loadingEllipsis += ".";
+      } else {
+        loadingEllipsis = ".";
+      }
+    }, 500); // Adjust speed (milliseconds) as desired
+  }
+
+  function stopEllipsisAnimation() {
+    if (ellipsisInterval) {
+      clearInterval(ellipsisInterval);
+      ellipsisInterval = null;
+    }
+  }
+
   function onDoubleClick(event) {
     if (!renderer || !mounted) return;
     const rect = renderer.domElement.getBoundingClientRect();
@@ -2493,6 +2551,7 @@
   }
 
   // --- Animation Loop ---
+  // --- Animation Loop ---
   function animate(time) {
     //
     if (!mounted) return; //
@@ -2505,160 +2564,169 @@
     // --- CHANGE: Update unified activity markers ---
     activityMarkers.forEach((markerObj) => {
       //
-      // Update mixer if it exists
+      // Update mixer if it exists (for camp-style pulse animation)
       if (markerObj.mixer) markerObj.mixer.update(deltaTime); //
 
-      // Handle flash animation
+      // Find relevant visual components for this marker
+      // Note: Not all markers have all components
       const glowSprite = markerObj.group?.children.find(
-        //
-        (
-          c //
-        ) =>
-          c.isSprite && //
-          c.material.map === glowTexture && //
-          c !== markerObj.secondaryGlow //
+        // Primary glow for camp-style
+        (c) =>
+          c.isSprite &&
+          c.material.map === glowTexture &&
+          c !== markerObj.secondaryGlow
       );
-      const secondaryGlow = markerObj.secondaryGlow; //
-      const lineMat = markerObj.lineMaterial; // For roams
-      const activity = markerObj.activityData; //
-      const classification = activity?.classification; // Safely access classification //
+      const secondaryGlow = markerObj.secondaryGlow; // Secondary glow for all types
+      const activity = markerObj.activityData; // The raw activity data
 
-      // Determine colors based on classification stored in markerObj
+      // Determine colors based on classification stored in markerObj when created/updated
       let flashColor = FLASH_COLOR_CAMP; // Default
       let baseColor = CAMP_COLOR; // Default
-      let secondaryBaseOpacity = 0.1; //
-      let secondaryFlashOpacityBoost = 0.3; //
+      let secondaryBaseOpacity = 0.1;
+      let secondaryFlashOpacityBoost = 0.3;
 
       switch (
-        //
         markerObj.type // Use stored type for consistency
       ) {
-        case "camp": //
-          flashColor = FLASH_COLOR_CAMP; //
-          baseColor = CAMP_COLOR; //
-          break; //
-        case "smartbomb": //
-          flashColor = FLASH_COLOR_SMARTBOMB; //
-          baseColor = SMARTBOMB_COLOR; //
-          secondaryBaseOpacity = 0.15; //
-          secondaryFlashOpacityBoost = 0.35; //
-          break; //
-        case "roaming_camp": //
-          flashColor = FLASH_COLOR_ROAMING_CAMP; //
-          baseColor = ROAMING_CAMP_COLOR; //
-          secondaryBaseOpacity = 0.15; //
-          secondaryFlashOpacityBoost = 0.35; //
-          break; //
-        case "battle": //
-          flashColor = FLASH_COLOR_BATTLE; //
-          baseColor = BATTLE_COLOR; //
-          secondaryBaseOpacity = 0.2; //
-          secondaryFlashOpacityBoost = 0.4; //
-          break; //
-        case "roam": //
-          flashColor = FLASH_COLOR_ROAM; //
-          baseColor = ROAM_COLOR; //
-          secondaryBaseOpacity = 0.1; //
-          secondaryFlashOpacityBoost = 0.3; //
-          break; //
+        case "camp":
+          flashColor = FLASH_COLOR_CAMP;
+          baseColor = CAMP_COLOR;
+          break;
+        case "smartbomb":
+          flashColor = FLASH_COLOR_SMARTBOMB;
+          baseColor = SMARTBOMB_COLOR;
+          secondaryBaseOpacity = 0.15;
+          secondaryFlashOpacityBoost = 0.35;
+          break;
+        case "roaming_camp":
+          flashColor = FLASH_COLOR_ROAMING_CAMP;
+          baseColor = ROAMING_CAMP_COLOR;
+          secondaryBaseOpacity = 0.15;
+          secondaryFlashOpacityBoost = 0.35;
+          break;
+        case "battle":
+          flashColor = FLASH_COLOR_BATTLE;
+          baseColor = BATTLE_COLOR;
+          secondaryBaseOpacity = 0.2;
+          secondaryFlashOpacityBoost = 0.4;
+          break;
+        case "roam":
+          flashColor = FLASH_COLOR_ROAM; // Flash color for roam
+          baseColor = ROAM_COLOR; // Base color for roam
+          secondaryBaseOpacity = 0.1;
+          secondaryFlashOpacityBoost = 0.3;
+          break;
       }
 
+      // --- Handle Flashing State (if flashEndTime is active) ---
       if (markerObj.flashEndTime > 0 && markerObj.flashEndTime > now) {
-        //
         const flashProgress = Math.max(
-          //
-          0, //
-          1 - (markerObj.flashEndTime - now) / FLASH_DURATION //
+          0,
+          1 - (markerObj.flashEndTime - now) / FLASH_DURATION
         );
-        const flashSine = Math.sin(flashProgress * Math.PI); //
+        const flashSine = Math.sin(flashProgress * Math.PI); // Ease in/out effect
 
-        // Flash primary visual (glow or line)
+        // Flash primary visual (glowSprite for camps, lineMat for roams)
         if (glowSprite) {
-          //
-          const baseScale = markerObj.group.userData.baseGlowSize || 10; // Use stored base size //
-          const flashScaleMultiplier = 1 + flashSine * 19.0; // Flash size multiplier //
-          glowSprite.scale.setScalar(baseScale * flashScaleMultiplier); //
+          // Camp-style flash logic (scale, color, opacity)
+          const baseScale = markerObj.group.userData.baseGlowSize || 10;
+          const flashScaleMultiplier = 1 + flashSine * 1.0; // Adjusted flash size multiplier
+          glowSprite.scale.setScalar(baseScale * flashScaleMultiplier);
           glowSprite.material.color.lerpColors(
-            //
-            new THREE.Color(flashColor), //
-            new THREE.Color(baseColor), //
-            flashProgress //
+            new THREE.Color(flashColor),
+            new THREE.Color(baseColor),
+            flashProgress // Interpolate color based on progress
           );
-          glowSprite.material.opacity = 0.9 + flashSine * 0.1; //
-        } else if (lineMat) {
-          //
-          lineMat.opacity = 1.0; //
+          glowSprite.material.opacity = 0.9 + flashSine * 0.1; // Flash opacity slightly
+        } else if (markerObj.type === "roam" && markerObj.lineMaterial) {
+          // --- Roam line FLASH logic ---
+          const lineMat = markerObj.lineMaterial; // Get material
+          lineMat.opacity = 1.0; // Keep full opacity during flash
           lineMat.color.lerpColors(
-            //
-            new THREE.Color(flashColor), //
-            new THREE.Color(baseColor), //
-            flashProgress //
+            new THREE.Color(flashColor), // Use roam's specific flash color
+            new THREE.Color(baseColor), // Use roam's specific base color
+            flashProgress // Interpolate color based on progress
           );
+          // --- End Roam line FLASH logic ---
         }
 
-        // Flash secondary glow
+        // Flash secondary glow (common to most types)
         if (secondaryGlow) {
-          //
-          secondaryGlow.material.opacity = //
-            secondaryBaseOpacity + flashSine * secondaryFlashOpacityBoost; //
+          secondaryGlow.material.opacity =
+            secondaryBaseOpacity + flashSine * secondaryFlashOpacityBoost;
         }
-      } else {
-        //
-        // Reset flash time if it just ended
+      }
+      // --- Handle Normal State / Pulse ---
+      else {
+        // Reset flash time if it just ended in this frame
         if (markerObj.flashEndTime > 0 && markerObj.flashEndTime <= now) {
-          //
-          markerObj.flashEndTime = 0; //
+          markerObj.flashEndTime = 0;
         }
 
-        // Handle normal state / pulse
+        // Apply normal state / pulse animation
         if (glowSprite) {
-          //
-          // Camp-like markers
-          const baseScale = markerObj.group.userData.baseGlowSize || 10; //
-          glowSprite.scale.setScalar(baseScale); // Reset scale //
-          glowSprite.material.color.set(baseColor); // Reset color //
+          // Camp-style markers: Reset properties potentially changed by flash/mixer
+          // Mixer handles the scale pulse, just ensure color/opacity are correct
+          glowSprite.material.color.set(baseColor); // Reset color
           glowSprite.material.opacity = Math.min(
-            //
-            0.8, //
-            (activity?.probability || 0) / 100 // Safely access probability //
+            0.8,
+            (activity?.probability || 0) / 100 // Base opacity based on probability
           );
-        } else if (lineMat) {
-          // Roam markers
-          const pulseFactor = (Math.sin(now * 4) + 1) / 2; // Pulse speed
+          // Base scale is reset by the mixer animation action if running
+          if (!markerObj.mixer?.clipAction?.("pulse")?.isRunning()) {
+            const baseScale = markerObj.group?.userData?.baseGlowSize || 10;
+            glowSprite.scale.setScalar(baseScale); // Fallback scale reset
+          }
+        } else if (markerObj.type === "roam" && markerObj.lineMaterial) {
+          // --- Roam line PULSE logic ---
+          const lineMat = markerObj.lineMaterial; // Get the material
+          const pulseSpeed = 4; // Adjust speed of the pulse
+          const minOpacity = 0.6; // Minimum opacity during pulse (e.g., 60%)
+          const maxOpacity = 1.0; // Maximum opacity (should match base opacity set in create function)
 
-          lineMat.opacity = 0.8 + pulseFactor * 0.2; // Pulse 0.8 to 1.0
+          // Calculate a value oscillating between 0 and 1
+          const pulseFactor = (Math.sin(now * pulseSpeed) + 1) / 2;
 
-          lineMat.color.lerpColors(
-            new THREE.Color(baseColor), // Base Roam Color
-            new THREE.Color(0xffffff), // Pulse towards white
-            pulseFactor * 0.9 // Keep intensity high
-          );
+          // Modulate opacity between minOpacity and maxOpacity
+          lineMat.opacity =
+            minOpacity + pulseFactor * (maxOpacity - minOpacity);
+
+          // Ensure base color is set (no color pulsing needed based on request)
+          lineMat.color.set(ROAM_COLOR);
+          // --- End Roam line PULSE logic ---
         }
 
-        // Pulse secondary glow
+        // Pulse secondary glow (common to most types)
         if (secondaryGlow) {
-          //
-          const pulseFactorSec = (Math.sin(now * 3) + 1) / 2; // Slower pulse //
-          secondaryGlow.material.opacity = //
-            secondaryBaseOpacity + pulseFactorSec * 0.2; // Pulse opacity //
+          const pulseFactorSec = (Math.sin(now * 3) + 1) / 2; // Slower pulse
+          secondaryGlow.material.opacity =
+            secondaryBaseOpacity + pulseFactorSec * 0.2; // Pulse base opacity slightly
         }
       }
     });
-    // --- END CHANGE ---
+    // --- END CHANGE for activity marker update ---
 
-    if (userLocationMarker.mixer) userLocationMarker.mixer.update(deltaTime); //
-    // Region label visibility (remains the same - always visible)
+    // Update user location marker animation
+    if (userLocationMarker.mixer) userLocationMarker.mixer.update(deltaTime);
+
+    // Ensure region labels remain visible
     regionLabelCache.forEach((cacheEntry) => {
-      //
-      if (cacheEntry.label) cacheEntry.label.visible = true; //
+      if (cacheEntry.label) cacheEntry.label.visible = true;
     });
-    if (controls) controls.update(); //
-    if (renderer && camera) renderer.render(scene, camera); //
-    if (labelRenderer && camera) labelRenderer.render(scene, camera); //
-  } //
+
+    // Update controls and render the scene
+    if (controls) controls.update();
+    if (renderer && camera) renderer.render(scene, camera);
+    if (labelRenderer && camera) labelRenderer.render(scene, camera);
+  } // End animate function
 </script>
 
 <div class="universe-map-container">
+  {#if isLoading}
+    <div class="loading">
+      Loading map{loadingEllipsis}
+    </div>
+  {/if}
   <div class="controls">
     <div class="control-panel">
       <div class="search-box">
@@ -3042,6 +3110,21 @@
     width: 100%;
     height: 100%;
     background-color: #000; /* Base background */
+  }
+  .loading {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    color: white;
+    background-color: rgba(0, 0, 0, 0.8); /* Background helps visibility */
+    padding: 20px 30px;
+    border-radius: 8px; /* Keep rounded corners */
+    z-index: 20;
+    box-shadow: 0 0 10px rgba(0, 0, 0, 0.5); /* Keep shadow for contrast */
+    text-align: center;
+    font-size: 1.2em;
+    white-space: nowrap;
   }
   .loading,
   .error {
