@@ -556,8 +556,6 @@
       if (mapData.length === 0) throw new Error("No map data received");
 
       // --- DYNAMIC REGION COLOR GENERATION --- START ---
-
-      // 1. Filter mapData to get only region definitions first
       const regionDefinitions = mapData.filter((item) => item.typeid === 3);
       const numberOfRegions = regionDefinitions.length;
       console.log(
@@ -566,26 +564,37 @@
 
       if (numberOfRegions === 0) {
         console.warn(
-          "[UniverseMap] No region definitions found in mapData. Region coloring/labels might fail."
+          "[UniverseMap] No region definitions found. Region coloring might fail."
         );
-        regions = []; // Ensure regions array is empty
+        regions = [];
       } else {
-        // 2. Generate distinct colors using HSL hue stepping
         const hueStep = 360 / numberOfRegions;
-        const saturation = 0.85; // High saturation for vibrancy (adjust 0.7 - 1.0)
-        const lightness = 0.55; // Mid-range lightness (adjust 0.5 - 0.6)
+        const saturation = 0.85; // Keep saturation high for vibrancy
+        // --- Define base lightness and variation ---
+        const baseLightness = 0.55; // The average lightness target
+        const lightnessVariation = 0.1; // How much to vary (e.g., 0.1 => 0.55 +/- 0.05)
 
-        // 3. Map region definitions to the desired structure, calculating color
         regions = regionDefinitions
           .map((regionData, index) => {
-            const hue = (index * hueStep) % 360; // Calculate hue for this region
+            const hue = (index * hueStep) % 360; // Calculate base hue
+
+            // --- Vary lightness based on index ---
+            // Alternate between slightly lighter and slightly darker
+            // This helps differentiate colors with similar hues
+            const lightness =
+              index % 2 === 0
+                ? baseLightness + lightnessVariation / 2 // e.g., 0.55 + 0.05 = 0.60
+                : baseLightness - lightnessVariation / 2; // e.g., 0.55 - 0.05 = 0.50
+
+            // Ensure lightness stays within reasonable bounds (e.g., 0.3 to 0.8)
+            const clampedLightness = Math.max(0.3, Math.min(0.8, lightness));
 
             const color = new THREE.Color();
-            // THREE.Color.setHSL expects H, S, L values between 0 and 1
-            color.setHSL(hue / 360, saturation, lightness);
+            // Use the calculated hue and the *varied*, clamped lightness
+            color.setHSL(hue / 360, saturation, clampedLightness);
 
             return {
-              id: regionData.itemid, // Use the ID from the region definition
+              id: regionData.itemid,
               name: regionData.itemname,
               x: regionData.x,
               y: regionData.y,
@@ -593,23 +602,14 @@
               color: color.getHex(), // Store the calculated HEX color
             };
           })
-          .sort((a, b) => a.name.localeCompare(b.name)); // Sort alphabetically after processing
+          .sort((a, b) => a.name.localeCompare(b.name)); // Sort alphabetically
 
         console.log(
-          `[UniverseMap] Generated and assigned distinct colors for ${regions.length} regions.`
+          `[UniverseMap] Generated and assigned distinct colors (with lightness variation) for ${regions.length} regions.`
         );
-        // Optional: Log a sample of generated colors
-        // console.log("Sample generated colors:", regions.slice(0, 5).map(r => ({ name: r.name, hex: `#${r.color.toString(16).padStart(6, '0')}` })));
+        // Optional: Log HSL values for debugging
+        // console.log("Sample generated HSL:", regions.slice(0, 5).map(r => { const c = new THREE.Color(r.color); const hsl={h:0,s:0,l:0}; c.getHSL(hsl); return { name: r.name, h: (hsl.h*360).toFixed(1), s: hsl.s.toFixed(2), l: hsl.l.toFixed(2) } }));
       }
-      // --- DYNAMIC REGION COLOR GENERATION --- END ---
-
-      // 4. Now build the map - it will use the 'regions' array with generated colors
-      console.log(
-        `[UniverseMap] Final regions array (sample):`,
-        JSON.stringify(regions.slice(0, 10)),
-        "Total count:",
-        regions.length
-      );
       buildMap(mapData); // Pass the full mapData
     } catch (err) {
       console.error("[UniverseMap] Error during initializeMap:", err);
