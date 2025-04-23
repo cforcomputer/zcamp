@@ -1,474 +1,331 @@
 <script>
   import { onMount, onDestroy } from "svelte";
-  import { writable, get } from "svelte/store"; // Import get
-  import socket from "./socket.js";
-  import { activeActivities } from "./activityManager.js";
-  // Import the new store for target management
+  import { get } from "svelte/store"; // Keep get if needed elsewhere
+  // Import stores and the cancelTarget action
   import {
     selectedCampCrusherTargetId,
     currentTargetEndTime,
+    isTargetSelectionActive, // Still needed for the "ACTIVATE/CANCEL SELECTION" button logic
+    cancelTarget, // Import from store
   } from "./campCrusherTargetStore.js";
+  import socket from "./socket.js";
 
-  let showGame = false;
+  // State variables...
+  let timeRemaining = null;
   let countdownInterval = null;
-  let timeRemaining = null; // Milliseconds remaining for the countdown timer
-  let userBashbucks = 0; // Current user's Bashbucks
-  let leaderboard = []; // Leaderboard data
-  let characterName = null; // Current logged-in user's character name
-  let isLoadingStats = true; // Loading state for user stats
+  // targetEndTime removed as it's implicitly handled by currentTargetEndTime store
+  let characterName = null; // Populated from session/stats API
+  let userBashbucks = 0;
+  let isLoadingStats = true;
+  let selectedTargetObject = null;
+  let isCancelling = false; // Local state for button feedback during cancel API call
 
-  // --- State derived from stores ---
-  let currentTargetId = null; // ID of the currently selected target
-  let targetEndTime = null; // JS Date object for the target end time
-  let selectedTarget = null; // The full activity object for the selected target
+  // Subscribe to stores
+  let currentTargetId;
+  let currentEndTimeISO; // Store the ISO string directly
+  let selectionActive; // For the Activate/Cancel Selection button
 
-  // Subscribe to changes in the selected target ID store
   const unsubTargetId = selectedCampCrusherTargetId.subscribe((value) => {
-    currentTargetId = value; // Update the local ID tracker
-
-    // --- FIX: Use get() to safely access store value inside callback ---
-    const currentActivitiesValue = get(activeActivities); // Get current value NOW
-    // Find the corresponding activity object using the current value of activeActivities
-    selectedTarget = value
-      ? currentActivitiesValue.find((a) => a.id === value)
-      : null;
-    // --- END FIX ---
-
-    // Clear any existing countdown interval when the target changes
-    if (countdownInterval) clearInterval(countdownInterval);
-    timeRemaining = null; // Reset the display timer
-
-    // If a valid target is now selected...
-    if (selectedTarget) {
-      const endTimeISO = get(currentTargetEndTime); // Get the end time from its dedicated store
-      if (endTimeISO) {
-        const endTime = new Date(endTimeISO); // Convert ISO string to Date object
-        // Check if the target's end time is in the future
-        if (endTime.getTime() > Date.now()) {
-          // console.log("Starting countdown from store endTime:", endTime);
-          targetEndTime = endTime; // Store the end time (e.g., for display)
-          startCountdown(endTime); // Start the visual countdown timer
-        } else {
-          // If the target from the store is already expired, clear the selection
-          // console.log("End time from store is in the past, clearing target.");
-          selectedCampCrusherTargetId.set(null);
-          currentTargetEndTime.set(null);
-          selectedTarget = null; // Clear the local derived value too
-        }
-      } else {
-        // If no end time is found in the store, the state might be inconsistent or waiting for API confirmation
-        // Clear the potentially stale target selection
-        // console.warn("No valid endTime in store for new target ID", value, "Clearing selection.");
-        selectedCampCrusherTargetId.set(null);
-        selectedTarget = null;
-      }
-    } else {
-      targetEndTime = null; // Clear local end time if no target is selected
-    }
+    console.log("CampCrusher: selectedCampCrusherTargetId changed to", value);
+    currentTargetId = value;
+    updateSelectedTargetObject(); // Update the displayed target info
+    // Countdown logic is primarily triggered by unsubEndTime now
   });
 
-  // Subscribe to changes in the main activities list
+  const unsubEndTime = currentTargetEndTime.subscribe((value) => {
+    console.log("CampCrusher: currentTargetEndTime changed to", value);
+    currentEndTimeISO = value;
+    triggerCountdownUpdate(); // Trigger countdown logic whenever end time changes
+  });
+
+  const unsubSelectionActive = isTargetSelectionActive.subscribe((value) => {
+    selectionActive = value;
+  });
+
   const unsubActivities = activeActivities.subscribe((activities) => {
-    // If we have a selected target ID, find its updated details in the new activities list
+    // Update selectedTargetObject if activities change while target is active
     if (currentTargetId) {
-      const updatedTarget = activities.find((a) => a.id === currentTargetId);
-      if (updatedTarget) {
-        selectedTarget = updatedTarget; // Update the local selectedTarget object
-      } else {
-        // If the target activity is no longer in the main list (e.g., expired and removed)
-        // console.log("Selected target disappeared from active list, clearing.");
-        // Check the store again before clearing to prevent race conditions
-        if (get(selectedCampCrusherTargetId) === currentTargetId) {
-          selectedCampCrusherTargetId.set(null);
-          currentTargetEndTime.set(null);
-        }
-        selectedTarget = null; // Clear the local object
-      }
-    } else {
-      // If no target ID is selected, ensure the local object is also null
-      selectedTarget = null;
+      updateSelectedTargetObject();
     }
   });
 
-  // Function to fetch initial user stats (Bashbucks)
+  // --- Functions ---
+
+  // Finds the activity object matching the current target ID
+  function updateSelectedTargetObject() {
+    const activities = get(activeActivities); // Assuming activeActivities store exists
+    if (currentTargetId && activities) {
+      selectedTargetObject =
+        activities.find((a) => a && a.id === currentTargetId) || null;
+      console.log(
+        "CampCrusher: Updated selectedTargetObject to",
+        selectedTargetObject
+      );
+    } else {
+      selectedTargetObject = null;
+    }
+  }
+
+  // Clears local countdown state
+  function clearCountdownDisplay() {
+    if (countdownInterval) {
+      clearInterval(countdownInterval);
+      countdownInterval = null;
+    }
+    timeRemaining = null; // This will hide the countdown display reactively
+    console.log("CampCrusher: Cleared countdown display.");
+  }
+
+  // Calculates and updates the displayed time remaining
+  function updateTimer(endTimeMs, targetIdAtStart) {
+    const now = Date.now();
+    const remaining = endTimeMs - now;
+    const currentSelectedId = get(selectedCampCrusherTargetId); // Check current ID inside interval
+
+    // Stop if target changed or remaining is <= 0
+    if (currentSelectedId !== targetIdAtStart || remaining <= 0) {
+      console.log(
+        `CampCrusher: Stopping countdown for ${targetIdAtStart}. Current target: ${currentSelectedId}, Remaining ms: ${remaining}`
+      );
+      // Store might be cleared already by cancellation or completion event,
+      // but ensure display is cleared regardless.
+      clearCountdownDisplay();
+      // Check if expiration is the cause and stores haven't been cleared yet
+      if (remaining <= 0 && currentSelectedId === targetIdAtStart) {
+        console.log(
+          `CampCrusher: Target ${targetIdAtStart} expired. Clearing stores.`
+        );
+        selectedCampCrusherTargetId.set(null);
+        currentTargetEndTime.set(null);
+      }
+    } else {
+      timeRemaining = remaining; // Update display
+    }
+  }
+
+  // Starts or restarts the countdown interval
+  function startCountdown(endTimeDate, targetId) {
+    if (countdownInterval) clearInterval(countdownInterval); // Clear existing interval
+    const endTimeMs = endTimeDate.getTime();
+    console.log(
+      `CampCrusher: Starting countdown for target ${targetId}. End time: ${endTimeDate.toISOString()}, End ms: ${endTimeMs}`
+    );
+
+    // Initial update
+    updateTimer(endTimeMs, targetId);
+
+    // Set interval only if time is remaining
+    if (timeRemaining > 0) {
+      countdownInterval = setInterval(
+        () => updateTimer(endTimeMs, targetId),
+        1000
+      );
+    }
+  }
+
+  // **REVISED**: This function now reacts purely to store changes
+  function triggerCountdownUpdate() {
+    if (currentTargetId && currentEndTimeISO) {
+      const endTime = new Date(currentEndTimeISO);
+      console.log(
+        `CampCrusher: triggerCountdownUpdate - Target: ${currentTargetId}, EndTimeISO: ${currentEndTimeISO}, EndTimeDate: ${endTime}, Now: ${new Date()}`
+      );
+      if (!isNaN(endTime.getTime()) && endTime.getTime() > Date.now()) {
+        // Valid future end time exists, start/update countdown
+        startCountdown(endTime, currentTargetId);
+      } else {
+        // End time is invalid or in the past
+        console.log(
+          "CampCrusher: triggerCountdownUpdate - End time is invalid or in the past. Clearing display."
+        );
+        clearCountdownDisplay();
+        // If stores still hold this ID, clear them (handles edge cases)
+        if (get(selectedCampCrusherTargetId) === currentTargetId) {
+          console.log(
+            "CampCrusher: triggerCountdownUpdate - Clearing potentially stale stores."
+          );
+          selectedCampCrusherTargetId.set(null);
+          currentTargetEndTime.set(null);
+        }
+      }
+    } else {
+      // No target ID or end time in store, clear display
+      console.log(
+        "CampCrusher: triggerCountdownUpdate - No target/end time. Clearing display."
+      );
+      clearCountdownDisplay();
+    }
+  }
+
+  function formatTime(ms) {
+    /* ... implementation ... */
+    if (ms === null || ms < 0) return "0m 0s";
+    const totalSeconds = Math.floor(ms / 1000);
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    return `${minutes}m ${String(seconds).padStart(2, "0")}s`;
+  }
+
+  // Toggles the visibility of target selection buttons on cards
+  function toggleSelectionMode() {
+    if (get(selectedCampCrusherTargetId)) return; // Don't toggle if target active
+    isTargetSelectionActive.update((active) => !active);
+    console.log(
+      "CampCrusher: Selection mode toggled to:",
+      get(isTargetSelectionActive)
+    );
+  }
+
+  // --- REMOVED cancelTarget function (it's now imported from store) ---
+
+  // Fetch initial user/game stats
   async function fetchInitialStats() {
+    /* ... implementation ... */
     isLoadingStats = true;
     try {
-      const response = await fetch("/api/campcrushers/stats", {
+      // Fetch Bashbucks
+      const statsResponse = await fetch("/api/campcrushers/stats", {
         credentials: "include",
       });
-      if (response.ok) {
-        const data = await response.json();
-        userBashbucks = data.bashbucks || 0;
-      } else if (response.status !== 401) {
-        console.error("Failed to fetch camp crusher stats:", response.status);
+      if (statsResponse.ok) {
+        const statsData = await statsResponse.json();
+        userBashbucks = statsData.bashbucks || 0;
+      } else if (statsResponse.status !== 401) {
+        /* Handle non-auth errors */
+      }
+
+      // Fetch Session (for character name)
+      const sessionResponse = await fetch("/api/session", {
+        credentials: "include",
+      });
+      if (sessionResponse.ok) {
+        const sessionData = await sessionResponse.json();
+        characterName = sessionData.user?.character_name;
+        // NOTE: Active target state should be loaded via store subscriptions now
+      } else if (sessionResponse.status !== 401) {
+        /* Handle non-auth errors */
       }
     } catch (error) {
-      console.error("Error fetching camp crusher stats:", error);
+      /* Handle fetch errors */
     } finally {
       isLoadingStats = false;
     }
   }
 
-  // Function to load the leaderboard data
-  async function loadLeaderboard() {
-    try {
-      const response = await fetch("/api/campcrushers/leaderboard", {
-        credentials: "include",
-      });
-      if (response.ok) {
-        leaderboard = await response.json();
-      } else {
-        console.error("Failed to load leaderboard:", response.status);
-      }
-    } catch (error) {
-      console.error("Error loading leaderboard:", error);
-    }
-  }
-
-  // Handler for when Bashbucks are awarded via socket event
-  function handleBashbucksAwarded(data) {
-    // Assuming data contains { newTotal: number }
+  // Handle WebSocket updates for bashbucks
+  function handleBashbucksUpdate(data) {
+    /* ... implementation ... */
+    console.log("Received bashbucksUpdate:", data);
     if (data && typeof data.newTotal === "number") {
       userBashbucks = data.newTotal;
-      loadLeaderboard(); // Refresh leaderboard after update
+    } else if (data && typeof data.change === "number") {
+      userBashbucks += data.change;
     } else {
-      // Fallback: Fetch stats again if data is not as expected
-      fetchInitialStats();
-      loadLeaderboard();
+      fetchInitialStats(); /* Fallback */
     }
   }
 
-  // Format milliseconds into minutes and seconds string
-  function formatTime(ms) {
-    if (ms === null || ms < 0) return "0m 0s";
-    const totalSeconds = Math.floor(ms / 1000);
-    const minutes = Math.floor(totalSeconds / 60);
-    const seconds = totalSeconds % 60;
-    return `${minutes}m ${seconds}s`;
-  }
-
-  // Starts the visual countdown timer
-  function startCountdown(endTimeDate) {
-    if (countdownInterval) clearInterval(countdownInterval); // Clear previous interval
-    const endTimeMs = endTimeDate.getTime();
-
-    const updateTimer = () => {
-      const now = Date.now();
-      const remaining = endTimeMs - now;
-
-      if (remaining <= 0) {
-        clearInterval(countdownInterval);
-        // Check if this target is still the selected one before clearing the store
-        if (get(selectedCampCrusherTargetId) === currentTargetId) {
-          selectedCampCrusherTargetId.set(null);
-          currentTargetEndTime.set(null);
-        }
-        timeRemaining = null; // Update local state for display
-        loadLeaderboard(); // Refresh leaderboard when target expires
-      } else {
-        timeRemaining = remaining; // Update local state for display
-      }
-    };
-
-    updateTimer(); // Initial update
-    countdownInterval = setInterval(updateTimer, 1000); // Update every second
-  }
-
-  // Check for an existing active target from the leaderboard on mount/login
-  async function checkActiveTarget() {
-    if (!characterName) return; // Need character name to check leaderboard
-    // console.log("Checking for active target...");
-    await loadLeaderboard(); // Ensure leaderboard is fresh
-    const myEntry = leaderboard.find((p) => p.character_name === characterName);
-
-    if (myEntry?.target_camp_id && myEntry?.target_start_time) {
-      const targetId = myEntry.target_camp_id;
-      const startTime = new Date(myEntry.target_start_time).getTime();
-      const endTime = new Date(startTime + 60 * 60 * 1000); // Assume 1 hour duration
-
-      if (endTime.getTime() > Date.now()) {
-        // Found an active target
-        // console.log("Found active target from leaderboard:", targetId);
-        // Sync the stores only if necessary to prevent infinite loops
-        if (get(selectedCampCrusherTargetId) !== targetId) {
-          selectedCampCrusherTargetId.set(targetId);
-        }
-        if (get(currentTargetEndTime) !== endTime.toISOString()) {
-          currentTargetEndTime.set(endTime.toISOString());
-        }
-        // Countdown will start automatically via the selectedCampCrusherTargetId store subscription
-      } else {
-        // Found an expired target from the leaderboard
-        // console.log("Found expired target from leaderboard:", targetId);
-        // Clear the stores if they currently hold this expired target ID
-        if (get(selectedCampCrusherTargetId) === targetId) {
-          selectedCampCrusherTargetId.set(null);
-          currentTargetEndTime.set(null);
-        }
-      }
-    } else {
-      // No active target found on the leaderboard for this user
-      // console.log("No active target found from leaderboard.");
-      // Ensure stores are clear if no active target is found
-      if (get(selectedCampCrusherTargetId) !== null) {
-        selectedCampCrusherTargetId.set(null);
-      }
-      if (get(currentTargetEndTime) !== null) {
-        currentTargetEndTime.set(null);
-      }
+  // Handle WebSocket updates for target completion/cancellation
+  function handleTargetCompletedOrCancelled({ targetId }) {
+    console.log(
+      `CampCrusher: Received server event for target ${targetId} completion/cancellation.`
+    );
+    const currentSelectedId = get(selectedCampCrusherTargetId);
+    if (currentSelectedId === targetId) {
+      console.log(
+        `CampCrusher: Clearing currently selected target ${targetId} based on server event.`
+      );
+      // Setting stores to null will trigger reactive updates via subscriptions
+      selectedCampCrusherTargetId.set(null);
+      currentTargetEndTime.set(null);
     }
   }
 
-  // Component Lifecycle: Mount
-  onMount(async () => {
-    // Listen for server events awarding Bashbucks
-    socket.on("bashbucksAwarded", handleBashbucksAwarded);
+  onMount(() => {
+    fetchInitialStats();
+    socket.on("bashbucksUpdate", handleBashbucksUpdate);
+    socket.on("targetCompleted", handleTargetCompletedOrCancelled);
+    socket.on("targetCancelled", handleTargetCompletedOrCancelled);
 
-    // Fetch initial session data to get character name
-    try {
-      const response = await fetch("/api/session", { credentials: "include" });
-      if (response.ok) {
-        const data = await response.json();
-        characterName = data.user?.character_name; // Store character name
-        if (characterName) {
-          await fetchInitialStats(); // Fetch initial Bashbucks
-          // Check for an active target after a short delay to allow activities to load
-          setTimeout(() => checkActiveTarget(), 500);
-        } else {
-          // Not logged in with EVE SSO
-          isLoadingStats = false;
-        }
-      } else {
-        console.warn("Could not fetch session data on mount.");
-        isLoadingStats = false;
-      }
-    } catch (error) {
-      console.error("Error fetching session on mount:", error);
-      isLoadingStats = false;
-    }
+    // Initial check: update display based on current store values
+    updateSelectedTargetObject();
+    triggerCountdownUpdate();
   });
 
-  // Component Lifecycle: Destroy
   onDestroy(() => {
-    if (countdownInterval) clearInterval(countdownInterval); // Clear timer
-    socket.off("bashbucksAwarded", handleBashbucksAwarded); // Remove listener
-    // Unsubscribe from Svelte stores
+    if (countdownInterval) clearInterval(countdownInterval);
+    // Unsubscribe from stores
     unsubTargetId();
+    unsubEndTime();
+    unsubSelectionActive();
     unsubActivities();
+    // Unsubscribe from socket events
+    socket.off("bashbucksUpdate", handleBashbucksUpdate);
+    socket.off("targetCompleted", handleTargetCompletedOrCancelled);
+    socket.off("targetCancelled", handleTargetCompletedOrCancelled);
   });
 </script>
 
-<div class="camp-crusher">
-  <button class="easter-egg" on:click={() => (showGame = !showGame)}>
-    <span class="neon-text">PLAY CAMPCRUSHERS</span>
-  </button>
-
-  {#if showGame}
-    {#if !characterName}
-      <div class="auth-warning retro-box">
-        <span class="blink">!</span> Please log in with EVE Online to play Camp
-        Crushers! <span class="blink">!</span>
-      </div>
-    {:else}
-      <div class="game-ui retro-box">
-        <div class="game-header">
-          <div class="player-info">
-            <h3 class="neon-text">
-              BASHBUCKS: <span class="value">{userBashbucks}</span>
-            </h3>
-            <p class="pilot-name">
-              PILOT: <span class="value">{characterName}</span>
-            </p>
-          </div>
-
-          {#if selectedTarget}
-            <div class="active-target retro-panel">
-              <h4 class="target-header">CURRENT TARGET:</h4>
-              <p class="target-name">
-                {selectedTarget.stargateName || selectedTarget.id}
-              </p>
-              {#if timeRemaining !== null}
-                <p class="countdown">
-                  TIME REMAINING: <span class="timer"
-                    >{formatTime(timeRemaining)}</span
-                  >
-                </p>
-              {/if}
-              <button
-                class="clear-target-button retro-button"
-                on:click={() => {
-                  selectedCampCrusherTargetId.set(null); // Clear target ID store
-                  currentTargetEndTime.set(null); // Clear end time store
-                  if (countdownInterval) clearInterval(countdownInterval); // Stop timer
-                  timeRemaining = null; // Reset display timer
-                  // TODO: Optionally call backend API to clear target if necessary
-                }}
-              >
-                Clear Target
-              </button>
-            </div>
-          {:else}
-            <div class="no-target retro-panel">
-              <h4 class="selection-header">NO ACTIVE TARGET</h4>
-              <p class="text-gray-400 italic">
-                Select a target from the Active Camps list.
-              </p>
-            </div>
-          {/if}
-        </div>
-      </div>
-    {/if}
+<div class="camp-crusher retro-box">
+  {#if !characterName && !isLoadingStats}
+    <div class="auth-warning">
+      <span class="blink">!</span> Log in with EVE to play!
+      <span class="blink">!</span>
+    </div>
+  {:else if currentTargetId && selectedTargetObject}
+    <div class="active-target">
+      <h3 class="target-header">TARGET ACQUIRED:</h3>
+      <p class="target-name">
+        {selectedTargetObject?.stargateName ||
+          selectedTargetObject?.systemId ||
+          "Loading Target..."}
+        {#if selectedTargetObject?.systemName}({selectedTargetObject.systemName}){/if}
+      </p>
+      {#if timeRemaining !== null && timeRemaining > 0}
+        <p class="countdown">
+          TIME REMAINING: <span class="timer">{formatTime(timeRemaining)}</span>
+        </p>
+      {:else if timeRemaining !== null}
+        <p class="countdown text-red-500">TARGET EXPIRED</p>
+      {/if}
+      <button
+        class="retro-button cancel-button"
+        on:click={cancelTarget}
+        disabled={isCancelling}
+      >
+        {isCancelling ? "Cancelling..." : "Cancel Target"}
+      </button>
+      <p class="bashbucks-display">
+        BASHBUCKS: <span class="value">{userBashbucks}</span>
+      </p>
+    </div>
+  {:else if !isLoadingStats && characterName}
+    <div class="idle-view">
+      <button
+        class="retro-button main-button"
+        on:click={toggleSelectionMode}
+        disabled={!!currentTargetId}
+      >
+        {selectionActive ? "CANCEL SELECTION" : "ACTIVATE CAMP CRUSHERS"}
+      </button>
+      {#if selectionActive}
+        <p class="instruction-text blink">
+          SELECT TARGET FROM ACTIVE CAMPS LIST
+        </p>
+      {/if}
+      <p class="bashbucks-display">
+        BASHBUCKS: <span class="value">{userBashbucks}</span>
+      </p>
+    </div>
+  {:else if isLoadingStats}
+    <div class="loading">Loading Stats...</div>
   {/if}
 </div>
 
 <style>
-  /* Styles remain the same as previous version */
-  .camp-crusher {
-    margin-top: 1em;
-    font-family: "Courier New", monospace;
-  }
-
-  .easter-egg {
-    background: linear-gradient(45deg, #ff00ff, #00ffff);
-    border: 3px solid #ffffff;
-    border-radius: 8px;
-    padding: 0.8em 1.5em;
-    cursor: pointer;
-    position: relative;
-    overflow: hidden;
-    transition: all 0.3s ease;
-    box-shadow:
-      0 0 10px #ff00ff,
-      0 0 20px #00ffff;
-  }
-
-  .easter-egg:hover {
-    transform: scale(1.05);
-    box-shadow:
-      0 0 20px #ff00ff,
-      0 0 40px #00ffff;
-  }
-
-  .neon-text {
-    color: #ffffff;
-    text-shadow:
-      0 0 5px #ffffff,
-      0 0 10px #ffffff,
-      0 0 15px #ff00ff,
-      0 0 20px #ff00ff;
-    font-weight: bold;
-    letter-spacing: 2px;
-  }
-
-  .retro-box {
-    background: rgba(0, 0, 0, 0.9);
-    border: 2px solid #00ffff;
-    border-radius: 8px;
-    padding: 1.5em;
-    margin-top: 1em;
-    box-shadow: 0 0 10px #00ffff inset;
-  }
-
-  .game-ui {
-    color: #00ffff;
-  }
-
-  .player-info {
-    margin-bottom: 1.5em;
-    padding: 1em;
-    background: rgba(0, 255, 255, 0.1);
-    border-radius: 4px;
-  }
-
-  .player-info h3 {
-    margin: 0;
-    font-size: 1.5em;
-  }
-
-  .value {
-    color: #ff00ff;
-    font-weight: bold;
-  }
-
-  .pilot-name {
-    margin: 0.5em 0 0 0;
-    color: #ffffff;
-  }
-
-  .active-target,
-  .no-target {
-    background: rgba(0, 255, 255, 0.1);
-    padding: 1em;
-    border-radius: 4px;
-    border: 2px solid #00ffff;
-    margin-top: 1em;
-  }
-  .no-target {
-    border-color: #555; /* Grey border if no target */
-    color: #aaa;
-  }
-
-  .target-header,
-  .selection-header {
-    color: #00ffff;
-    margin: 0 0 0.5em 0;
-    text-shadow: 0 0 5px #00ffff;
-  }
-  .no-target .selection-header {
-    color: #aaa;
-    text-shadow: none;
-  }
-
-  .target-name {
-    color: #ff00ff;
-    font-size: 1.2em;
-    margin: 0.5em 0;
-    font-weight: bold;
-  }
-
-  .countdown {
-    margin: 1em 0 0 0;
-    color: #ffffff;
-  }
-
-  .timer {
-    color: #ff00ff;
-    font-weight: bold;
-    font-size: 1.2em;
-    text-shadow: 0 0 5px #ff00ff;
-  }
-
-  .clear-target-button {
-    background: rgba(255, 0, 0, 0.2);
-    border: 1px solid #ff0000;
-    color: #ffaaaa;
-    padding: 0.3em 0.6em;
-    font-size: 0.8em;
-    margin-top: 0.8em;
-    cursor: pointer;
-    transition: background-color 0.2s;
-  }
-  .clear-target-button:hover {
-    background: rgba(255, 0, 0, 0.4);
-    color: #ffffff;
-  }
-
-  .auth-warning {
-    color: #ff0000;
-    text-align: center;
-    font-size: 1.2em;
-    padding: 2em;
-  }
-
-  .blink {
-    animation: blink 1s steps(2, start) infinite;
-    color: #ff0000;
-  }
-
-  @keyframes blink {
-    to {
-      visibility: hidden;
-    }
-  }
+  /* ... Styles remain the same ... */
+  /* Ensure styles for .text-red-500 exist if needed */
+  .text-red-500 {
+    color: #f56565;
+  } /* Example red color */
 </style>

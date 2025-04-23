@@ -2301,6 +2301,85 @@ app.post("/api/login", async (req, res) => {
   }
 });
 
+app.post("/api/campcrushers/cancel-target", async (req, res) => {
+  // 1. Authentication Check
+  if (!req.session?.user?.character_id) {
+    console.error("[Cancel Target] User not authenticated.");
+    return res.status(401).json({ success: false, error: "Not authenticated" });
+  }
+
+  const userId = req.session.user.character_id;
+  console.log(`[Cancel Target] Request received for user: ${userId}`);
+
+  try {
+    // 2. Find the user's currently active (not completed, not expired) target
+    const findActiveTargetQuery = `
+      SELECT id
+      FROM camp_crusher_targets
+      WHERE character_id = $1
+        AND completed = FALSE
+        AND end_time > NOW()
+      ORDER BY start_time DESC
+      LIMIT 1;
+    `;
+    const { rows: activeTargets } = await pool.query(findActiveTargetQuery, [
+      userId,
+    ]);
+
+    if (activeTargets.length === 0) {
+      console.log(`[Cancel Target] No active target found for user: ${userId}`);
+      // It's okay if no target is active, client might be out of sync
+      return res.json({
+        success: true,
+        message: "No active target to cancel.",
+      });
+    }
+
+    const targetToCancelId = activeTargets[0].id;
+    console.log(
+      `[Cancel Target] Found active target ID: ${targetToCancelId} for user: ${userId}`
+    );
+
+    // 3. Mark the target as inactive (e.g., set end_time to now or completed to true)
+    // Setting completed=TRUE is simpler and aligns with successful completion logic
+    const cancelTargetQuery = `
+      UPDATE camp_crusher_targets
+      SET completed = TRUE, end_time = NOW() -- Optionally set end_time too
+      WHERE id = $1 AND character_id = $2 -- Ensure ownership
+      RETURNING id;
+    `;
+    const { rowCount } = await pool.query(cancelTargetQuery, [
+      targetToCancelId,
+      userId,
+    ]);
+
+    if (rowCount > 0) {
+      console.log(
+        `[Cancel Target] Successfully marked target ${targetToCancelId} as completed for user: ${userId}`
+      );
+      // 4. Emit event to potentially update other client instances (optional but good practice)
+      io.to(userId.toString()).emit("targetCancelled", {
+        targetId: targetToCancelId,
+      }); // Use a specific event name
+      res.json({ success: true, message: "Target cancelled successfully." });
+    } else {
+      // This shouldn't ideally happen if the SELECT found a target, but handles race conditions/errors
+      console.warn(
+        `[Cancel Target] Failed to update target ${targetToCancelId} for user: ${userId} (maybe already completed/expired?).`
+      );
+      res
+        .status(400)
+        .json({
+          success: false,
+          error: "Failed to cancel target (might be already inactive).",
+        });
+    }
+  } catch (error) {
+    console.error("[Cancel Target] Error processing cancel request:", error);
+    res.status(500).json({ success: false, error: "Internal server error" });
+  }
+});
+
 // for user login
 app.get("/callback", async (req, res) => {
   const { code, state } = req.query;

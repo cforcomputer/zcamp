@@ -1,21 +1,22 @@
 <script>
   import { onMount, onDestroy } from "svelte";
-  import CampCrusher from "./CampCrusher.svelte";
+  import CampCrusher from "./CampCrusher.svelte"; // Default import
   import activityManager, { activeActivities } from "./activityManager.js";
   import { CAMP_PROBABILITY_FACTORS, CAPSULE_ID } from "./constants.js";
   import ContextMenu from "./ContextMenu.svelte";
   import PinnedSystemsList from "./PinnedSystemsList.svelte";
-  // --- CHANGE: Import target store ---
   import {
     selectedCampCrusherTargetId,
     currentTargetEndTime,
+    isTargetSelectionActive, // Import selection state
+    cancelTarget, // Import cancelTarget from the store
   } from "./campCrusherTargetStore.js";
-  // --- END CHANGE ---
-  import { get } from "svelte/store"; // Import get
-  import { getValidAccessToken } from "./tokenManager.js"; // Import ESI helper
+  import { get } from "svelte/store";
+  import { getValidAccessToken } from "./tokenManager.js";
 
   const { THREAT_SHIPS } = CAMP_PROBABILITY_FACTORS;
 
+  // --- Component State ---
   let viewMode = "cards";
   let isLoading = true;
   let mounted = false;
@@ -23,23 +24,25 @@
   let pinnedSystemsComponent;
   let expandedCompositionCards = new Set();
 
-  // --- CHANGE: Subscribe to target store ---
-  let currentTargetId = get(selectedCampCrusherTargetId); // Get initial value
+  // --- Subscribe to stores ---
+  let currentTargetId;
+  let selectionActive;
   const unsubTarget = selectedCampCrusherTargetId.subscribe((value) => {
     currentTargetId = value;
   });
-  // --- END CHANGE ---
+  const unsubSelection = isTargetSelectionActive.subscribe((value) => {
+    selectionActive = value;
+  });
+  // --- END Store Subscriptions ---
 
-  // Declare contextMenu state variable here
   let contextMenu = { show: false, x: 0, y: 0, options: [] };
-
   const classificationIcons = {
-    camp: "⛺", // Tent for standard camp
-    smartbomb: "⚡", // Lightning for smartbomb
-    roaming_camp: "🏕️", // Tent with campfire for roaming camp
-    gate_battle: "⚔️", // Crossed swords for battle
-    roam: "➡️", // Arrow for roam (though likely filtered out here)
-    activity: "❓", // Question mark for unknown/default
+    camp: "⛺",
+    smartbomb: "⚡",
+    roaming_camp: "🏕️",
+    battle: "⚔️",
+    roam: "➡️",
+    activity: "❓",
   };
   const classificationTooltips = {
     camp: "Standard Gate Camp",
@@ -50,6 +53,7 @@
     activity: "Unclassified Activity",
   };
 
+  // --- Helper Functions ---
   function toggleCompositionExpansion(e, activityId) {
     e.stopPropagation();
     if (expandedCompositionCards.has(activityId)) {
@@ -57,17 +61,16 @@
     } else {
       expandedCompositionCards.add(activityId);
     }
-    expandedCompositionCards = expandedCompositionCards; // Trigger reactivity
+    expandedCompositionCards = expandedCompositionCards;
   }
+
   function getAccurateShipCounts(activity) {
     const uniqueAttackerShips = new Map();
     (activity.kills || []).forEach((kill) => {
-      // Add default empty array
       (kill?.killmail?.attackers || []).forEach((attacker) => {
-        // Add null checks
         if (
-          attacker?.character_id && // Add null check
-          attacker?.ship_type_id && // Add null check
+          attacker?.character_id &&
+          attacker?.ship_type_id &&
           attacker?.ship_type_id !== CAPSULE_ID
         ) {
           const key = `${attacker.character_id}-${attacker.ship_type_id}`;
@@ -85,54 +88,36 @@
     return shipCounts;
   }
 
+  // Filter activities
   $: activitiesToShow = ($activeActivities || [])
     .filter(
       (activity) =>
-        // --- MODIFIED filter ---
-        // Show standard camps, smartbombs, roaming camps (if they occur at gates),
-        // and the new gate_battles. Explicitly exclude 'roam' and 'activity'.
-        ["camp", "smartbomb", "roaming_camp", "gate_battle"].includes(
-          // Added gate_battle, removed battle
+        activity && // Ensure activity is not null/undefined
+        ["camp", "smartbomb", "roaming_camp", "battle"].includes(
           activity.classification
         ) &&
-        // Ensure the activity has a stargate association, unless it's a battle
-        // (which we now know is specifically a gate_battle)
-        (activity.stargateName || activity.classification === "gate_battle") && // Keep gate_battle even if stargateName is briefly null? Or rely on classification? Let's rely on classification primarily.
-        // Keep battles only if they meet the new gate_battle criteria (handled by the inclusion above)
-        // Keep other camp types only if they have > 0 probability
+        (activity.stargateName || activity.classification === "battle") &&
         (activity.probability === undefined ||
           activity.probability > 0 ||
-          activity.classification === "gate_battle") // Keep gate_battle even if probability dips
+          activity.classification === "battle")
     )
-    .sort((a, b) => (b.probability || 0) - (a.probability || 0)); // Sort by probability
+    .sort((a, b) => (b.probability || 0) - (a.probability || 0));
 
   $: if (mounted && $activeActivities) isLoading = false;
 
-  // --- CHANGE: Function to handle target selection ---
-  async function handleTargetSelection(activity) {
+  // Function to SET a target
+  async function handleSetTarget(activity) {
     if (!isLoggedIn) {
       alert("Please log in to select a Camp Crusher target.");
       return;
     }
-    // Ensure activity has necessary properties for the API call
-    if (
-      !activity ||
-      !activity.id ||
-      !activity.systemId ||
-      !activity.stargateName
-    ) {
+    if (!activity?.id || !activity?.systemId || !activity?.stargateName) {
       console.error("Invalid activity data for target selection:", activity);
       alert("Cannot select this target due to missing data.");
       return;
     }
-
-    // Check if already selected
-    if (currentTargetId === activity.id) {
-      // Optional: Allow deselecting? For now, just clear it.
-      console.log("Clearing current target.");
-      selectedCampCrusherTargetId.set(null);
-      currentTargetEndTime.set(null);
-      // TODO: Call backend API to clear target if necessary
+    if (currentTargetId) {
+      alert("An active target already exists. Please cancel it first.");
       return;
     }
 
@@ -143,36 +128,28 @@
         credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          campId: activity.id, // Use activity.id
-          systemId: activity.systemId, // Pass systemId
-          stargateName: activity.stargateName, // Pass stargateName
+          campId: activity.id,
+          systemId: activity.systemId,
+          stargateName: activity.stargateName,
         }),
       });
-
       const data = await response.json();
-
       if (data.success && data.endTime) {
-        console.log("Target set successfully. End time:", data.endTime);
-        selectedCampCrusherTargetId.set(activity.id); // Update store
-        currentTargetEndTime.set(data.endTime); // Update end time store
+        selectedCampCrusherTargetId.set(activity.id);
+        currentTargetEndTime.set(data.endTime);
+        isTargetSelectionActive.set(false); // Turn off selection mode
       } else {
-        console.error("Failed to set target:", data.error);
-        alert(`Failed to set target: ${data.error || "Unknown error"}`);
-        // Clear selection if API failed
-        selectedCampCrusherTargetId.set(null);
-        currentTargetEndTime.set(null);
+        throw new Error(data.error || "Unknown error setting target");
       }
     } catch (error) {
       console.error("Error setting camp crusher target:", error);
-      alert("An error occurred while setting the target.");
-      selectedCampCrusherTargetId.set(null);
-      currentTargetEndTime.set(null);
+      alert(`Failed to set target: ${error.message}`);
     }
   }
-  // --- END CHANGE ---
+
+  // (cancelTarget is now imported from the store)
 
   onMount(async () => {
-    // ... (existing onMount logic for session check) ...
     try {
       const response = await fetch("/api/session", { credentials: "include" });
       if (response.ok) {
@@ -184,30 +161,22 @@
     }
     mounted = true;
     activityManager.startUpdates();
-    return () => {
-      mounted = false;
-      // activityManager.cleanup(); // Cleanup moved potentially? Check App.svelte
-    };
   });
 
   onDestroy(() => {
-    // --- CHANGE: Unsubscribe from target store ---
     unsubTarget();
-    // --- END CHANGE ---
-    // activityManager.cleanup(); // Ensure cleanup happens
+    unsubSelection();
   });
 
+  // --- Other helper functions (pinSystem, formatValue, getTimeAgo, etc.) ---
   async function pinSystem(activity) {
+    /* ... implementation ... */
     if (!isLoggedIn) return;
     try {
-      // --- FIX 1: Get the system name ---
-      // Use the same logic as before to get the name from the activity
       const systemName =
         activity.kills?.[0]?.pinpoints?.celestialData?.solarsystemname ||
-        activity.systemName || // Add fallback if name might be directly on activity
-        null; // Send null if truly not found client-side
-
-      // Check if we actually found a name before sending potentially bad data
+        activity.systemName ||
+        null;
       if (!activity.systemId || !activity.stargateName) {
         console.error(
           "Cannot pin: Missing systemId or stargateName in activity",
@@ -216,12 +185,6 @@
         alert("Cannot pin this item: missing required data.");
         return;
       }
-      // Optional: You might want to prevent pinning if systemName is null client-side,
-      // or let the backend handle potential nulls if you prefer.
-      // if (!systemName) {
-      //    console.warn("Attempting to pin without a client-side system name for:", activity.systemId);
-      // }
-
       const response = await fetch("/api/pinned-systems", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -229,40 +192,21 @@
         body: JSON.stringify({
           system_id: activity.systemId,
           stargate_name: activity.stargateName,
-          system_name: systemName, // *** ADD system_name TO THE REQUEST BODY ***
+          system_name: systemName,
         }),
       });
-
       if (response.ok) {
         const data = await response.json();
         if (data.id) {
-          // Call the PinnedSystemsList component's function
-          // Note: Now we pass the systemName we determined above directly
           pinnedSystemsComponent?.pinSystem({
             id: data.id,
             user_id: data.user_id || null,
             system_id: activity.systemId,
             stargate_name: activity.stargateName,
-            system_name: systemName || `System ${activity.systemId}`, // Still need fallback *here* for optimistic UI just in case API modifies it? Or trust API response? Let's trust API if possible.
-            // Let's refine this: The API response *should* now include the name we sent or null.
-            // Best practice: Use the name confirmed by the API response if available, otherwise use the name we sent.
+            system_name: data.system_name || `System ${activity.systemId}`, // Prefer API response name
             created_at: data.created_at || new Date().toISOString(),
             probability: activity.probability,
           });
-
-          // Refined call using name from API response (if backend includes it in response)
-          // If your backend POST response now includes the system_name used:
-          /*
-        pinnedSystemsComponent?.pinSystem({
-          id: data.id,
-          user_id: data.user_id,
-          system_id: data.system_id, // Use data from response if available
-          stargate_name: data.stargate_name, // Use data from response if available
-          system_name: data.system_name || `System ${data.system_id}`, // Use name from response!
-          created_at: data.created_at,
-          probability: activity.probability, // Probability still comes from original activity
-        });
-        */
         } else {
           console.error(
             "Pin API call succeeded but did not return expected data.",
@@ -275,20 +219,20 @@
           response.status,
           await response.text()
         );
-        // Optional: Show error to user
       }
     } catch (error) {
       console.error("Error pinning system:", error);
-      // Optional: Show error to user
     }
   }
   function formatValue(value) {
+    /* ... */
     if (!value) return "0 ISK";
     if (value >= 1000000000) return (value / 1000000000).toFixed(2) + "B";
     if (value >= 1000000) return (value / 1000000).toFixed(2) + "M";
     return (value / 1000).toFixed(2) + "K";
   }
   function getTimeAgo(timestamp) {
+    /* ... */
     if (!timestamp) return "unknown";
     const now = new Date().getTime();
     const then = new Date(timestamp).getTime();
@@ -298,6 +242,7 @@
     return `${minutes} minutes ago`;
   }
   async function setDestination(systemId, clearOthers = true) {
+    /* ... */
     try {
       const accessToken = await getValidAccessToken();
       const result = await fetch(
@@ -316,11 +261,12 @@
     }
   }
   function handleContextMenu(event, activity) {
+    /* ... */
     event.preventDefault();
     const container =
       event.currentTarget.closest(".eve-card") ||
       event.currentTarget.closest("table");
-    if (!container) return; // Check if container exists
+    if (!container) return;
     const containerBounds = container.getBoundingClientRect();
     const x = event.clientX - containerBounds.left;
     const y = event.clientY - containerBounds.top;
@@ -336,43 +282,40 @@
     ];
     if (
       isLoggedIn &&
-      activity.classification !== "battle" &&
-      activity.classification !== "roaming_camp" &&
-      activity.stargateName // Ensure it's a gate camp for pinning
+      ["camp", "smartbomb"].includes(activity.classification) &&
+      activity.stargateName
     ) {
-      // Only allow pinning for standard/SB camps at gates
       options.push({ label: "Pin System", action: () => pinSystem(activity) });
     }
-    // Update the contextMenu state variable declared earlier
     contextMenu = { show: true, x, y, options };
   }
   function handleMenuSelect(event) {
+    /* ... */
     const option = event.detail;
     option.action();
     contextMenu.show = false;
   }
   function getProbabilityColor(probability) {
-    if (probability >= 80) return "#ff4444";
-    if (probability >= 60) return "#ff8c00";
-    if (probability >= 40) return "#ffd700";
-    return "#90ee90";
+    /* ... */
+    if (probability >= 80) return "#ff4444"; // Red
+    if (probability >= 60) return "#ff8c00"; // Orange
+    if (probability >= 40) return "#ffd700"; // Yellow
+    return "#90ee90"; // Green
   }
   function hasInterdictor(kills) {
-    return (kills || []).some(
-      (
-        kill // Add default empty array
-      ) =>
-        (kill?.killmail?.attackers || []).some(
-          // Add null checks
-          (a) =>
-            a?.ship_type_id && // Add null check
-            [22456, 22464, 22452, 22460, 12013, 12017, 12021, 12025].includes(
-              a.ship_type_id
-            )
-        )
+    /* ... */
+    return (kills || []).some((kill) =>
+      (kill?.killmail?.attackers || []).some(
+        (a) =>
+          a?.ship_type_id &&
+          [22456, 22464, 22452, 22460, 12013, 12017, 12021, 12025].includes(
+            a.ship_type_id
+          )
+      )
     );
   }
   function formatProbabilityLog(log) {
+    /* ... */
     if (!log || !Array.isArray(log)) return "No probability log available.";
     return log
       .map((entry) =>
@@ -383,14 +326,18 @@
       .join("\n");
   }
   function openActivityHistory(activity) {
-    const latestKill = (activity.kills || [])[activity.kills.length - 1]; // Add default empty array
+    /* ... */
+    const latestKill = (activity.kills || [])[activity.kills.length - 1];
     if (latestKill) {
       const killTime = new Date(latestKill.killmail.killmail_time);
       const formattedTime = `${killTime.getUTCFullYear()}${String(killTime.getUTCMonth() + 1).padStart(2, "0")}${String(killTime.getUTCDate()).padStart(2, "0")}${String(killTime.getUTCHours()).padStart(2, "0")}${String(killTime.getUTCMinutes()).padStart(2, "0")}`;
-      window.open(
-        `https://zkillboard.com/related/${activity.systemId}/${formattedTime}/`,
-        "_blank"
-      );
+      const systemToLink = activity.lastSystem?.id || activity.systemId;
+      if (systemToLink) {
+        window.open(
+          `https://zkillboard.com/related/${systemToLink}/${formattedTime}/`,
+          "_blank"
+        );
+      }
     }
   }
 </script>
@@ -445,36 +392,52 @@
                   activity.probability || 0
                 )}"
               >
-                {#if isLoggedIn && ["camp", "smartbomb"].includes(activity.classification) && activity.stargateName}
-                  <button
-                    type="button"
-                    title={currentTargetId === activity.id
-                      ? "Current Target (Click to Clear)"
-                      : "Set as Target"}
-                    class="absolute top-2 right-2 w-8 h-8 rounded-full flex items-center justify-center transition-all duration-200 ease-in-out z-10
-                               {currentTargetId === activity.id
-                      ? 'bg-red-500 hover:bg-red-600 scale-110 ring-2 ring-white'
-                      : 'bg-gray-600 hover:bg-gray-500'}"
-                    on:click|stopPropagation={() =>
-                      handleTargetSelection(activity)}
-                    aria-pressed={currentTargetId === activity.id}
-                    aria-label={currentTargetId === activity.id
-                      ? `Clear target ${activity.stargateName}`
-                      : `Set ${activity.stargateName} as target`}
-                  >
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      viewBox="0 0 20 20"
-                      fill="currentColor"
-                      class="w-5 h-5 text-white"
+                {#if isLoggedIn}
+                  {#if currentTargetId === activity.id}
+                    <button
+                      type="button"
+                      title="Current Target (Click to Clear)"
+                      class="absolute top-2 right-2 w-8 h-8 rounded-full flex items-center justify-center transition-all duration-200 ease-in-out z-10 bg-red-500 hover:bg-red-600 scale-110 ring-2 ring-white"
+                      on:click|stopPropagation={cancelTarget}
+                      aria-pressed={true}
+                      aria-label={`Clear target ${activity.stargateName || "current target"}`}
                     >
-                      <path
-                        fill-rule="evenodd"
-                        d="M10 18a8 8 0 100-16 8 8 0 000 16zm0-2a6 6 0 100-12 6 6 0 000 12zm0-4a2 2 0 100-4 2 2 0 000 4z"
-                        clip-rule="evenodd"
-                      />
-                    </svg>
-                  </button>
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        viewBox="0 0 20 20"
+                        fill="currentColor"
+                        class="w-5 h-5 text-white"
+                      >
+                        <path
+                          fill-rule="evenodd"
+                          d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.28 7.22a.75.75 0 00-1.06 1.06L8.94 10l-1.72 1.72a.75.75 0 101.06 1.06L10 11.06l1.72 1.72a.75.75 0 101.06-1.06L11.06 10l1.72-1.72a.75.75 0 00-1.06-1.06L10 8.94 8.28 7.22z"
+                          clip-rule="evenodd"
+                        />
+                      </svg>
+                    </button>
+                  {:else if selectionActive && ["camp", "smartbomb"].includes(activity.classification) && activity.stargateName}
+                    <button
+                      type="button"
+                      title="Set as Target"
+                      class="absolute top-2 right-2 w-8 h-8 rounded-full flex items-center justify-center transition-all duration-200 ease-in-out z-10 bg-gray-600 hover:bg-green-500"
+                      on:click|stopPropagation={() => handleSetTarget(activity)}
+                      aria-pressed={false}
+                      aria-label={`Set ${activity.stargateName} as target`}
+                    >
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        viewBox="0 0 20 20"
+                        fill="currentColor"
+                        class="w-5 h-5 text-white"
+                      >
+                        <path
+                          fill-rule="evenodd"
+                          d="M10 18a8 8 0 100-16 8 8 0 000 16zm0-2a6 6 0 100-12 6 6 0 000 12zm0-4a2 2 0 100-4 2 2 0 000 4z"
+                          clip-rule="evenodd"
+                        />
+                      </svg>
+                    </button>
+                  {/if}
                 {/if}
                 <h3 class="text-white text-base font-bold truncate pr-10">
                   {activity.kills?.[0]?.pinpoints?.celestialData
@@ -488,16 +451,10 @@
                   </span>
                 </h3>
               </div>
-
               <button
                 type="button"
                 class="w-full text-left bg-eve-primary p-3"
                 on:click={() => openActivityHistory(activity)}
-                on:keypress={(e) => {
-                  if (e.key === "Enter" || e.key === " ") {
-                    openActivityHistory(activity);
-                  }
-                }}
               >
                 <div class="flex justify-between items-center mb-3">
                   <div class="flex items-center gap-2">
@@ -535,12 +492,12 @@
                     class="flex justify-between py-0.5 border-b border-white/10"
                   >
                     <span class="text-gray-400">Location:</span>
-                    <span class="text-white">
-                      {activity.stargateName ||
-                        (activity.classification === "gate_battle"
-                          ? "Gate Battle"
-                          : "Unknown Gate")}
-                    </span>
+                    <span class="text-white"
+                      >{activity.stargateName ||
+                        (activity.classification === "battle"
+                          ? "Battle Zone"
+                          : "Unknown Gate")}</span
+                    >
                   </div>
                   <div
                     class="flex justify-between py-0.5 border-b border-white/10"
@@ -601,8 +558,7 @@
                     <span class="text-gray-400">Comp:</span>
                     <span class="text-white">
                       {#if activity.metrics?.partyMetrics}
-                        {activity.metrics.partyMetrics.characters} pilots
-                        {#if activity.metrics.partyMetrics.corporations > 0}
+                        {activity.metrics.partyMetrics.characters} pilots {#if activity.metrics.partyMetrics.corporations > 0}
                           from {activity.metrics.partyMetrics.corporations} corps
                           {#if activity.metrics.partyMetrics.alliances > 0}
                             in {activity.metrics.partyMetrics.alliances} alliances{/if}{/if}
@@ -622,7 +578,6 @@
                     </div>{/if}
                 </div>
               </button>
-
               {#if activity.metrics?.shipCounts}
                 <div class="mt-1 bg-eve-secondary/80 rounded">
                   <div class="flex items-center h-10 px-3">
@@ -645,13 +600,11 @@
                           ? "▲"
                           : "▼"}</span
                       >
-                      {#if !expandedCompositionCards.has(activity.id)}
-                        <span
+                      {#if !expandedCompositionCards.has(activity.id)}<span
                           class="ml-1 px-1.5 py-0.5 bg-eve-accent/20 rounded-full text-xs"
                           >{Object.keys(getAccurateShipCounts(activity))
                             .length}</span
-                        >
-                      {/if}
+                        >{/if}
                     </button>
                   </div>
                   {#if expandedCompositionCards.has(activity.id)}
@@ -710,49 +663,41 @@
                 on:click={() => openActivityHistory(activity)}
                 on:contextmenu|preventDefault={(e) =>
                   handleContextMenu(e, activity)}
-                on:keypress={(e) => {
-                  if (e.key === "Enter" || e.key === " ") {
-                    openActivityHistory(activity);
-                  }
-                }}
                 role="button"
                 tabindex="0"
               >
                 <td class="px-4 py-2"
                   >{activity.stargateName || "Battle Zone"}</td
                 >
-                <td class="px-4 py-2">
-                  <span
+                <td class="px-4 py-2"
+                  ><span
                     class="text-lg"
                     title={classificationTooltips[activity.classification] ||
                       "Activity"}
-                  >
-                    {classificationIcons[activity.classification] || "?"}
-                  </span>
-                </td>
-                <td class="px-4 py-2">
-                  <span
+                    >{classificationIcons[activity.classification] || "?"}</span
+                  ></td
+                >
+                <td class="px-4 py-2"
+                  ><span
                     class="px-2 py-1 rounded text-black text-sm"
                     style="background-color: {getProbabilityColor(
                       activity.probability || 0
                     )}">{Math.round(activity.probability || 0)}%</span
-                  >
-                </td>
-                <td class="px-4 py-2">
-                  {(activity.kills || []).length} kills {#if activity.metrics?.podKills > 0}({activity
-                      .metrics.podKills} pods){/if}
-                </td>
-                <td class="px-4 py-2 text-eve-danger"
+                  ></td
+                >
+                <td class="px-4 py-2"
+                  >{(activity.kills || []).length} kills {#if activity.metrics?.podKills > 0}({activity
+                      .metrics.podKills} pods){/if}</td
+                >
+                <td class="px-4 py-2 text-eve-danger font-semibold"
                   >{formatValue(activity.totalValue)}</td
                 >
-                <td class="px-4 py-2">
-                  {#if activity.metrics?.partyMetrics}{activity.metrics
+                <td class="px-4 py-2"
+                  >{#if activity.metrics?.partyMetrics}{activity.metrics
                       .partyMetrics.characters} pilots {#if activity.metrics.partyMetrics.corporations > 0}({activity
-                        .metrics.partyMetrics.corporations} corps){/if}
-                  {:else if activity.composition}{activity.composition
-                      .activeCount || 0} pilots
-                  {:else}Computing...{/if}
-                </td>
+                        .metrics.partyMetrics.corporations} corps){/if}{:else if activity.composition}{activity
+                      .composition.activeCount || 0} pilots{:else}Computing...{/if}</td
+                >
                 <td class="px-4 py-2 text-eve-accent"
                   >{getTimeAgo(activity.lastKill)}</td
                 >
