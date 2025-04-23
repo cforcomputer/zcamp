@@ -2488,8 +2488,8 @@ app.get("/callback", async (req, res) => {
 
       console.log("Ensuring camp_crushers entry exists...");
       await pool.query(
-        `INSERT INTO camp_crushers (character_id, character_name, bashbucks)
-         SELECT $1, $2, 0
+        `INSERT INTO camp_crushers (character_id, character_name)
+         SELECT $1, $2 
          WHERE NOT EXISTS (
            SELECT 1 FROM camp_crushers WHERE character_id = $3
          )`,
