@@ -215,9 +215,9 @@
               {system.probability}%
             </span>
             <span class="text-white">{system.system_name}</span>
-            <span class="text-gray-400"
-              >({system.stargate_name || "Unknown Gate"})</span
-            >
+            {#if system.stargate_name}
+              <span class="text-gray-400"> - {system.stargate_name}</span>
+            {/if}
           </span>
           {#if isLoggedIn}
             <button

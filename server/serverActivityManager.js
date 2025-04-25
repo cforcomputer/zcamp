@@ -494,60 +494,75 @@ export class ServerActivityManager {
 
   /**
    * Calculates the probability of an activity being a gate camp.
-   * This function incorporates previous fixes: threat cap, NPC/AWOX filtering.
+   * Incorporates various factors: threat ships (capped), bonuses for specific scenarios
+   * (smartbombs, location, vulnerable victims, consistency, widely spaced kills),
+   * a separate small bonus for pod kills, and filters out irrelevant kills
+   * (NPCs, structures, AWOX, structure-only attackers).
+   * This version avoids the 'Cannot access killsForProbability before initialization' error.
    * @param {object} activity - The activity object.
    * @returns {number} Probability percentage (0-100).
    */
   calculateCampProbability(activity) {
     // --- START of calculateCampProbability ---
-    const log = []; // Reuse or clear log for each calculation
-    activity.probabilityLog = log; // Attach log to activity
+    const log = []; // Log for debugging probability steps
+    activity.probabilityLog = log; // Attach log to the activity object
     log.push(
       `--- Prob Calc for Activity: ${activity.id} (Current Class: ${activity.classification}) ---`
     );
 
-    const initialMaxProbability = activity.maxProbability || 0;
+    const initialMaxProbability = activity.maxProbability || 0; // Track highest probability reached
+    const CAPSULE_ID = 670; // Assuming this is the constant for pods
 
-    // Filter out kills that shouldn't contribute to camp probability
+    // --- Filter Kills for Probability Calculation ---
+    // Filter out kills irrelevant to player-driven gate camping activity.
+    // Pods are NOT filtered here, they are handled separately later.
     const killsForProbability = (activity.kills || []).filter((kill) => {
-      // Add default empty array
+      // Filter 1: AWOX Kills
       if (kill.zkb?.awox) {
         log.push(`Ignoring AWOX kill ${kill.killID} for probability scoring.`);
         return false;
       }
+
+      // Filter 2: NPC or Structure VICTIMS
       if (
         (kill.killmail.victim.corporation_id &&
-          !kill.killmail.victim.character_id) ||
-        kill.zkb?.labels?.includes("npc")
-      ) {
-        log.push(`Ignoring NPC victim kill ${kill.killID} for probability.`);
-        return false;
-      }
-      if (
-        kill.shipCategories?.victim === "structure" ||
+          !kill.killmail.victim.character_id) || // Corp asset victim
+        kill.zkb?.labels?.includes("npc") || // NPC victim label
+        kill.shipCategories?.victim === "structure" || // Structure category (victim)
         kill.shipCategories?.victim?.category === "structure"
       ) {
-        log.push(`Ignoring structure kill ${kill.killID} for probability.`);
+        log.push(
+          `Ignoring NPC/Structure victim kill ${kill.killID} for probability.`
+        );
         return false;
       }
+
+      // Filter 3: Mobile Tractor Unit (MTU) VICTIMS
       if (kill.killmail.victim.ship_type_id === 35834) {
-        // MTU
-        log.push(`Ignoring MTU kill ${kill.killID} for probability.`);
+        // MTU ID
+        log.push(`Ignoring MTU victim kill ${kill.killID} for probability.`);
         return false;
       }
-      if (kill.killmail.victim.ship_type_id === CAPSULE_ID) {
-        if (activity.kills.length > 1) {
-          log.push(
-            `Ignoring secondary pod kill ${kill.killID} for probability.`
-          );
-          return false;
-        } else {
-          log.push(`Including standalone pod kill ${kill.killID}.`);
-        }
+
+      // Filter 4: Structure-Only ATTACKERS
+      const attackers = kill.killmail.attackers || [];
+      const hasPlayerOrNpcAttacker = attackers.some(
+        (a) => a.character_id || a.faction_id // Check for player or NPC pilot
+      );
+      if (!hasPlayerOrNpcAttacker && attackers.length > 0) {
+        // If no player/NPC attacker found, assume structure-only kill
+        log.push(
+          `Ignoring kill ${kill.killID} - no player/NPC attackers detected (likely structure-only).`
+        );
+        return false; // Exclude this kill
       }
+
+      // If none of the above filters matched, keep the kill for now.
       return true;
     });
+    // --- End of Kill Filtering ---
 
+    // If no kills remain after basic filtering, probability is 0.
     if (killsForProbability.length === 0) {
       log.push(
         "Camp probability 0: No valid player kills remain after filtering."
@@ -556,118 +571,144 @@ export class ServerActivityManager {
       return 0;
     }
 
-    // Ensure remaining kills are at gates (only relevant if activity has stargateName)
+    // If activity is tied to a stargate, ensure remaining kills happened *at* that gate.
     const gateKills = activity.stargateName
       ? killsForProbability.filter((kill) => this.isGateCamp(kill))
       : [];
-
-    // If it's supposed to be a camp (has stargateName) but no kills happened at the gate, probability is 0
     if (activity.stargateName && gateKills.length === 0) {
       log.push("Camp probability 0: No valid kills at the specified stargate.");
       activity.maxProbability = Math.max(initialMaxProbability, 0);
       return 0;
     }
 
-    // Use gateKills if it's a stargate-focused activity, otherwise use all valid kills
-    // This allows probability calculation even if it's not strictly at a gate (e.g., for battle classification)
-    const relevantKills = activity.stargateName
+    // Use gateKills if applicable, otherwise use all filtered kills.
+    const relevantKillsUnsorted = activity.stargateName
       ? gateKills
       : killsForProbability;
-    if (relevantKills.length === 0) {
-      log.push("Camp probability 0: No relevant kills for calculation.");
+
+    // --- Separate Ship Kills from Pod Kills ---
+    // This happens *after* the main filter, avoiding the reference error.
+    const relevantShipKills = relevantKillsUnsorted
+      .filter((k) => k.killmail.victim.ship_type_id !== CAPSULE_ID)
+      .sort(
+        // Sort ship kills by time for sequence-based bonuses
+        (a, b) =>
+          new Date(a.killmail.killmail_time).getTime() -
+          new Date(b.killmail.killmail_time).getTime()
+      );
+    const relevantPodKills = relevantKillsUnsorted.filter(
+      (k) => k.killmail.victim.ship_type_id === CAPSULE_ID
+    );
+
+    log.push(
+      `Relevant Kills for Calc: ${relevantShipKills.length} ships, ${relevantPodKills.length} pods.`
+    );
+
+    // If there are no ship *or* pod kills left, probability is 0.
+    if (relevantShipKills.length === 0 && relevantPodKills.length === 0) {
+      log.push(
+        "Camp probability 0: No relevant ship or pod kills for calculation."
+      );
       activity.maxProbability = Math.max(initialMaxProbability, 0);
       return 0;
     }
 
+    // --- Start Probability Calculation Stages ---
     const now = Date.now();
-    const isSingleKill = relevantKills.length === 1;
-    let baseProbability = 0;
-    log.push(
-      `Starting probability calculation with ${relevantKills.length} relevant kills.`
-    );
-
-    // Use lastKill if available, otherwise fallback to lastActivity
     const lastEventTime = new Date(
-      activity.lastKill || activity.lastActivity
+      activity.lastKill || activity.lastActivity || activity.firstKillTime
     ).getTime();
     const minutesSinceLastKill = (now - lastEventTime) / (60 * 1000);
+    let baseProbability = 0; // Accumulates score
 
-    // --- STAGE 1: Burst Penalty ---
-    if (relevantKills.length > 1) {
-      const killTimes = relevantKills
-        .map((k) => new Date(k.killmail.killmail_time).getTime())
-        .sort();
-      const firstRelevantKillTime = killTimes[0];
-      // Use activity's overall firstKillTime for age calculation
-      const campAge =
-        (now - (activity.firstKillTime || firstRelevantKillTime)) / (60 * 1000);
-      log.push(
-        `Activity age (based on relevant kills): ${campAge.toFixed(1)} minutes`
+    // --- STAGE 1: Burst Penalty (Based on Ship Kills) ---
+    if (relevantShipKills.length > 1) {
+      const shipKillTimes = relevantShipKills.map((k) =>
+        new Date(k.killmail.killmail_time).getTime()
       );
+      const firstOverallKillTime = new Date(
+        activity.firstKillTime || Date.now()
+      ).getTime();
+      const campAge = (now - firstOverallKillTime) / (60 * 1000);
+      log.push(
+        `Activity age (based on first kill time): ${campAge.toFixed(1)} minutes`
+      );
+      const BURST_THRESHOLD_MS = 120 * 1000; // 2 minutes
+      const BURST_PENALTY_AGE_LIMIT_MIN = 15;
       if (
-        campAge <= 15 &&
-        killTimes.some((time, i) => i > 0 && time - killTimes[i - 1] < 120000)
+        campAge <= BURST_PENALTY_AGE_LIMIT_MIN &&
+        shipKillTimes.some(
+          (time, i) => i > 0 && time - shipKillTimes[i - 1] < BURST_THRESHOLD_MS
+        )
       ) {
         baseProbability -= 0.2;
-        log.push("Burst kill penalty applied: -20%");
+        log.push("Burst ship kill penalty applied (-20%) for young camp.");
       }
     }
 
-    // --- STAGE 2 & 3: Threat Ships (Capped) ---
+    // --- STAGE 2: Threat Ships Contribution (Based on Ship Kills, Capped) ---
     let threatShipScore = 0;
-    const threatShips = new Map();
-    relevantKills.forEach((kill) => {
-      (kill.killmail.attackers || []).forEach((attacker) => {
-        // Add default empty array
-        const shipType = attacker.ship_type_id;
-        const weight =
-          CAMP_PROBABILITY_FACTORS.THREAT_SHIPS[shipType]?.weight || 0;
-        if (weight > 0) {
-          threatShips.set(shipType, (threatShips.get(shipType) || 0) + 1);
-          threatShipScore += weight;
-        }
+    if (relevantShipKills.length > 0) {
+      const threatShips = new Map();
+      relevantShipKills.forEach((kill) => {
+        (kill.killmail.attackers || []).forEach((attacker) => {
+          const shipType = attacker.ship_type_id;
+          const weight =
+            CAMP_PROBABILITY_FACTORS.THREAT_SHIPS[shipType]?.weight || 0;
+          if (weight > 0) {
+            threatShips.set(shipType, (threatShips.get(shipType) || 0) + 1);
+            threatShipScore += weight;
+          }
+        });
       });
-    });
-
-    const cappedThreatShipScore = Math.min(0.5, threatShipScore); // Cap at 50%
-    if (threatShipScore > 0.5 && threatShipScore !== Infinity) {
-      // Avoid logging Infinity
-      log.push(
-        `Threat ship score capped at 50% (was ${(threatShipScore * 100).toFixed(
-          1
-        )}%)`
+      const THREAT_SCORE_CAP = 0.5;
+      const cappedThreatShipScoreContribution = Math.min(
+        THREAT_SCORE_CAP,
+        threatShipScore
       );
-    } else if (threatShipScore === Infinity) {
-      log.push(`Threat ship score was Infinity, capped at 50%`);
+      if (threatShipScore > THREAT_SCORE_CAP && threatShipScore !== Infinity) {
+        log.push(
+          `Threat ship score component capped at ${
+            THREAT_SCORE_CAP * 100
+          }% (was ${(threatShipScore * 100).toFixed(1)}%)`
+        );
+      } else if (threatShipScore === Infinity) {
+        log.push(
+          `Threat ship score component was Infinity, capped at ${
+            THREAT_SCORE_CAP * 100
+          }%`
+        );
+      }
+      baseProbability += cappedThreatShipScoreContribution;
+      log.push(
+        `Threat ship contribution added: +${(
+          cappedThreatShipScoreContribution * 100
+        ).toFixed(1)}%`
+      );
+    } else {
+      log.push("No relevant ship kills for threat score calculation.");
     }
-    baseProbability += cappedThreatShipScore;
-    log.push(
-      `Threat ship contribution: +${(cappedThreatShipScore * 100).toFixed(1)}%`
-    );
 
-    // --- STAGE 4: Additional Factors ---
-    // Smartbomb Type Bonus (check original activity type)
+    // --- STAGE 3: Other Factor Bonuses ---
+    // Smartbomb Bonus: Check activity type and attackers across *all* kills
     if (activity.type === "smartbomb") {
       let smartbombBonus = 0.16;
-      log.push("Smartbomb activity detected: +16%");
-      const hasSmartbombShip = (activity.kills || []).some(
-        (
-          kill // Add default empty array
-        ) =>
-          (kill.killmail.attackers || []).some(
-            (attacker) =>
-              CAMP_PROBABILITY_FACTORS.SMARTBOMB_SHIPS[attacker.ship_type_id]
-          ) // Add default empty array
+      const hasSmartbombShip = (activity.kills || []).some((kill) =>
+        (kill.killmail.attackers || []).some(
+          (attacker) =>
+            CAMP_PROBABILITY_FACTORS.SMARTBOMB_SHIPS[attacker.ship_type_id]
+        )
       );
       if (hasSmartbombShip) {
-        const extraBonus = isSingleKill ? 0.15 : 0.3;
+        const extraBonus = relevantShipKills.length <= 1 ? 0.15 : 0.3; // Bonus higher if multiple ship kills
         smartbombBonus += extraBonus;
-        log.push(`Dedicated smartbomb ship bonus: +${extraBonus * 100}%`);
+        log.push(` > Dedicated smartbomb ship bonus: +${extraBonus * 100}%`);
       }
       baseProbability += smartbombBonus;
+      log.push(`Smartbomb bonus added: +${(smartbombBonus * 100).toFixed(1)}%`);
     }
 
-    // Known Camping Location Bonus (only if it's a stargate camp)
+    // Known Camping Location Bonus
     if (activity.stargateName) {
       const systemData =
         CAMP_PROBABILITY_FACTORS.PERMANENT_CAMPS[activity.systemId];
@@ -679,46 +720,47 @@ export class ServerActivityManager {
       ) {
         baseProbability += systemData.weight;
         log.push(
-          `Known camping location bonus: +${(systemData.weight * 100).toFixed(
-            1
-          )}%`
+          `Known camping location bonus added: +${(
+            systemData.weight * 100
+          ).toFixed(1)}%`
         );
       }
     }
 
-    // Vulnerable victim bonus
-    const vulnerableKills = relevantKills.filter(
+    // Vulnerable Victim Bonus (Based on Ship Kills only)
+    const vulnerableShipKills = relevantShipKills.filter(
       (kill) =>
         kill.shipCategories?.victim?.category ===
           CAMP_PROBABILITY_FACTORS.SHIP_CATEGORIES.INDUSTRIAL ||
         kill.shipCategories?.victim?.category ===
           CAMP_PROBABILITY_FACTORS.SHIP_CATEGORIES.MINING
     );
-    if (vulnerableKills.length > 0) {
-      const vulnerableBonus = isSingleKill ? 0.2 : 0.4;
+    if (vulnerableShipKills.length > 0) {
+      const vulnerableBonus = vulnerableShipKills.length === 1 ? 0.2 : 0.4; // Higher bonus for multiple vulnerable ships
       baseProbability += vulnerableBonus;
       log.push(
-        `Vulnerable victim bonus (${
-          vulnerableKills.length
-        } industrial/mining ships): +${vulnerableBonus * 100}%`
+        `Vulnerable ship victim bonus added: +${vulnerableBonus * 100}%`
       );
     }
 
-    // --- STAGE 5: Consistency Bonus ---
+    // --- STAGE 4: Consistency Bonus (Attacker Overlap on Ship Kills) ---
     let consistencyBonus = 0;
-    if (relevantKills.length >= 2) {
-      const CONSISTENCY_BONUS = 0.15;
-      const consistencyCheckKills = relevantKills.slice(-3); // Check last 3 relevant kills
+    const MIN_CONSISTENCY_SHIP_KILLS = 2;
+    if (relevantShipKills.length >= MIN_CONSISTENCY_SHIP_KILLS) {
+      const CONSISTENCY_BONUS_PER_MATCH = 0.15;
+      const MAX_CONSISTENCY_BONUS = 0.3;
+      const consistencyCheckKills = relevantShipKills.slice(-3); // Check last 3 ship kills
 
-      if (consistencyCheckKills.length >= 2) {
-        const killTimes = consistencyCheckKills
-          .map((k) => new Date(k.killmail.killmail_time).getTime())
-          .sort();
+      if (consistencyCheckKills.length >= MIN_CONSISTENCY_SHIP_KILLS) {
+        const killTimes = consistencyCheckKills.map((k) =>
+          new Date(k.killmail.killmail_time).getTime()
+        );
         const isBurst = killTimes.some(
           (time, i) => i > 0 && time - killTimes[i - 1] < 120000
         );
         let skipConsistencyBonus = false;
         if (isBurst) {
+          // Don't reward consistency if it was just a burst against the same entity
           const victimCorps = consistencyCheckKills
             .map((k) => k.killmail.victim.corporation_id)
             .filter(Boolean);
@@ -735,11 +777,10 @@ export class ServerActivityManager {
           ) {
             skipConsistencyBonus = true;
             log.push(
-              "Burst kills from same corp/alliance: skipping consistency bonus"
+              " > Burst ship kills from same victim corp/alliance: skipping attacker consistency bonus"
             );
           }
         }
-
         if (!skipConsistencyBonus) {
           const latestAttackers = new Set(
             (
@@ -748,86 +789,178 @@ export class ServerActivityManager {
             )
               .map((a) => a.character_id)
               .filter((id) => id)
-          ); // Add default empty array
+          );
           for (let i = consistencyCheckKills.length - 2; i >= 0; i--) {
             const previousAttackers = new Set(
               (consistencyCheckKills[i].killmail.attackers || [])
                 .map((a) => a.character_id)
                 .filter((id) => id)
-            ); // Add default empty array
+            );
             const intersection = new Set(
               [...latestAttackers].filter((x) => previousAttackers.has(x))
             );
-            if (intersection.size >= 2) {
-              consistencyBonus += CONSISTENCY_BONUS;
+            const minOverlap = Math.max(
+              2,
+              Math.floor(previousAttackers.size / 3)
+            );
+            if (intersection.size >= minOverlap && intersection.size >= 2) {
+              consistencyBonus += CONSISTENCY_BONUS_PER_MATCH;
               log.push(
-                `Attacker consistency bonus with kill ${i + 1}: +${(
-                  CONSISTENCY_BONUS * 100
-                ).toFixed(1)}% (${intersection.size} same)`
+                ` > Attacker consistency bonus match (ships): +${(
+                  CONSISTENCY_BONUS_PER_MATCH * 100
+                ).toFixed(1)}%`
               );
             }
           }
           if (consistencyBonus > 0) {
+            if (consistencyBonus > MAX_CONSISTENCY_BONUS) {
+              log.push(
+                ` > Capping consistency bonus at ${
+                  MAX_CONSISTENCY_BONUS * 100
+                }%`
+              );
+              consistencyBonus = MAX_CONSISTENCY_BONUS;
+            }
+            baseProbability += consistencyBonus;
             log.push(
-              `Total attacker consistency bonus: +${(
+              `Total attacker consistency bonus added: +${(
                 consistencyBonus * 100
               ).toFixed(1)}%`
             );
           }
         }
-      } else {
-        log.push("No consistency bonus: Need at least 2 relevant kills.");
       }
+    } else {
+      log.push("Not enough ship kills for attacker consistency check.");
     }
-    baseProbability += consistencyBonus;
 
-    // --- STAGE 6 & 7: Capping & Decay ---
-    const rawProbability = Math.min(0.95, baseProbability); // Cap before decay
-    log.push(
-      `Raw probability (capped at 95%): ${(rawProbability * 100).toFixed(1)}%`
-    );
+    // --- STAGE 5: Widely Spaced Kill Bonus (Based on Ship Kills) ---
+    let widelySpacedBonus = 0;
+    const MIN_SPACED_SHIP_KILLS = 2;
+    if (relevantShipKills.length >= MIN_SPACED_SHIP_KILLS) {
+      const WIDELY_SPACED_THRESHOLD_MS = 5 * 60 * 1000; // 5 minutes
+      const WIDELY_SPACED_BONUS_PER_KILL = 0.15;
+      const MAX_WIDELY_SPACED_BONUS = 0.45;
+      const shipKillTimes = relevantShipKills.map((k) =>
+        new Date(k.killmail.killmail_time).getTime()
+      );
+      let widelySpacedCount = 0;
+      for (let i = 1; i < shipKillTimes.length; i++) {
+        const timeDiff = shipKillTimes[i] - shipKillTimes[i - 1];
+        if (timeDiff > WIDELY_SPACED_THRESHOLD_MS) {
+          widelySpacedBonus += WIDELY_SPACED_BONUS_PER_KILL;
+          widelySpacedCount++;
+          log.push(
+            ` > Widely spaced ship kill bonus match: +${(
+              WIDELY_SPACED_BONUS_PER_KILL * 100
+            ).toFixed(0)}% (Gap: ${(timeDiff / 60000).toFixed(1)} min)`
+          );
+        }
+      }
+      if (widelySpacedCount > 0) {
+        if (widelySpacedBonus > MAX_WIDELY_SPACED_BONUS) {
+          log.push(
+            ` > Capping widely spaced bonus at ${
+              MAX_WIDELY_SPACED_BONUS * 100
+            }%`
+          );
+          widelySpacedBonus = MAX_WIDELY_SPACED_BONUS;
+        }
+        baseProbability += widelySpacedBonus;
+        log.push(
+          `Total widely spaced ship kill bonus added: +${(
+            widelySpacedBonus * 100
+          ).toFixed(1)}%`
+        );
+      }
+    } else {
+      log.push("Not enough ship kills for widely spaced bonus check.");
+    }
 
-    let finalProbability = rawProbability;
-    let timeDecayPercent = 0;
-    const decayStartMinutes = DECAY_START / (60 * 1000);
+    // --- STAGE 5b: Pod Kill Bonus ---
+    // Add a small, capped bonus for each relevant pod kill found earlier.
+    let podKillBonus = 0;
+    if (relevantPodKills.length > 0) {
+      const POD_BONUS_PER_KILL = 0.03; // 3% per pod
+      const MAX_POD_BONUS = 0.15; // Cap total pod bonus (e.g., max 5 pods = 15%)
+      podKillBonus = relevantPodKills.length * POD_BONUS_PER_KILL;
+      if (podKillBonus > MAX_POD_BONUS) {
+        log.push(
+          ` > Capping pod kill bonus at ${MAX_POD_BONUS * 100}% (was ${
+            podKillBonus * 100
+          }%)`
+        );
+        podKillBonus = MAX_POD_BONUS;
+      }
+      baseProbability += podKillBonus;
+      log.push(
+        `Pod kill bonus added: +${(podKillBonus * 100).toFixed(1)}% (${
+          relevantPodKills.length
+        } pods)`
+      );
+    }
 
+    // --- STAGE 6: Pre-Decay Capping & Flooring ---
+    const OVERALL_CAP_BEFORE_DECAY = 0.95;
+    let probabilityBeforeDecay = baseProbability;
+    if (probabilityBeforeDecay > OVERALL_CAP_BEFORE_DECAY) {
+      log.push(
+        `Probability sum capped at ${OVERALL_CAP_BEFORE_DECAY * 100}% (was ${(
+          probabilityBeforeDecay * 100
+        ).toFixed(1)}%) before decay`
+      );
+      probabilityBeforeDecay = OVERALL_CAP_BEFORE_DECAY;
+    } else if (probabilityBeforeDecay < 0) {
+      log.push(
+        `Probability sum floored at 0% (was ${(
+          probabilityBeforeDecay * 100
+        ).toFixed(1)}%) before decay`
+      );
+      probabilityBeforeDecay = 0;
+    } else {
+      log.push(
+        `Total probability before decay: ${(
+          probabilityBeforeDecay * 100
+        ).toFixed(1)}%`
+      );
+    }
+
+    // --- STAGE 7: Decay ---
+    let finalProbability = probabilityBeforeDecay;
+    // DECAY_START should be defined in constants.js (e.g., 5 * 60 * 1000 for 5 minutes)
+    const decayStartMinutes = (DECAY_START || 5 * 60 * 1000) / (60 * 1000);
     if (minutesSinceLastKill > decayStartMinutes) {
       const decayMinutes = minutesSinceLastKill - decayStartMinutes;
-      timeDecayPercent = Math.min(1.0, decayMinutes * 0.1); // Decay rate
-      finalProbability = rawProbability * (1 - timeDecayPercent);
-      log.push(`Applying decay for ${decayMinutes.toFixed(1)} minutes`);
+      const decayRatePerMinute = 0.1; // 10% decay per minute past threshold
+      const timeDecayPercent = Math.min(1.0, decayMinutes * decayRatePerMinute); // Cap decay at 100%
+      finalProbability = probabilityBeforeDecay * (1 - timeDecayPercent);
       log.push(
-        `Time decay adjustment: -${(timeDecayPercent * 100).toFixed(1)}% (${(
-          rawProbability * 100
-        ).toFixed(1)}% -> ${(finalProbability * 100).toFixed(1)}%)`
+        `Applying decay for ${decayMinutes.toFixed(
+          1
+        )} minutes past threshold (${decayStartMinutes}m)`
       );
-
-      // Hard timeout check (using CAMP_TIMEOUT for camp-like activities)
-      if (decayMinutes > CAMP_TIMEOUT / (60 * 1000)) {
-        log.push(
-          `Camp probability 0: Exceeded timeout (${
-            CAMP_TIMEOUT / (60 * 1000)
-          } mins)`
-        );
-        activity.maxProbability = Math.max(
-          initialMaxProbability,
-          Math.round(finalProbability * 100)
-        );
-        return 0; // Explicitly return 0 if timed out
-      }
+      log.push(
+        `Time decay adjustment: -${(timeDecayPercent * 100).toFixed(1)}% -> ${(
+          finalProbability * 100
+        ).toFixed(1)}%`
+      );
     }
 
-    // Final normalization and minimum threshold
-    finalProbability = Math.max(0, Math.min(0.95, finalProbability)); // Ensure probability is between 0 and 0.95
+    // --- STAGE 8: Final Normalization & Minimum Threshold ---
+    finalProbability = Math.max(
+      0,
+      Math.min(OVERALL_CAP_BEFORE_DECAY, finalProbability)
+    );
     const percentProbability = Math.round(finalProbability * 100);
-
-    // Apply minimum threshold *after* rounding
-    if (percentProbability < 5) {
-      log.push(`Camp probability 0: Below minimum threshold (5%)`);
+    const MINIMUM_THRESHOLD = 5; // Minimum 5% to be considered active
+    if (percentProbability < MINIMUM_THRESHOLD) {
+      log.push(
+        `Final probability 0: Below minimum threshold (${MINIMUM_THRESHOLD}%)`
+      );
       activity.maxProbability = Math.max(
         initialMaxProbability,
         percentProbability
-      ); // Store the value before setting to 0
+      );
       return 0;
     }
 

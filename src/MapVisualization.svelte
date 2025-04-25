@@ -113,6 +113,32 @@
     return lines;
   }
 
+  // Function to create the MESH part of the kill point
+  function createKillpointMeshVisual(position) {
+    // Use a slightly smaller radius than the sprite might visually represent
+    // Or adjust SIZES.KILL if needed. Let's use half for distinction.
+    const meshRadius = SIZES.KILL.radius * 0.5;
+    const geometry = new THREE.SphereGeometry(meshRadius, 16, 8); // Simple sphere
+
+    // Use a material that can glow and react slightly to light
+    const material = new THREE.MeshPhongMaterial({
+      color: 0xff3333, // A slightly less intense red base color
+      emissive: 0xff0000, // Bright red emissive glow
+      emissiveIntensity: 1.0, // Full intensity glow
+      shininess: 30, // A little bit of shine
+      depthWrite: true, // Standard depth writing for solid object
+      transparent: false,
+    });
+
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.position.copy(position);
+
+    // This mesh doesn't need billboarding (it's a sphere)
+    // It will have a fixed world size (defined by meshRadius) unless scaled manually
+
+    return mesh;
+  }
+
   function createKillpointSprite(position) {
     const canvas = document.createElement("canvas");
     canvas.width = 32;
@@ -419,9 +445,13 @@
       }
 
       scene.traverse((object) => {
-        if (object.isSprite) {
-          updateSpriteScale(object);
+        // Scale sprites using objectsWithLabels map
+        if (object.isSprite && objectsWithLabels.has(object)) {
+          updateSpriteScale(object); // Make sure this function works correctly
         }
+        // NOTE: The killMeshVisual (Sphere) is NOT scaled here. It keeps its fixed world size.
+        // If you *wanted* the mesh to scale, you'd add it to objectsWithLabels
+        // and adapt the scaling function (like updateObjectScale discussed before).
       });
     }
 
@@ -1013,6 +1043,12 @@
       type: "killmail",
       position: killSprite.position.clone(),
     });
+
+    // 2. Create the Mesh visual (using the new function)
+    // This is purely visual enhancement
+    const killMeshVisual = createKillpointMeshVisual(killPosition);
+    scene.add(killMeshVisual);
+    // DO NOT add killMeshVisual to objectsWithLabels if sprite handles interaction
 
     // Add celestials
     celestialData.forEach((celestial) => {

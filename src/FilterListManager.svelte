@@ -13,7 +13,6 @@
   let newListFilterType = ""; // Default to empty string
 
   // Local reactive variable bound to the store
-  // Any change to the $filterLists store will update this variable
   $: localFilterLists = $filterLists;
 
   // Function to handle the creation of a new filter list
@@ -32,69 +31,78 @@
       return;
     }
 
-    // Process the IDs string into an array, trimming whitespace and removing empty entries
     const ids = newListIds
       .split(",")
       .map((id) => id.trim())
       .filter((id) => id); // Filter out empty strings
 
-    // Prepare the data object for the new list
     const newListData = {
       name: newListName,
-      ids, // Use the processed array
-      enabled: true, // Default new lists to enabled
+      ids,
+      enabled: true, // Default new lists to enabled on client-side too
       is_exclude: newListIsExclude,
       filter_type: newListFilterType,
     };
 
-    // Emit the 'createFilterList' event to the server via socket
     console.log(
       "[FilterListManager] Emitting createFilterList event with data:",
       newListData
     );
     socket.emit("createFilterList", newListData);
 
-    // --- Optimistic Update ---
-    // Create a temporary ID (e.g., using timestamp or a simple counter)
-    // This ID will be replaced when/if the server confirms with the real ID.
-    const tempId = `temp-${Date.now()}`;
-    const optimisticList = {
-      ...newListData,
-      id: tempId,
-      user_id: "optimistic", // Placeholder user_id
-    };
-    console.log(
-      "[FilterListManager] Applying optimistic update with temp ID:",
-      tempId
-    );
-    filterLists.update((currentLists) => [...currentLists, optimisticList]);
-    // --- End Optimistic Update ---
+    // --- Remove Optimistic Update for creation ---
+    // Rely on server confirmation via 'filterListCreated' to add the list
+    // filterLists.update((currentLists) => [...currentLists, optimisticList]);
 
     // Clear the form fields after submission
     newListName = "";
     newListIds = "";
     newListIsExclude = false;
-    newListFilterType = ""; // Reset filter type dropdown
+    newListFilterType = "";
   }
 
   // Function to toggle the enabled state of a filter list
   function toggleFilterList(id) {
-    // Prevent toggling for temporary items (optional, but can prevent errors if server confirmation is slow)
-    // if (id.startsWith('temp-')) return;
+    console.log(`[FilterListManager] Toggling filter list ID: ${id}`);
 
+    let newEnabledState; // Variable to store the new state
+
+    // 1. Update the local Svelte store IMMEDIATELY for UI responsiveness
     filterLists.update((lists) =>
-      lists.map((list) =>
-        // Find the list by ID and toggle its 'enabled' property
-        list.id === id ? { ...list, enabled: !list.enabled } : list
-      )
+      lists.map((list) => {
+        if (list.id === id) {
+          newEnabledState = !list.enabled; // Capture the new state
+          console.log(
+            `[FilterListManager] Updating local store for ID ${id}. New enabled state: ${newEnabledState}`
+          );
+          return { ...list, enabled: newEnabledState };
+        }
+        return list;
+      })
     );
-    // Dispatch an event to notify parent components (like SettingsManager) of the change
-    // This isn't strictly necessary if reactivity is handled correctly, but can be useful
-    dispatch("updateFilterLists", { filterLists: $filterLists });
+
+    // 2. Emit the state change to the server to PERSIST it in the session
+    if (typeof newEnabledState === "boolean") {
+      console.log(
+        `[FilterListManager] Emitting 'updateFilterState' to server for ID ${id}, enabled: ${newEnabledState}`
+      );
+      socket.emit("updateFilterState", { id, enabled: newEnabledState });
+    } else {
+      console.warn(
+        `[FilterListManager] Could not determine new enabled state for ID ${id} after toggle. Not emitting update.`
+      );
+    }
+
+    // Optional: Dispatch event if other components need direct notification
+    // dispatch("updateFilterLists", { filterLists: $filterLists });
   }
 
-  // Function to delete a filter list - REMOVED CONFIRMATION
+  // Function to delete a filter list
   async function deleteFilterList(id) {
+    if (!confirm(`Are you sure you want to delete this filter list?`)) {
+      // Add confirmation back if desired
+      return;
+    }
     console.log(
       "[FilterListManager] Emitting deleteFilterList event for ID:",
       id
@@ -102,82 +110,77 @@
     // Emit the 'deleteFilterList' event to the server immediately
     socket.emit("deleteFilterList", { id });
 
-    // --- Optimistic Update for Deletion ---
+    // --- Optimistic Update for Deletion (Keep this, it's usually safe) ---
     console.log("[FilterListManager] Applying optimistic delete for ID:", id);
     filterLists.update((lists) => lists.filter((list) => list.id !== id));
     // --- End Optimistic Update ---
   }
 
   // --- Socket Event Handlers ---
-  // Handler for when filter lists are fetched (e.g., on initial load)
   const handleFilterListsFetched = (fetchedLists) => {
-    console.log("[FilterListManager] Received filter lists:", fetchedLists);
-    // Update the Svelte store with the fetched lists
-    filterLists.set(fetchedLists);
+    console.log(
+      "[FilterListManager] Received 'filterListsFetched':",
+      fetchedLists
+    );
+    filterLists.set(fetchedLists); // Overwrite local store with server state
   };
 
-  // Handler for when a filter list is deleted (event from server)
-  // This confirms the deletion, but the UI might already be updated optimistically
   const handleFilterListDeleted = ({ id }) => {
     console.log(
-      "[FilterListManager] Received confirmation for filterListDeleted event for ID:",
+      "[FilterListManager] Received 'filterListDeleted' confirmation for ID:",
       id
     );
-    // Ensure the item is removed if the optimistic update somehow failed or was reverted
+    // Ensure it's removed (mostly for safety, optimistic update usually handles it)
     filterLists.update((lists) => lists.filter((list) => list.id !== id));
-    // Dispatch update event (optional, depends on component structure)
-    dispatch("updateFilterLists", { filterLists: $filterLists });
+    // dispatch("updateFilterLists", { filterLists: $filterLists }); // Optional dispatch
   };
 
-  // Handler for when a filter list is created (event from server)
-  // This replaces the optimistic update with the actual data from the server
-  const handleFilterListCreated = (filterList) => {
+  const handleFilterListCreated = (newServerList) => {
     console.log(
-      "[FilterListManager] Received filterListCreated event (server confirmation):",
-      filterList
+      "[FilterListManager] Received 'filterListCreated' (server confirmation):",
+      newServerList
     );
+    // Add the confirmed list from the server, replacing any potential temp/optimistic one
     filterLists.update((currentLists) => {
-      // Remove the temporary optimistic entry if it exists by finding *any* temp entry
-      // (We don't know the exact temp ID here, but there should only be one recent one)
+      // Remove any potential temp items (safer than relying on specific temp ID)
       const listsWithoutTemp = currentLists.filter(
-        (l) => !l.id.startsWith("temp-")
+        (l) => !l.id || !l.id.startsWith("temp-")
       );
-      // Check if the real list already exists (e.g., from fetch or another client)
-      const existingIndex = listsWithoutTemp.findIndex(
-        (l) => l.id === filterList.id
-      );
-      if (existingIndex !== -1) {
-        // Update if already exists (less common for 'created')
-        const updatedLists = [...listsWithoutTemp];
-        updatedLists[existingIndex] = filterList;
-        console.log(
-          "[FilterListManager] Updated existing filter list in store (server confirmation):",
-          filterList.id
-        );
-        return updatedLists;
-      } else {
-        // Add the confirmed list from the server
-        console.log(
-          "[FilterListManager] Added confirmed filter list to store:",
-          filterList.id
-        );
-        return [...listsWithoutTemp, filterList];
+      // Check if this ID already exists (e.g., from fetch race condition)
+      if (listsWithoutTemp.some((l) => l.id === newServerList.id)) {
+        return listsWithoutTemp.map((l) =>
+          l.id === newServerList.id ? newServerList : l
+        ); // Update if exists
       }
+      return [...listsWithoutTemp, newServerList]; // Add if new
     });
-    // Force reactivity check after store update
-    localFilterLists = $filterLists;
+    localFilterLists = $filterLists; // Trigger reactivity update
+  };
+
+  // --- NEW: Handler for state changes from other clients/tabs ---
+  const handleFilterStateChanged = ({ id, enabled }) => {
+    console.log(
+      `[FilterListManager] Received 'filterStateChanged' for ID: ${id}, Enabled: ${enabled}`
+    );
+    filterLists.update((lists) =>
+      lists.map((list) =>
+        list.id === id ? { ...list, enabled: enabled } : list
+      )
+    );
+    localFilterLists = $filterLists; // Trigger reactivity update
   };
 
   // Component lifecycle: setup and teardown socket listeners
   onMount(() => {
     console.log("[FilterListManager] Component mounted, setting up listeners.");
     // Request initial filter lists when the component mounts
-    socket.emit("fetchFilterLists");
+    socket.emit("fetchFilterLists"); // Still useful for initial load
 
     // Register socket event listeners
     socket.on("filterListsFetched", handleFilterListsFetched);
     socket.on("filterListDeleted", handleFilterListDeleted);
-    socket.on("filterListCreated", handleFilterListCreated); // Listener for real-time updates
+    socket.on("filterListCreated", handleFilterListCreated);
+    socket.on("filterStateChanged", handleFilterStateChanged); // Add new listener
 
     // Cleanup function: remove listeners when the component is destroyed
     return () => {
@@ -187,6 +190,7 @@
       socket.off("filterListsFetched", handleFilterListsFetched);
       socket.off("filterListDeleted", handleFilterListDeleted);
       socket.off("filterListCreated", handleFilterListCreated);
+      socket.off("filterStateChanged", handleFilterStateChanged); // Remove new listener
     };
   });
 </script>
@@ -267,7 +271,7 @@
                 id={`filter-list-${list.id}`}
                 checked={list.enabled}
                 on:change={() => toggleFilterList(list.id)}
-                class="form-checkbox bg-eve-secondary text-eve-accent rounded border-eve-accent/20 focus:ring-eve-accent focus:ring-2"
+                class="form-checkbox bg-eve-secondary text-eve-accent rounded border-eve-accent/20 focus:ring-eve-accent focus:ring-2 cursor-pointer"
               />
               <label
                 for={`filter-list-${list.id}`}

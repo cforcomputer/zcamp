@@ -1909,12 +1909,10 @@ app.post("/api/register", async (req, res) => {
 });
 
 app.post("/api/filter-list", async (req, res) => {
-  // ADDED: Log entry into the route handler *before* any checks
   console.log(
     `[API /api/filter-list POST] Request received for path: ${req.path}`
   );
 
-  // Check for user authentication in the session
   if (!req.session?.user?.id) {
     console.log("[API /api/filter-list POST] User not authenticated");
     return res
@@ -1922,69 +1920,53 @@ app.post("/api/filter-list", async (req, res) => {
       .json({ success: false, message: "Not authenticated" });
   }
 
-  // ADDED: Log user ID after authentication check
   const userId = req.session.user.id;
   console.log(`[API /api/filter-list POST] Authenticated User ID: ${userId}`);
 
   try {
-    // Destructure request body
-    const { name, ids, enabled, isExclude, filterType } = req.body;
+    const { name, ids, enabled = true, isExclude, filterType } = req.body; // Default enabled to true
 
-    // Log processing details
     console.log(
       "[API /api/filter-list POST] Processing filter list creation:",
-      {
-        // <-- Original log location
-        userId,
-        name,
-        idsLength: ids?.length,
-        enabled,
-        isExclude,
-        filterType,
-      }
+      { userId, name, idsLength: ids?.length, enabled, isExclude, filterType }
     );
 
-    // Process IDs: Ensure it's an array of strings, trim whitespace.
     let processedIds;
     if (Array.isArray(ids)) {
-      processedIds = ids.map((id) => String(id).trim()); // Ensure strings and trim
+      processedIds = ids.map((id) => String(id).trim());
     } else if (typeof ids === "string") {
       processedIds = ids
         .split(",")
         .map((id) => id.trim())
-        .filter((id) => id); // Split, trim, remove empty strings
+        .filter((id) => id);
     } else {
       console.warn(
         "[API /api/filter-list POST] Invalid 'ids' format received:",
         ids
       );
-      processedIds = []; // Default to empty array if format is unexpected
+      processedIds = [];
     }
-
     console.log("[API /api/filter-list POST] Processed IDs:", processedIds);
 
-    // Insert the new filter list into the database
+    // --- Database Insert ---
     console.log("[API /api/filter-list POST] Attempting database insert...");
     const result = await pool.query(
       `INSERT INTO filter_lists (user_id, name, ids, enabled, is_exclude, filter_type)
        VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
       [
-        userId, // User ID from session
-        name, // Name of the filter list
-        JSON.stringify(processedIds), // Store processed IDs as a JSON string
-        enabled ? 1 : 0, // Convert boolean to integer (1 for true, 0 for false)
-        isExclude ? 1 : 0, // Convert boolean to integer
-        filterType || null, // Use provided filter type or null if none
+        userId,
+        name,
+        JSON.stringify(processedIds),
+        enabled ? 1 : 0, // Store initial enabled state in DB too
+        isExclude ? 1 : 0,
+        filterType || null,
       ]
     );
-
-    // Log database insertion result
     console.log(
       "[API /api/filter-list POST] Database insert result:",
       result.rows
     );
 
-    // Check if insertion was successful
     if (!result.rows || result.rows.length === 0) {
       console.error(
         "[API /api/filter-list POST] Failed to insert filter list into database."
@@ -1994,53 +1976,73 @@ app.post("/api/filter-list", async (req, res) => {
         message: "Database error: Failed to create filter list.",
       });
     }
+    const newListId = result.rows[0].id.toString(); // Get the new ID as string
     console.log(
       "[API /api/filter-list POST] Database insert successful. New ID:",
-      result.rows[0].id
+      newListId
     );
 
-    // Prepare the new filter list object for response and socket emission
-    // Ensure IDs are numbers where appropriate
+    // --- Update Session State ---
+    req.session.currentFilterStates = req.session.currentFilterStates || {};
+    req.session.currentFilterStates[newListId] = Boolean(enabled); // Store initial state in session
+
+    // Save session asynchronously (fire and forget is okay here, or await if critical)
+    req.session.save((err) => {
+      if (err) {
+        console.error(
+          "[API /api/filter-list POST] Error saving session after creating filter list:",
+          err
+        );
+        // Continue anyway, but log the error
+      } else {
+        console.log(
+          "[API /api/filter-list POST] Session saved with new filter state for ID:",
+          newListId
+        );
+      }
+    });
+
+    // --- Prepare Response/Emit ---
     const newFilterList = {
-      id: result.rows[0].id.toString(), // Convert BigInt ID to string
-      user_id: userId.toString(), // User ID as string
-      name, // Name as provided
-      ids: processedIds, // Use the processed array of IDs
-      enabled: Boolean(enabled), // Ensure boolean value
-      is_exclude: Boolean(isExclude), // Ensure boolean value
-      filter_type: filterType || null, // Use provided type or null
+      id: newListId,
+      user_id: userId.toString(),
+      name,
+      ids: processedIds,
+      enabled: Boolean(enabled), // Use the actual initial state
+      is_exclude: Boolean(isExclude),
+      filter_type: filterType || null,
     };
 
-    // Log the filter list object being emitted
     console.log(
       "[API /api/filter-list POST] Emitting 'filterListCreated' to user room:",
       userId.toString(),
       newFilterList
     );
 
-    // Emit the 'filterListCreated' event to the specific user's room via socket.io
-    // This notifies the client-side application in real-time
-    // Ensure 'io' is correctly defined and accessible here
     if (io && typeof io.to === "function") {
+      // Ensure user is in their room (might need to be added on login/connection)
+      const userSocket = Array.from(io.sockets.sockets.values()).find(
+        (s) => s.request.session?.user?.id === userId
+      );
+      if (userSocket) {
+        userSocket.join(userId.toString()); // Ensure they are in the room
+      }
       io.to(userId.toString()).emit("filterListCreated", newFilterList);
       console.log(
         "[API /api/filter-list POST] 'filterListCreated' event emitted successfully."
       );
     } else {
       console.error(
-        "[API /api/filter-list POST] 'io' object is not available or 'to' is not a function. Cannot emit socket event."
+        "[API /api/filter-list POST] 'io' object is not available or 'to' is not a function."
       );
     }
 
-    // Send a success response back to the client
-    res.status(201).json({ success: true, filterList: newFilterList }); // Use 201 Created status
+    res.status(201).json({ success: true, filterList: newFilterList });
   } catch (error) {
-    // Log any errors that occur during the process
     console.error(
       "[API /api/filter-list POST] Error creating filter list:",
       error
     );
-    // Send a generic server error response
     res.status(500).json({
       success: false,
       message: "Server error while creating filter list.",
@@ -2048,52 +2050,116 @@ app.post("/api/filter-list", async (req, res) => {
   }
 });
 
+// This route is less critical if using sockets for updates, but good to keep consistent
 app.put("/api/filter-list/:id", async (req, res) => {
-  const { name, ids, enabled, isExclude, filterType } = req.body;
-  const id = req.params.id;
+  console.log(`[API PUT /api/filter-list/${req.params.id}] Request received.`);
+  const listId = req.params.id;
+
+  if (!req.session?.user?.id) {
+    console.log(`[API PUT /api/filter-list/${listId}] User not authenticated.`);
+    return res
+      .status(401)
+      .json({ success: false, message: "Not authenticated" });
+  }
+
+  const userId = req.session.user.id;
+  console.log(
+    `[API PUT /api/filter-list/${listId}] Authenticated User ID: ${userId}`
+  );
 
   try {
-    const { rows } = await pool.query(
-      "SELECT user_id FROM filter_lists WHERE id = $1",
-      [id]
+    const { name, ids, enabled, isExclude, filterType } = req.body;
+
+    // 1. Verify ownership
+    const { rows: verifyRows } = await pool.query(
+      "SELECT user_id FROM filter_lists WHERE id = $1 AND user_id = $2",
+      [listId, userId]
     );
 
-    if (rows.length === 0) {
-      return res
-        .status(404)
-        .json({ success: false, message: "Filter list not found" });
+    if (verifyRows.length === 0) {
+      console.log(
+        `[API PUT /api/filter-list/${listId}] Filter list not found or user ${userId} does not own it.`
+      );
+      return res.status(404).json({
+        success: false,
+        message: "Filter list not found or unauthorized",
+      });
     }
 
-    const userId = rows[0].user_id;
-
+    // 2. Update Database (optional but good practice)
+    // Note: We primarily rely on the session for the 'enabled' state, but updating DB is okay too.
+    console.log(
+      `[API PUT /api/filter-list/${listId}] Updating database entry.`
+    );
     await pool.query(
-      "UPDATE filter_lists SET name = $1, ids = $2, enabled = $3, is_exclude = $4, filter_type = $5 WHERE id = $6",
+      `UPDATE filter_lists SET name = $1, ids = $2, enabled = $3, is_exclude = $4, filter_type = $5
+           WHERE id = $6 AND user_id = $7`,
       [
         name,
-        JSON.stringify(ids),
-        enabled ? 1 : 0,
-        isExclude ? 1 : 0,
+        JSON.stringify(ids || []), // Ensure ids is an array string
+        typeof enabled === "boolean" ? (enabled ? 1 : 0) : null, // Handle enabled state
+        typeof isExclude === "boolean" ? (isExclude ? 1 : 0) : null,
         filterType || null,
-        id,
+        listId,
+        userId,
       ]
     );
 
+    // 3. Update Session State (Critically, update the 'enabled' state here)
+    if (typeof enabled === "boolean") {
+      req.session.currentFilterStates = req.session.currentFilterStates || {};
+      req.session.currentFilterStates[listId] = enabled;
+      console.log(
+        `[API PUT /api/filter-list/${listId}] Updating session state: enabled=${enabled}`
+      );
+
+      // Save session
+      await new Promise((resolve, reject) => {
+        req.session.save((err) => {
+          if (err) {
+            console.error(
+              `[API PUT /api/filter-list/${listId}] Error saving session after update:`,
+              err
+            );
+            reject(err); // Or handle differently
+          } else {
+            console.log(
+              `[API PUT /api/filter-list/${listId}] Session saved successfully.`
+            );
+            resolve();
+          }
+        });
+      });
+    } else {
+      console.log(
+        `[API PUT /api/filter-list/${listId}] No 'enabled' state provided in PUT request, session not updated for enabled status.`
+      );
+    }
+
+    // 4. Prepare and send response/emit (optional if handled by socket)
     const updatedList = {
-      id: id.toString(),
+      id: listId.toString(),
       user_id: userId.toString(),
       name,
-      ids,
-      enabled: Boolean(enabled),
-      is_exclude: Boolean(isExclude),
-      filter_type: filterType,
+      ids: ids || [], // Ensure it's an array
+      enabled: typeof enabled === "boolean" ? enabled : verifyRows[0].enabled, // Reflect the change or keep original if not provided
+      is_exclude:
+        typeof isExclude === "boolean" ? isExclude : verifyRows[0].is_exclude,
+      filter_type: filterType || verifyRows[0].filter_type,
     };
 
-    // Emit to all sockets in the user's room
+    // Emit update via socket (redundant if client already sent update via socket, but good for consistency)
+    console.log(
+      `[API PUT /api/filter-list/${listId}] Emitting filterListUpdated to room ${userId.toString()}`
+    );
     io.to(userId.toString()).emit("filterListUpdated", updatedList);
+
     res.json({ success: true, filterList: updatedList });
   } catch (error) {
-    console.error("Server error:", error);
-    res.status(500).json({ success: false, message: "Server error" });
+    console.error(`[API PUT /api/filter-list/${listId}] Error:`, error);
+    res
+      .status(500)
+      .json({ success: false, message: "Server error updating filter list" });
   }
 });
 
@@ -2164,73 +2230,98 @@ app.get("/api/eve-sso-config", (req, res) => {
 });
 
 app.get("/api/session", async (req, res) => {
+  console.log("[API GET /api/session] Request received.");
   if (!req.session?.user) {
+    console.log("[API GET /api/session] No active session found.");
     return res.status(401).json({
       error: "No active session",
-      debug: {
-        hasSession: !!req.session,
-        sessionID: req.sessionID,
-      },
+      debug: { hasSession: !!req.session, sessionID: req.sessionID },
     });
   }
+  const userId = req.session.user.id;
+  console.log(`[API GET /api/session] Session found for User ID: ${userId}`);
 
   try {
-    // Fetch filter lists
-    const { rows: filterLists } = await pool.query(
+    // Fetch filter lists from DB
+    console.log(
+      `[API GET /api/session] Fetching filter lists from DB for User ID: ${userId}`
+    );
+    const { rows: filterListsFromDb } = await pool.query(
       "SELECT * FROM filter_lists WHERE user_id = $1",
-      [req.session.user.id]
+      [userId]
+    );
+    console.log(
+      `[API GET /api/session] Found ${filterListsFromDb.length} lists in DB.`
     );
 
-    // Add profile fetch
-    const { rows: profiles } = await pool.query(
+    // Fetch profiles from DB
+    console.log(
+      `[API GET /api/session] Fetching profiles from DB for User ID: ${userId}`
+    );
+    const { rows: profilesFromDb } = await pool.query(
       "SELECT id, name, settings FROM user_profiles WHERE user_id = $1",
-      [req.session.user.id]
+      [userId]
+    );
+    console.log(
+      `[API GET /api/session] Found ${profilesFromDb.length} profiles in DB.`
     );
 
-    const processedFilterLists = filterLists.map((list) => ({
-      id: list.id.toString(),
-      user_id: list.user_id.toString(),
-      ids: JSON.parse(list.ids || "[]"),
-      enabled: Boolean(list.enabled),
-      is_exclude: Boolean(list.is_exclude),
-      filter_type: list.filter_type || null,
-    }));
+    // --- Process Filter Lists using Session State ---
+    console.log(
+      "[API GET /api/session] Processing filter lists with session state:",
+      req.session.currentFilterStates
+    );
+    const processedFilterLists = processFilterListsWithSessionState(
+      filterListsFromDb,
+      req.session.currentFilterStates // Pass the session state
+    );
+    console.log("[API GET /api/session] Finished processing filter lists.");
 
-    const processedProfiles = profiles.map((profile) => ({
+    const processedProfiles = profilesFromDb.map((profile) => ({
       id: profile.id.toString(),
       name: profile.name,
-      settings: JSON.parse(profile.settings),
+      settings: JSON.parse(profile.settings || "{}"), // Add default empty object
     }));
+    console.log("[API GET /api/session] Finished processing profiles.");
 
     res.json({
       user: {
         id: req.session.user.id,
         character_id: req.session.user.character_id,
         character_name: req.session.user.character_name,
-        access_token: req.session.user.access_token,
-        refresh_token: req.session.user.refresh_token,
+        // Avoid sending tokens unnecessarily unless needed by the direct consumer of /api/session
+        // access_token: req.session.user.access_token,
+        // refresh_token: req.session.user.refresh_token,
       },
       filterLists: processedFilterLists,
-      profiles: processedProfiles, // Add this line
+      profiles: processedProfiles,
     });
+    console.log("[API GET /api/session] Sent session data response.");
   } catch (err) {
-    console.error("Error fetching session data:", err);
-    res.status(500).json({ error: "Server error" });
+    console.error("[API GET /api/session] Error fetching session data:", err);
+    res.status(500).json({ error: "Server error fetching session data" });
   }
 });
 
 // Normal login route for people who don't want their character tracked.
 app.post("/api/login", async (req, res) => {
+  console.log("[API POST /api/login] Request received.");
   try {
     const { username, password } = req.body;
 
     if (!username || !password) {
-      return res.status(400).json({
-        success: false,
-        message: "Username and password are required",
-      });
+      console.log("[API POST /api/login] Missing username or password.");
+      return res
+        .status(400)
+        .json({
+          success: false,
+          message: "Username and password are required",
+        });
     }
 
+    console.log(
+      `[API POST /api/login] Attempting login for username: ${username}`
+    );
     const { rows } = await pool.query(
       "SELECT * FROM users WHERE username = $1",
       [username]
@@ -2238,51 +2329,97 @@ app.post("/api/login", async (req, res) => {
 
     const user = rows[0];
     if (!user) {
-      return res.status(401).json({
-        success: false,
-        message: "Invalid credentials",
-      });
+      console.log(`[API POST /api/login] User not found: ${username}`);
+      return res
+        .status(401)
+        .json({ success: false, message: "Invalid credentials" });
     }
 
+    console.log(
+      `[API POST /api/login] Comparing password for user ID: ${user.id}`
+    );
     const match = await compare(password, user.password);
     if (!match) {
-      return res.status(401).json({
-        success: false,
-        message: "Invalid credentials",
-      });
+      console.log(
+        `[API POST /api/login] Invalid password for user ID: ${user.id}`
+      );
+      return res
+        .status(401)
+        .json({ success: false, message: "Invalid credentials" });
     }
+    console.log(
+      `[API POST /api/login] Login successful for user ID: ${user.id}`
+    );
 
-    // Get user's filter lists
-    // Get user's filter lists
-    const { rows: filterLists } = await pool.query(
+    // Fetch filter lists and profiles
+    const { rows: filterListsFromDb } = await pool.query(
       "SELECT * FROM filter_lists WHERE user_id = $1",
       [user.id]
     );
+    const { rows: profilesFromDb } = await pool.query(
+      "SELECT id, name, settings FROM user_profiles WHERE user_id = $1",
+      [user.id]
+    );
 
-    const processedFilterLists = filterLists.map((list) => ({
-      ...list,
-      ids: JSON.parse(list.ids || "[]"),
-      enabled: Boolean(list.enabled),
-      is_exclude: Boolean(list.is_exclude),
-    }));
-
+    // Prepare session data
     const sessionUser = {
       id: user.id,
       username: user.username,
       character_id: user.character_id,
       character_name: user.character_name,
-      access_token: user.access_token,
+      // Don't store sensitive tokens directly if not needed immediately after login via this route
     };
 
-    req.session.user = sessionUser;
+    // --- Initialize/Load Filter States into Session ---
+    // Try loading from DB user settings if we stored it there, otherwise initialize
+    // For now, we'll just initialize it empty on login via this route,
+    // assuming /api/session will handle loading/merging later.
+    // Or, better: try to load existing session if possible, otherwise init.
+    // Safest: Just initialize `currentFilterStates` if it doesn't exist.
+    if (!req.session.currentFilterStates) {
+      req.session.currentFilterStates = {};
+      console.log(
+        `[API POST /api/login] Initialized empty currentFilterStates in session for user ID: ${user.id}`
+      );
+      // Optionally pre-populate based on DB 'enabled' column as a default starting point
+      filterListsFromDb.forEach((list) => {
+        req.session.currentFilterStates[list.id.toString()] = Boolean(
+          list.enabled
+        );
+      });
+      console.log(
+        `[API POST /api/login] Pre-populated session filter states from DB for user ID: ${user.id}`
+      );
+    } else {
+      console.log(
+        `[API POST /api/login] Found existing currentFilterStates in session for user ID: ${user.id}`
+      );
+    }
 
+    // Process lists/profiles using session state
+    const processedFilterLists = processFilterListsWithSessionState(
+      filterListsFromDb,
+      req.session.currentFilterStates
+    );
+    const processedProfiles = profilesFromDb.map((p) => ({
+      id: p.id.toString(),
+      name: p.name,
+      settings: JSON.parse(p.settings || "{}"),
+    }));
+
+    // Set user and save session
+    req.session.user = sessionUser;
+    console.log(`[API POST /api/login] Saving session for user ID: ${user.id}`);
     await new Promise((resolve, reject) => {
       req.session.save((err) => {
         if (err) {
-          console.error("Session save error:", err);
+          console.error("[API POST /api/login] Session save error:", err);
           reject(err);
           return;
         }
+        console.log(
+          `[API POST /api/login] Session saved successfully for user ID: ${user.id}`
+        );
         resolve();
       });
     });
@@ -2291,13 +2428,13 @@ app.post("/api/login", async (req, res) => {
       success: true,
       user: sessionUser,
       filterLists: processedFilterLists,
+      profiles: processedProfiles,
     });
   } catch (err) {
-    console.error("Login error:", err);
-    res.status(500).json({
-      success: false,
-      message: "Server error during login",
-    });
+    console.error("[API POST /api/login] Login error:", err);
+    res
+      .status(500)
+      .json({ success: false, message: "Server error during login" });
   }
 });
 
@@ -2367,12 +2504,10 @@ app.post("/api/campcrushers/cancel-target", async (req, res) => {
       console.warn(
         `[Cancel Target] Failed to update target ${targetToCancelId} for user: ${userId} (maybe already completed/expired?).`
       );
-      res
-        .status(400)
-        .json({
-          success: false,
-          error: "Failed to cancel target (might be already inactive).",
-        });
+      res.status(400).json({
+        success: false,
+        error: "Failed to cancel target (might be already inactive).",
+      });
     }
   } catch (error) {
     console.error("[Cancel Target] Error processing cancel request:", error);
@@ -2381,21 +2516,28 @@ app.post("/api/campcrushers/cancel-target", async (req, res) => {
 });
 
 // for user login
+// --- MODIFIED EVE SSO Callback route ---
 app.get("/callback", async (req, res) => {
   const { code, state } = req.query;
-  console.log("Received callback with code:", code);
-  console.log("Session at callback:", req.session);
+  console.log(
+    "[GET /callback] Received callback. Code:",
+    code ? "Present" : "Missing",
+    "State:",
+    state
+  );
+  // console.log("[GET /callback] Session BEFORE processing:", req.session); // Debug session state
 
   try {
     // State validation
     const stateData = await getState(state);
     if (!stateData) {
-      console.error("Invalid state:", state);
+      console.error("[GET /callback] Invalid or expired state:", state);
       return res.redirect("/?login=error&reason=invalid_state");
     }
+    console.log("[GET /callback] State verified:", state);
 
     // Token acquisition
-    console.log("Requesting access token...");
+    console.log("[GET /callback] Requesting EVE SSO tokens...");
     const tokenResponse = await axios.post(
       "https://login.eveonline.com/v2/oauth/token",
       `grant_type=authorization_code&code=${code}`,
@@ -2411,16 +2553,17 @@ app.get("/callback", async (req, res) => {
         },
       }
     );
-
-    console.log("Token response received:", tokenResponse.data);
+    console.log("[GET /callback] Token response received.");
     const { access_token, refresh_token, expires_in } = tokenResponse.data;
 
     if (!access_token || !refresh_token) {
-      console.error("Missing token data:", tokenResponse.data);
+      console.error(
+        "[GET /callback] Missing token data in response:",
+        tokenResponse.data
+      );
       return res.redirect("/?login=error&reason=invalid_token");
     }
 
-    // Token expiry calculation
     const token_expiry = Math.floor(Date.now() / 1000) + expires_in;
 
     // Character info extraction
@@ -2428,151 +2571,182 @@ app.get("/callback", async (req, res) => {
     const tokenPayload = JSON.parse(
       Buffer.from(tokenParts[1], "base64").toString()
     );
-
     const characterId = tokenPayload.sub.split(":")[2];
     const characterName = tokenPayload.name;
-
-    console.log("Character data extracted:", { characterId, characterName });
+    console.log("[GET /callback] Character data extracted:", {
+      characterId,
+      characterName,
+    });
 
     if (!characterId || !characterName) {
-      console.error("Invalid character data:", tokenPayload);
+      console.error(
+        "[GET /callback] Invalid character data from token:",
+        tokenPayload
+      );
       return res.redirect("/?login=error&reason=invalid_character");
     }
 
-    try {
-      console.log("Starting database operations...");
+    // --- Database Operations ---
+    console.log("[GET /callback] Starting database operations...");
+    const { rows: existingUser } = await pool.query(
+      "SELECT id, settings FROM users WHERE character_id = $1",
+      [characterId]
+    );
 
-      // User lookup/creation
-      const { rows: existingUser } = await pool.query(
-        "SELECT id, settings FROM users WHERE character_id = $1",
-        [characterId]
+    let userId;
+    let userDbSettings = "{}"; // Default settings string
+
+    if (existingUser.length > 0) {
+      console.log(
+        `[GET /callback] Updating existing user (ID: ${existingUser[0].id})`
       );
-
-      let userId;
-      let userSettings = {};
-
-      if (existingUser.length > 0) {
-        console.log("Updating existing user...");
-        userId = existingUser[0].id;
-        userSettings = JSON.parse(existingUser[0].settings || "{}");
-
-        await pool.query(
-          `UPDATE users 
-           SET access_token = $1, refresh_token = $2, character_name = $3, token_expiry = $4 
-           WHERE character_id = $5`,
-          [
-            access_token,
-            refresh_token,
-            characterName,
-            token_expiry,
-            characterId,
-          ]
-        );
-      } else {
-        console.log("Creating new user...");
-        const result = await pool.query(
-          `INSERT INTO users 
-           (character_id, character_name, access_token, refresh_token, token_expiry, settings) 
-           VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
-          [
-            characterId,
-            characterName,
-            access_token,
-            refresh_token,
-            token_expiry,
-            "{}",
-          ]
-        );
-        userId = result.rows[0].id;
-      }
-
-      console.log("Ensuring camp_crushers entry exists...");
+      userId = existingUser[0].id;
+      userDbSettings = existingUser[0].settings || "{}";
       await pool.query(
-        `INSERT INTO camp_crushers (character_id, character_name)
-         SELECT $1, $2 
+        `UPDATE users
+            SET access_token = $1, refresh_token = $2, character_name = $3, token_expiry = $4
+            WHERE character_id = $5`,
+        [access_token, refresh_token, characterName, token_expiry, characterId]
+      );
+    } else {
+      console.log("[GET /callback] Creating new user...");
+      const result = await pool.query(
+        `INSERT INTO users
+            (character_id, character_name, access_token, refresh_token, token_expiry, settings, bashbucks)
+            VALUES ($1, $2, $3, $4, $5, $6, 0) RETURNING id`, // Ensure bashbucks defaults to 0
+        [
+          characterId,
+          characterName,
+          access_token,
+          refresh_token,
+          token_expiry,
+          "{}", // Default empty settings JSON
+        ]
+      );
+      userId = result.rows[0].id;
+      console.log(`[GET /callback] New user created with ID: ${userId}`);
+    }
+
+    // Ensure camp_crushers entry
+    console.log("[GET /callback] Ensuring camp_crushers entry exists...");
+    await pool.query(
+      `INSERT INTO camp_crushers (character_id, character_name)
+         SELECT $1, $2
          WHERE NOT EXISTS (
            SELECT 1 FROM camp_crushers WHERE character_id = $3
          )`,
-        [characterId, characterName, characterId]
+      [characterId, characterName, characterId]
+    );
+
+    // Fetch filter lists and profiles
+    console.log(
+      `[GET /callback] Fetching filter lists and profiles for User ID: ${userId}`
+    );
+    const { rows: filterListsFromDb } = await pool.query(
+      "SELECT * FROM filter_lists WHERE user_id = $1",
+      [userId]
+    );
+    const { rows: profilesFromDb } = await pool.query(
+      "SELECT id, name, settings FROM user_profiles WHERE user_id = $1",
+      [userId]
+    );
+    console.log(
+      `[GET /callback] Found ${filterListsFromDb.length} lists, ${profilesFromDb.length} profiles.`
+    );
+
+    // --- Session Setup ---
+    const sessionUser = {
+      id: userId,
+      character_id: characterId,
+      character_name: characterName,
+      access_token, // Store tokens in session for immediate use
+      refresh_token,
+      token_expiry,
+      // settings: JSON.parse(userDbSettings), // Store DB settings initially
+    };
+    req.session.user = sessionUser;
+    console.log("[GET /callback] User data set in session.");
+
+    // --- Initialize/Load Filter States into Session ---
+    if (!req.session.currentFilterStates) {
+      req.session.currentFilterStates = {};
+      console.log(
+        `[GET /callback] Initialized empty currentFilterStates in session for user ID: ${userId}`
       );
-
-      // Fetch filter lists
-      const { rows: filterLists } = await pool.query(
-        "SELECT * FROM filter_lists WHERE user_id = $1",
-        [userId]
-      );
-
-      // Fetch profiles
-      const { rows: profiles } = await pool.query(
-        "SELECT id, name, settings FROM user_profiles WHERE user_id = $1",
-        [userId]
-      );
-
-      const processedFilterLists = filterLists.map((list) => ({
-        id: list.id.toString(),
-        user_id: list.user_id.toString(),
-        name: list.name,
-        ids: JSON.parse(list.ids || "[]"),
-        enabled: Boolean(list.enabled),
-        is_exclude: Boolean(list.is_exclude),
-        filter_type: list.filter_type || null,
-      }));
-
-      const processedProfiles = profiles.map((profile) => ({
-        id: profile.id.toString(),
-        name: profile.name,
-        settings: JSON.parse(profile.settings),
-      }));
-
-      console.log("Processed filter lists:", processedFilterLists);
-      console.log("Processed profiles:", processedProfiles);
-
-      // Session setup
-      const sessionUser = {
-        id: userId,
-        character_id: characterId,
-        character_name: characterName,
-        access_token,
-        refresh_token,
-        token_expiry,
-        settings: userSettings,
-      };
-
-      req.session.user = sessionUser;
-      req.session.filterLists = processedFilterLists;
-      req.session.profiles = processedProfiles;
-
-      // Explicit session save
-      await new Promise((resolve, reject) => {
-        req.session.save((err) => {
-          if (err) {
-            console.error("Session save error:", err);
-            reject(err);
-            return;
-          }
-          console.log("Session saved to Redis");
-          resolve();
-        });
+      // Pre-populate based on DB 'enabled' column
+      filterListsFromDb.forEach((list) => {
+        req.session.currentFilterStates[list.id.toString()] = Boolean(
+          list.enabled
+        );
       });
+      console.log(
+        `[GET /callback] Pre-populated session filter states from DB.`
+      );
+    } else {
+      console.log(
+        `[GET /callback] Found existing currentFilterStates in session.`
+      );
+      // Optional: Merge logic could go here if needed, but session usually overrides
+    }
 
-      // Socket notification
+    // Process lists/profiles using the (potentially newly initialized) session state
+    const processedFilterLists = processFilterListsWithSessionState(
+      filterListsFromDb,
+      req.session.currentFilterStates
+    );
+    const processedProfiles = profilesFromDb.map((p) => ({
+      id: p.id.toString(),
+      name: p.name,
+      settings: JSON.parse(p.settings || "{}"),
+    }));
+
+    // Save the session explicitly *after* all updates
+    console.log("[GET /callback] Saving session to Redis...");
+    await new Promise((resolve, reject) => {
+      req.session.save((err) => {
+        if (err) {
+          console.error("[GET /callback] Session save error:", err);
+          reject(err);
+          return;
+        }
+        console.log("[GET /callback] Session saved successfully.");
+        // console.log("[GET /callback] Session AFTER saving:", req.session); // Debug session state
+        resolve();
+      });
+    });
+
+    // Socket notification (optional, client might fetch via /api/session anyway)
+    console.log(
+      `[GET /callback] Emitting loginSuccess to room ${userId.toString()}`
+    );
+    // Ensure the user's socket joins the room if connected
+    const userSockets = await io.in(userId.toString()).fetchSockets();
+    if (userSockets.length > 0) {
+      console.log(
+        `[GET /callback] Found ${userSockets.length} socket(s) for user ${userId}, emitting loginSuccess.`
+      );
       io.to(userId.toString()).emit("loginSuccess", {
-        settings: userSettings,
+        user: sessionUser, // Send user info back
+        settings: JSON.parse(userDbSettings), // Send initial DB settings
         filterLists: processedFilterLists,
         profiles: processedProfiles,
       });
-
-      return res.redirect("/?authenticated=true");
-    } catch (error) {
-      console.error("Database/Session error:", error);
-      return res.redirect("/?login=error&reason=database_error");
+    } else {
+      console.log(
+        `[GET /callback] No active sockets found for user ${userId} to emit loginSuccess.`
+      );
     }
+
+    // Redirect user back to the application
+    console.log("[GET /callback] Redirecting user to /?authenticated=true");
+    return res.redirect("/?authenticated=true");
   } catch (error) {
-    console.error("EVE SSO Error:", {
+    console.error("[GET /callback] EVE SSO Callback Error:", {
       message: error.message,
       response: error.response?.data,
       stack: error.stack,
     });
+    // Ensure session is destroyed or cleaned up on major error? Maybe not necessary.
     return res.redirect("/?login=error&reason=sso_error");
   }
 });
@@ -2727,6 +2901,33 @@ app.get("/api/celestials/:killmailId", async (req, res) => {
     res.status(500).json({ error: "Internal server error" });
   }
 });
+
+// --- Helper Function to Process Filter Lists with Session State ---
+function processFilterListsWithSessionState(dbRows, sessionFilterStates) {
+  const states = sessionFilterStates || {}; // Default to empty object if no session state
+
+  return dbRows.map((row) => {
+    const listId = row.id.toString();
+    const enabledFromSession = states[listId]; // Check if state exists for this ID
+
+    // Use session state if available, otherwise default (e.g., from DB or true)
+    // Let's default new/unstored lists to true initially, unless DB says otherwise
+    const finalEnabled =
+      typeof enabledFromSession === "boolean"
+        ? enabledFromSession
+        : Boolean(row.enabled); // Fallback to DB value (or default if DB column is null)
+
+    return {
+      id: listId, // Ensure string ID
+      user_id: row.user_id.toString(),
+      name: row.name,
+      ids: JSON.parse(row.ids || "[]"),
+      enabled: finalEnabled, // Apply the resolved state
+      is_exclude: Boolean(row.is_exclude),
+      filter_type: row.filter_type || null,
+    };
+  });
+}
 
 function calculatePinpoints(celestials, killPosition) {
   // Early validation
@@ -3082,10 +3283,80 @@ app.put("/api/filter-list/:id", async (req, res) => {
 
 // Delete a filter list
 app.delete("/api/filter-list/:id", async (req, res) => {
+  const listId = req.params.id;
+  console.log(`[API DELETE /api/filter-list/${listId}] Request received.`);
+
+  if (!req.session?.user?.id) {
+    console.log(
+      `[API DELETE /api/filter-list/${listId}] User not authenticated.`
+    );
+    return res
+      .status(401)
+      .json({ success: false, message: "Not authenticated" });
+  }
+  const userId = req.session.user.id;
+  console.log(
+    `[API DELETE /api/filter-list/${listId}] Authenticated User ID: ${userId}`
+  );
+
   try {
-    await pool.query("DELETE FROM filter_lists WHERE id = $1", [req.params.id]);
-    res.json({ success: true });
+    // 1. Verify ownership & Delete from DB
+    const { rowCount } = await pool.query(
+      "DELETE FROM filter_lists WHERE id = $1 AND user_id = $2",
+      [listId, userId]
+    );
+
+    if (rowCount === 0) {
+      console.log(
+        `[API DELETE /api/filter-list/${listId}] Filter list not found or user ${userId} does not own it.`
+      );
+      return res.status(404).json({
+        success: false,
+        message: "Filter list not found or unauthorized",
+      });
+    }
+    console.log(
+      `[API DELETE /api/filter-list/${listId}] Successfully deleted from database.`
+    );
+
+    // 2. Remove from Session State
+    if (
+      req.session.currentFilterStates &&
+      req.session.currentFilterStates[listId] !== undefined
+    ) {
+      delete req.session.currentFilterStates[listId];
+      console.log(
+        `[API DELETE /api/filter-list/${listId}] Removed list state from session.`
+      );
+
+      // Save session
+      req.session.save((err) => {
+        if (err) {
+          console.error(
+            `[API DELETE /api/filter-list/${listId}] Error saving session after deleting filter state:`,
+            err
+          );
+        } else {
+          console.log(
+            `[API DELETE /api/filter-list/${listId}] Session saved successfully.`
+          );
+        }
+      });
+    } else {
+      console.log(
+        `[API DELETE /api/filter-list/${listId}] No state found in session for this list ID.`
+      );
+    }
+
+    // 3. Emit update (optional, if client handles optimistic delete)
+    console.log(
+      `[API DELETE /api/filter-list/${listId}] Emitting filterListDeleted to room ${userId.toString()}`
+    );
+    io.to(userId.toString()).emit("filterListDeleted", { id: listId });
+
+    res.json({ success: true, message: "Filter list deleted" });
   } catch (err) {
+    console.error(`[API DELETE /api/filter-list/${listId}] Error:`, err);
     res
       .status(500)
       .json({ success: false, message: "Error deleting filter list" });
@@ -3374,22 +3645,42 @@ async function processKillmailData(killmail) {
   }
 } // End of processKillmailData
 
+// --- Socket.IO Connection Handler ---
 io.on("connection", (socket) => {
-  console.log("New client connected");
+  console.log(`Socket connected: ${socket.id}`);
+  let connectionUserId = null; // Track user ID for this connection for logging
 
+  // --- Join user-specific room on connection if authenticated ---
+  if (socket.request.session?.user?.id) {
+    connectionUserId = socket.request.session.user.id; // Store user ID
+    const userIdStr = connectionUserId.toString();
+    socket.join(userIdStr);
+    console.log(
+      `Socket ${socket.id} joined room ${userIdStr} for user ${
+        socket.request.session.user.character_name ||
+        socket.request.session.user.username ||
+        userIdStr
+      }`
+    );
+  } else {
+    console.log(`Socket ${socket.id} connected without authentication.`);
+  }
+
+  // Initial Data Requests (Keep existing)
   socket.on("requestInitialKillmails", async () => {
     console.log(
-      "Received request for initial killmails. Cache size:",
+      `Socket ${socket.id} requested initial killmails. Cache size:`,
       killmails.length
     );
     try {
-      const cacheSnapshot = [...killmails];
+      const cacheSnapshot = [...killmails]; // Take snapshot to avoid mutation during send
       const cacheSize = cacheSnapshot.length;
 
-      console.log(`Starting cache sync. Sending ${cacheSize} killmails`);
+      console.log(
+        `Socket ${socket.id}: Starting cache sync. Sending ${cacheSize} killmails`
+      );
       socket.emit("cacheInitStart", { totalSize: cacheSize });
 
-      // Send cache in chunks of 500
       const CHUNK_SIZE = 500;
       for (let i = 0; i < cacheSnapshot.length; i += CHUNK_SIZE) {
         const chunk = cacheSnapshot.slice(i, i + CHUNK_SIZE);
@@ -3398,73 +3689,100 @@ io.on("connection", (socket) => {
           currentCount: i + chunk.length,
           totalSize: cacheSize,
         });
-
-        // Small delay to prevent overwhelming the client
+        // Small delay to allow processing and prevent flooding
         await new Promise((resolve) => setTimeout(resolve, 50));
       }
+      console.log(`Socket ${socket.id}: Finished sending cache chunks.`);
+      // Client should now emit 'cacheSyncComplete'
     } catch (error) {
-      console.error("Error sending initial cache:", error);
+      console.error(`Socket ${socket.id}: Error sending initial cache:`, error);
       socket.emit("error", { message: "Failed to initialize cache" });
     }
   });
 
   socket.on("requestActivities", () => {
     console.log(`Socket ${socket.id} requested current activities.`);
-    const currentActivities = serverActivityManager.getActiveActivities();
-    socket.emit("activityUpdate", currentActivities); // Emit the unified update
+    try {
+      const currentActivities = serverActivityManager.getActiveActivities();
+      socket.emit("activityUpdate", currentActivities); // Emit the unified update
+      console.log(
+        `Socket ${socket.id}: Sent ${currentActivities.length} activities.`
+      );
+    } catch (error) {
+      console.error(
+        `Socket ${socket.id}: Error fetching/sending activities:`,
+        error
+      );
+      socket.emit("error", { message: "Failed to fetch activities" });
+    }
   });
 
   socket.on("cacheSyncComplete", () => {
     console.log(
       `Socket ${socket.id} confirmed cache sync complete. Joining live updates.`
     );
-    socket.emit("syncVerified", { success: true });
+    socket.emit("syncVerified", { success: true }); // Acknowledge completion
     socket.join("live-updates"); // Join the room for live killmail broadcasts
   });
 
+  // --- Filter List Fetch ---
   socket.on("fetchFilterLists", async () => {
-    if (
-      !socket.request.session?.user?.id &&
-      !socket.request.session?.user?.character_id
-    ) {
-      socket.emit("error", { message: "Not authenticated" });
-      return;
+    console.log(`Socket ${socket.id} requested filter lists.`);
+    if (!socket.request.session?.user?.id) {
+      console.log(
+        `Socket ${socket.id} - Not authenticated for fetchFilterLists.`
+      );
+      return socket.emit("error", { message: "Not authenticated" });
     }
-
+    const userId = socket.request.session.user.id; // Use the ID stored at connection time if available
     try {
-      const { rows } = await pool.query(
+      console.log(
+        `Workspaceing filter lists from DB for user ${userId} (Socket ${socket.id})`
+      );
+      const { rows: filterListsFromDb } = await pool.query(
         "SELECT * FROM filter_lists WHERE user_id = $1",
-        [socket.request.session.user.id]
+        [userId]
+      );
+      console.log(
+        `Found ${filterListsFromDb.length} lists in DB for user ${userId} (Socket ${socket.id})`
       );
 
-      const processedLists = rows.map((list) => ({
-        id: list.id.toString(),
-        user_id: list.user_id.toString(),
-        name: list.name,
-        ids: JSON.parse(list.ids || "[]"),
-        enabled: Boolean(list.enabled),
-        is_exclude: Boolean(list.is_exclude),
-        filter_type: list.filter_type || null,
-      }));
-
+      // Process with session state
+      const processedLists = processFilterListsWithSessionState(
+        filterListsFromDb,
+        socket.request.session.currentFilterStates // Access session state here
+      );
+      console.log(
+        `Processed ${processedLists.length} lists, sending 'filterListsFetched' to socket ${socket.id}`
+      );
       socket.emit("filterListsFetched", processedLists);
     } catch (error) {
-      console.error("Error fetching filter lists:", error);
+      console.error(
+        `Error fetching filter lists for user ${userId} (Socket ${socket.id}):`,
+        error
+      );
       socket.emit("error", { message: "Failed to fetch filter lists" });
     }
   });
 
+  // --- Login via Socket ---
   socket.on("login", async ({ username, password }) => {
+    console.log(
+      `Socket ${socket.id} attempting login for username: ${username}`
+    );
     try {
       const { rows } = await pool.query(
         "SELECT id, username, password, settings, character_id, character_name, access_token FROM users WHERE username = $1",
         [username]
       );
-
       const user = rows[0];
+
       if (user) {
         const match = await compare(password, user.password);
         if (match) {
+          console.log(
+            `Socket ${socket.id} - Login successful for user ID: ${user.id}`
+          );
           const sessionUser = {
             id: Number(user.id),
             username: String(user.username),
@@ -3472,205 +3790,215 @@ io.on("connection", (socket) => {
             character_name: user.character_name
               ? String(user.character_name)
               : null,
-            access_token: user.access_token ? String(user.access_token) : null,
+            // Avoid sending tokens unless strictly needed by client on socket login
+            // access_token: user.access_token ? String(user.access_token) : null,
           };
 
+          // --- IMPORTANT: Update session state for this socket ---
           socket.request.session.user = sessionUser;
+          connectionUserId = sessionUser.id; // Update connection's user ID tracker
+
+          // Fetch lists/profiles for this user
+          const { rows: filterLists } = await pool.query(
+            "SELECT * FROM filter_lists WHERE user_id = $1",
+            [user.id]
+          );
+          const { rows: profiles } = await pool.query(
+            "SELECT id, name, settings FROM user_profiles WHERE user_id = $1",
+            [user.id]
+          );
+
+          // Initialize/Load Filter States into Session
+          if (!socket.request.session.currentFilterStates) {
+            socket.request.session.currentFilterStates = {};
+            console.log(
+              `[Socket Login] Initialized empty currentFilterStates for user ID: ${user.id}`
+            );
+            filterLists.forEach((list) => {
+              socket.request.session.currentFilterStates[list.id.toString()] =
+                Boolean(list.enabled);
+            });
+            console.log(
+              `[Socket Login] Pre-populated session filter states from DB.`
+            );
+          } else {
+            console.log(
+              `[Socket Login] Found existing currentFilterStates in session.`
+            );
+          }
+
+          // Join the user-specific room *after* successful login
+          const userIdStr = user.id.toString();
+          socket.join(userIdStr);
+          console.log(
+            `Socket ${socket.id} joined room ${userIdStr} after login.`
+          );
+
+          // Save the updated session
           await new Promise((resolve, reject) => {
             socket.request.session.save((err) => {
               if (err) {
-                console.error("Session save error:", err);
+                console.error("[Socket Login] Session save error:", err);
                 reject(err);
                 return;
               }
+              console.log(
+                `[Socket Login] Session saved for user ID: ${user.id}`
+              );
               resolve();
             });
           });
 
-          socket.username = username;
-
-          // Fetch filter lists
-          const { rows: filterLists } = await pool.query(
-            "SELECT * FROM filter_lists WHERE user_id = $1",
-            [socket.request.session.user.id]
+          // Process lists/profiles using the potentially updated session state
+          const processedFilterLists = processFilterListsWithSessionState(
+            filterLists,
+            socket.request.session.currentFilterStates
           );
-
-          // Fetch profiles
-          const { rows: profiles } = await pool.query(
-            "SELECT id, name, settings FROM user_profiles WHERE user_id = $1",
-            [socket.request.session.user.id]
-          );
-
-          const processedFilterLists = filterLists.map((list) => ({
-            id: list.id.toString(),
-            user_id: list.user_id.toString(),
-            name: list.name,
-            ids: JSON.parse(list.ids || "[]"),
-            enabled: Boolean(list.enabled),
-            is_exclude: Boolean(list.is_exclude),
-            filter_type: list.filter_type || null,
-          }));
-
           const processedProfiles = profiles.map((profile) => ({
             id: profile.id.toString(),
             name: profile.name,
-            settings: JSON.parse(profile.settings),
+            settings: JSON.parse(profile.settings || "{}"),
           }));
 
           socket.emit("loginSuccess", {
+            user: sessionUser, // Send user info back
             settings: user.settings ? JSON.parse(user.settings) : {},
-            filterLists: processedFilterLists,
+            filterLists: processedFilterLists, // Send processed lists
             profiles: processedProfiles,
           });
         } else {
+          console.log(
+            `Socket ${socket.id} - Invalid password for username: ${username}`
+          );
           socket.emit("loginError", { message: "Invalid credentials" });
         }
       } else {
+        console.log(`Socket ${socket.id} - User not found: ${username}`);
         socket.emit("loginError", { message: "User not found" });
       }
     } catch (err) {
-      console.error("Login error:", err);
+      console.error(`Socket ${socket.id} - Login error:`, err);
       socket.emit("loginError", { message: "Error during login" });
     }
   });
 
-  // Settings handling
+  // --- Settings Update ---
   socket.on("updateSettings", async (newSettings) => {
-    if (socket.username) {
+    // Use connectionUserId or re-check session
+    const currentUserId = socket.request.session?.user?.id;
+    if (currentUserId) {
+      console.log(
+        `Socket ${socket.id} (User ${currentUserId}) updating settings.`
+      );
       try {
-        await pool.query("UPDATE users SET settings = $1 WHERE username = $2", [
+        await pool.query("UPDATE users SET settings = $1 WHERE id = $2", [
           JSON.stringify(newSettings),
-          socket.username,
+          currentUserId,
         ]);
-        console.log("Settings updated for user:", socket.username);
+        console.log(`Settings updated for user: ${currentUserId}`);
+        // Optionally emit confirmation back to the specific socket
+        // socket.emit('settingsUpdated', newSettings);
       } catch (err) {
-        console.error("Error updating settings:", err);
+        console.error(
+          `Error updating settings for user ${currentUserId}:`,
+          err
+        );
         socket.emit("error", { message: "Failed to update settings" });
       }
+    } else {
+      console.log(
+        `Socket ${socket.id} - Not authenticated for updateSettings.`
+      );
+      socket.emit("error", { message: "Not authenticated" });
     }
   });
 
+  // --- Profile Fetch/Save/Load/Delete ---
   socket.on("fetchProfiles", async () => {
+    const currentUserId = socket.request.session?.user?.id;
+    if (!currentUserId) {
+      console.log(`Socket ${socket.id} - Not authenticated for fetchProfiles.`);
+      return socket.emit("error", { message: "Not authenticated" });
+    }
+    console.log(
+      `Socket ${socket.id} (User ${currentUserId}) fetching profiles.`
+    );
     try {
-      if (
-        !socket.request.session?.user?.id &&
-        !socket.request.session?.user?.character_id
-      ) {
-        socket.emit("error", { message: "Not authenticated" });
-        return;
-      }
-
-      const userId =
-        socket.request.session.user.id ||
-        socket.request.session.user.character_id;
-
       const { rows: profiles } = await pool.query(
         "SELECT id, name, settings FROM user_profiles WHERE user_id = $1",
-        [userId]
+        [currentUserId]
       );
-
       const processedProfiles = profiles.map((profile) => ({
         id: profile.id.toString(),
         name: profile.name,
-        settings: JSON.parse(profile.settings),
+        settings: JSON.parse(profile.settings || "{}"),
       }));
-
-      console.log("Sending profiles to client:", processedProfiles);
+      console.log(
+        `Socket ${socket.id}: Sending ${processedProfiles.length} profiles to client.`
+      );
       socket.emit("profilesFetched", processedProfiles);
     } catch (error) {
-      console.error("Error fetching profiles:", error);
+      console.error(
+        `Error fetching profiles for user ${currentUserId}:`,
+        error
+      );
       socket.emit("error", { message: "Failed to fetch profiles" });
     }
   });
 
-  // Filter list handling
-  socket.on("createFilterList", async (data) => {
-    if (
-      !socket.request.session?.user?.id &&
-      !socket.request.session?.user?.character_id
-    ) {
-      socket.emit("error", { message: "Not authenticated" });
-      return;
-    }
-
-    try {
-      const { name, ids, enabled, is_exclude, filter_type } = data;
-      const userId =
-        socket.request.session.user.id ||
-        socket.request.session.user.character_id;
-
-      const processedIds = Array.isArray(ids)
-        ? ids
-        : ids.map((id) => id.trim());
-
-      const result = await pool.query(
-        "INSERT INTO filter_lists (user_id, name, ids, enabled, is_exclude, filter_type) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id",
-        [
-          userId,
-          name,
-          JSON.stringify(processedIds),
-          enabled ? 1 : 0,
-          is_exclude ? 1 : 0,
-          filter_type,
-        ]
-      );
-
-      const newFilterList = {
-        id: result.rows[0].id.toString(),
-        user_id: userId.toString(),
-        name,
-        ids: processedIds,
-        enabled: Boolean(enabled),
-        is_exclude: Boolean(is_exclude),
-        filter_type,
-      };
-
-      io.to(userId.toString()).emit("filterListCreated", newFilterList);
-    } catch (error) {
-      console.error("Error creating filter list:", error);
-      socket.emit("error", { message: "Failed to create filter list" });
-    }
-  });
-
-  // Profile handling
   socket.on("saveProfile", async (data) => {
-    if (!socket.request.session?.user?.id) {
-      socket.emit("error", { message: "Not authenticated" });
-      return;
+    const currentUserId = socket.request.session?.user?.id;
+    if (!currentUserId) {
+      console.log(`Socket ${socket.id} - Not authenticated for saveProfile.`);
+      return socket.emit("error", { message: "Not authenticated" });
     }
-
+    console.log(
+      `Socket ${socket.id} (User ${currentUserId}) saving profile: ${data?.name}`
+    );
     try {
-      const userId =
-        socket.request.session.user.id ||
-        socket.request.session.user.character_id;
-      const { name, settings, filterLists } = data;
+      const { name, settings, filterLists: profileFilterLists } = data; // Rename to avoid conflict
+      if (!name) {
+        return socket.emit("error", { message: "Profile name is required" });
+      }
 
-      const serializedFilterLists = filterLists.map((list) => ({
+      // Ensure filter lists are correctly formatted (IDs as strings)
+      const serializedFilterLists = (profileFilterLists || []).map((list) => ({
         ...list,
-        id: list.id.toString(),
+        id: list.id.toString(), // Make sure ID is string
+        ids: list.ids || [], // Ensure ids exists
+        enabled: typeof list.enabled === "boolean" ? list.enabled : false, // Ensure boolean
+        is_exclude:
+          typeof list.is_exclude === "boolean" ? list.is_exclude : false, // Ensure boolean
       }));
 
       const profileData = JSON.stringify({
-        settings,
+        settings: settings || {}, // Ensure settings exists
         filterLists: serializedFilterLists,
       });
 
+      // Check if profile exists to decide between INSERT and UPDATE
       const { rows: existingProfile } = await pool.query(
         "SELECT id FROM user_profiles WHERE user_id = $1 AND name = $2",
-        [userId, name]
+        [currentUserId, name]
       );
 
       let profileId;
       if (existingProfile.length > 0) {
-        await pool.query(
-          "UPDATE user_profiles SET settings = $1 WHERE id = $2",
-          [profileData, existingProfile[0].id]
-        );
         profileId = existingProfile[0].id;
+        console.log(
+          `Updating existing profile ID ${profileId} for user ${currentUserId}`
+        );
+        await pool.query(
+          "UPDATE user_profiles SET settings = $1 WHERE id = $2 AND user_id = $3",
+          [profileData, profileId, currentUserId]
+        );
       } else {
+        console.log(
+          `Inserting new profile named "${name}" for user ${currentUserId}`
+        );
         const result = await pool.query(
           "INSERT INTO user_profiles (user_id, name, settings) VALUES ($1, $2, $3) RETURNING id",
-          [userId, name, profileData]
+          [currentUserId, name, profileData]
         );
         profileId = result.rows[0].id;
       }
@@ -3678,112 +4006,432 @@ io.on("connection", (socket) => {
       const savedProfile = {
         id: profileId.toString(),
         name,
-        settings: JSON.parse(profileData),
+        settings: JSON.parse(profileData), // Send back parsed data
       };
 
+      console.log(
+        `Profile ${savedProfile.name} (ID: ${savedProfile.id}) saved successfully for user ${currentUserId}. Emitting 'profileSaved'.`
+      );
+      // Emit confirmation back to the requesting socket
       socket.emit("profileSaved", savedProfile);
+      // Optionally broadcast to other user sockets? Maybe not necessary for save.
+      // socket.to(currentUserId.toString()).emit("profileSaved", savedProfile);
     } catch (error) {
-      console.error("Error saving profile:", error);
+      console.error(`Error saving profile for user ${currentUserId}:`, error);
       socket.emit("error", { message: "Error saving profile" });
     }
   });
 
   socket.on("loadProfile", async (profileId) => {
-    if (!socket.request.session?.user?.id) {
-      socket.emit("error", { message: "Not authenticated" });
-      return;
+    const currentUserId = socket.request.session?.user?.id;
+    if (!currentUserId) {
+      console.log(`Socket ${socket.id} - Not authenticated for loadProfile.`);
+      return socket.emit("error", { message: "Not authenticated" });
     }
-
+    if (!profileId) {
+      return socket.emit("error", { message: "No profile ID provided" });
+    }
+    console.log(
+      `Socket ${socket.id} (User ${currentUserId}) loading profile ID: ${profileId}`
+    );
     try {
       const { rows } = await pool.query(
         "SELECT settings, name FROM user_profiles WHERE id = $1 AND user_id = $2",
-        [profileId, socket.request.session.user.id]
+        [profileId, currentUserId]
       );
 
-      if (!rows[0]) {
-        socket.emit("error", { message: "Profile not found" });
-        return;
+      if (rows.length === 0) {
+        console.log(
+          `Profile ID ${profileId} not found for user ${currentUserId}.`
+        );
+        return socket.emit("error", {
+          message: "Profile not found or unauthorized",
+        });
       }
 
-      const profileData = JSON.parse(rows[0].settings);
+      const profileData = JSON.parse(rows[0].settings || "{}"); // Default to empty object if settings are null/invalid
+      const profileName = rows[0].name;
+
+      console.log(
+        `Profile "${profileName}" loaded successfully for user ${currentUserId}. Emitting 'profileLoaded'.`
+      );
+
+      // --- Update Session Filter States based on Loaded Profile ---
+      if (profileData.filterLists && Array.isArray(profileData.filterLists)) {
+        socket.request.session.currentFilterStates =
+          socket.request.session.currentFilterStates || {};
+        // Reset session states based ONLY on the loaded profile lists
+        const newSessionStates = {};
+        profileData.filterLists.forEach((list) => {
+          newSessionStates[list.id.toString()] = Boolean(list.enabled);
+        });
+        socket.request.session.currentFilterStates = newSessionStates;
+        console.log(
+          `Updated session filter states based on loaded profile "${profileName}" for user ${currentUserId}.`
+        );
+
+        // Save the session with the new filter states
+        await new Promise((resolve, reject) => {
+          socket.request.session.save((err) => {
+            if (err) {
+              console.error(
+                `[Socket LoadProfile] Session save error for user ${currentUserId}:`,
+                err
+              );
+              reject(err);
+              return;
+            }
+            console.log(
+              `[Socket LoadProfile] Session saved successfully for user ${currentUserId}.`
+            );
+            resolve();
+          });
+        });
+      } else {
+        console.log(
+          `Loaded profile "${profileName}" has no filterLists array, session filter state not changed.`
+        );
+      }
+      // --- End Session Filter State Update ---
+
+      // Emit the loaded data back to the requesting client
       socket.emit("profileLoaded", {
-        id: profileId,
-        name: rows[0].name,
-        ...profileData,
+        id: profileId.toString(),
+        name: profileName,
+        settings: profileData.settings || {}, // Ensure settings object exists
+        filterLists: profileData.filterLists || [], // Ensure filterLists array exists
       });
+
+      // Optionally broadcast to other user sockets?
+      // socket.to(currentUserId.toString()).emit('profileLoaded', { /* ... same data ... */ });
     } catch (error) {
-      console.error("Error loading profile:", error);
+      console.error(
+        `Error loading profile ${profileId} for user ${currentUserId}:`,
+        error
+      );
       socket.emit("error", { message: "Error loading profile" });
     }
   });
 
-  socket.on("deleteFilterList", async ({ id }) => {
-    if (!socket.request.session?.user?.id) {
-      socket.emit("error", { message: "Not authenticated" });
-      return;
-    }
-
-    try {
-      // First verify the filter list belongs to this user
-      const { rows } = await pool.query(
-        "SELECT user_id FROM filter_lists WHERE id = $1",
-        [id]
-      );
-
-      if (
-        rows.length === 0 ||
-        rows[0].user_id !== socket.request.session.user.id
-      ) {
-        socket.emit("error", {
-          message: "Filter list not found or unauthorized",
-        });
-        return;
-      }
-
-      // Delete the filter list
-      await pool.query("DELETE FROM filter_lists WHERE id = $1", [id]);
-
-      // Emit the deletion event
-      socket.emit("filterListDeleted", { id });
-    } catch (error) {
-      console.error("Error deleting filter list:", error);
-      socket.emit("error", { message: "Failed to delete filter list" });
-    }
-  });
-
   socket.on("deleteProfile", async ({ id }) => {
-    console.log("Server: Received deleteProfile request for id:", id);
-    if (!socket.request.session?.user?.id) {
-      socket.emit("error", { message: "Not authenticated" });
-      return;
+    const profileIdToDelete = id; // Rename
+    const currentUserId = socket.request.session?.user?.id;
+    if (!currentUserId) {
+      console.log(`Socket ${socket.id} - Not authenticated for deleteProfile.`);
+      return socket.emit("error", { message: "Not authenticated" });
     }
-
+    if (!profileIdToDelete) {
+      return socket.emit("error", {
+        message: "No profile ID provided for deletion",
+      });
+    }
+    console.log(
+      `Socket ${socket.id} (User ${currentUserId}) deleting profile ID: ${profileIdToDelete}`
+    );
     try {
       const result = await pool.query(
         "DELETE FROM user_profiles WHERE id = $1 AND user_id = $2",
-        [id, socket.request.session.user.id]
+        [profileIdToDelete, currentUserId]
       );
 
       if (result.rowCount > 0) {
-        socket.emit("profileDeleted", id);
+        console.log(
+          `Profile ID ${profileIdToDelete} deleted successfully for user ${currentUserId}. Emitting 'profileDeleted'.`
+        );
+        // Emit confirmation only to the requesting socket
+        socket.emit("profileDeleted", profileIdToDelete);
+        // Optionally broadcast to other user sockets
+        socket
+          .to(currentUserId.toString())
+          .emit("profileDeleted", profileIdToDelete);
       } else {
-        socket.emit("error", { message: "Profile not found" });
+        console.log(
+          `Profile ID ${profileIdToDelete} not found or user ${currentUserId} does not own it.`
+        );
+        socket.emit("error", { message: "Profile not found or unauthorized" });
       }
     } catch (error) {
-      console.error("Server: Error deleting profile:", error);
+      console.error(
+        `Server error deleting profile ${profileIdToDelete} for user ${currentUserId}:`,
+        error
+      );
       socket.emit("error", { message: "Error deleting profile" });
     }
   });
 
-  // socket.on("clearKills", () => {
-  //   killmails = [];
-  //   socket.emit("killmailsCleared");
-  // });
+  // --- Filter List Create/Delete via Socket ---
+  socket.on("createFilterList", async (data) => {
+    const currentUserId = socket.request.session?.user?.id;
+    if (!currentUserId) {
+      console.log(
+        `Socket ${socket.id} - Not authenticated for createFilterList.`
+      );
+      return socket.emit("error", { message: "Not authenticated" });
+    }
+    console.log(
+      `Socket ${socket.id} (User ${currentUserId}) creating filter list: ${data?.name}`
+    );
 
-  socket.on("disconnect", () => {
-    console.log("Client disconnected");
+    try {
+      const { name, ids, enabled = true, is_exclude, filter_type } = data;
+      if (!name || !ids || !filter_type) {
+        console.warn(
+          `Socket ${socket.id} - Missing data for createFilterList:`,
+          data
+        );
+        return socket.emit("error", {
+          message: "Missing required fields (name, ids, type)",
+        });
+      }
+
+      const processedIds = Array.isArray(ids)
+        ? ids.map((id) => String(id).trim())
+        : ids
+            .split(",")
+            .map((id) => id.trim())
+            .filter((id) => id);
+
+      // Insert into DB
+      const result = await pool.query(
+        "INSERT INTO filter_lists (user_id, name, ids, enabled, is_exclude, filter_type) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id",
+        [
+          currentUserId,
+          name,
+          JSON.stringify(processedIds),
+          enabled ? 1 : 0,
+          is_exclude ? 1 : 0,
+          filter_type,
+        ]
+      );
+      const newListId = result.rows[0].id.toString();
+      console.log(
+        `Inserted new filter list with ID ${newListId} for user ${currentUserId}.`
+      );
+
+      // Update Session State
+      socket.request.session.currentFilterStates =
+        socket.request.session.currentFilterStates || {};
+      socket.request.session.currentFilterStates[newListId] = Boolean(enabled);
+      console.log(
+        `Updated session state for new list ${newListId}: enabled=${Boolean(
+          enabled
+        )}`
+      );
+
+      // Save Session
+      await new Promise((resolve, reject) => {
+        socket.request.session.save((err) => {
+          if (err) {
+            console.error("[Socket CreateFilterList] Session save error:", err);
+            reject(err);
+            return;
+          }
+          console.log(
+            `[Socket CreateFilterList] Session saved for user ${currentUserId}.`
+          );
+          resolve();
+        });
+      });
+
+      // Prepare and Emit
+      const newFilterList = {
+        id: newListId,
+        user_id: currentUserId.toString(),
+        name,
+        ids: processedIds,
+        enabled: Boolean(enabled),
+        is_exclude: Boolean(is_exclude),
+        filter_type,
+      };
+
+      console.log(
+        `Emitting 'filterListCreated' to room ${currentUserId.toString()} for list ${newListId}`
+      );
+      // Emit only to the user's room
+      io.to(currentUserId.toString()).emit("filterListCreated", newFilterList);
+    } catch (error) {
+      console.error(
+        `Error creating filter list for user ${currentUserId}:`,
+        error
+      );
+      socket.emit("error", { message: "Failed to create filter list" });
+    }
   });
-});
+
+  socket.on("deleteFilterList", async ({ id }) => {
+    const listIdToDelete = id; // Rename
+    const currentUserId = socket.request.session?.user?.id;
+    if (!currentUserId) {
+      console.log(
+        `Socket ${socket.id} - Not authenticated for deleteFilterList.`
+      );
+      return socket.emit("error", { message: "Not authenticated" });
+    }
+    if (!listIdToDelete) {
+      return socket.emit("error", {
+        message: "No filter list ID provided for deletion",
+      });
+    }
+    console.log(
+      `Socket ${socket.id} (User ${currentUserId}) deleting filter list ID: ${listIdToDelete}`
+    );
+
+    try {
+      // Verify ownership & Delete from DB
+      const { rowCount } = await pool.query(
+        "DELETE FROM filter_lists WHERE id = $1 AND user_id = $2",
+        [listIdToDelete, currentUserId]
+      );
+
+      if (rowCount === 0) {
+        console.log(
+          `Filter list ${listIdToDelete} not found or user ${currentUserId} does not own it.`
+        );
+        return socket.emit("error", {
+          message: "Filter list not found or unauthorized",
+        });
+      }
+      console.log(
+        `Deleted filter list ${listIdToDelete} from DB for user ${currentUserId}.`
+      );
+
+      // Remove from Session State
+      if (
+        socket.request.session.currentFilterStates &&
+        socket.request.session.currentFilterStates[listIdToDelete] !== undefined
+      ) {
+        delete socket.request.session.currentFilterStates[listIdToDelete];
+        console.log(`Removed list state for ${listIdToDelete} from session.`);
+
+        // Save Session
+        await new Promise((resolve, reject) => {
+          socket.request.session.save((err) => {
+            if (err) {
+              console.error(
+                "[Socket DeleteFilterList] Session save error:",
+                err
+              );
+              reject(err);
+              return;
+            }
+            console.log(
+              `[Socket DeleteFilterList] Session saved for user ${currentUserId}.`
+            );
+            resolve();
+          });
+        });
+      } else {
+        console.log(
+          `No session state found for list ID ${listIdToDelete} to delete.`
+        );
+      }
+
+      // Emit deletion event only to the user's room
+      console.log(
+        `Emitting 'filterListDeleted' to room ${currentUserId.toString()} for list ${listIdToDelete}`
+      );
+      io.to(currentUserId.toString()).emit("filterListDeleted", {
+        id: listIdToDelete,
+      });
+    } catch (error) {
+      console.error(
+        `Error deleting filter list ${listIdToDelete} for user ${currentUserId}:`,
+        error
+      );
+      socket.emit("error", { message: "Failed to delete filter list" });
+    }
+  });
+
+  // --- NEW: Handler for Filter List State Update ---
+  socket.on("updateFilterState", async ({ id, enabled }) => {
+    const listId = id; // Rename for clarity
+    const currentUserId = socket.request.session?.user?.id; // Check auth *inside* handler
+
+    // Basic validation
+    if (!currentUserId) {
+      console.log(
+        `Socket ${socket.id} - Not authenticated for updateFilterState (List ID: ${listId}).`
+      );
+      return; // Silently ignore if not authenticated
+    }
+    if (typeof enabled !== "boolean" || !listId) {
+      console.warn(
+        `Socket ${socket.id} (User ${currentUserId}) sent invalid data for updateFilterState: ID=${listId}, Enabled=${enabled}`
+      );
+      return; // Ignore invalid updates
+    }
+    console.log(
+      `Socket ${socket.id} (User ${currentUserId}) received updateFilterState for ID: ${listId}, Enabled: ${enabled}`
+    );
+
+    try {
+      // Initialize session state if it doesn't exist (should be rare here)
+      socket.request.session.currentFilterStates =
+        socket.request.session.currentFilterStates || {};
+
+      // --- Optional: Verify list ownership before updating state ---
+      // const { rowCount } = await pool.query("SELECT 1 FROM filter_lists WHERE id = $1 AND user_id = $2", [listId, currentUserId]);
+      // if (rowCount === 0) {
+      //     console.warn(`User ${currentUserId} attempted to update state for list ${listId} they don't own (or doesn't exist).`);
+      //     return; // Ignore
+      // }
+      // --- End Optional Verification ---
+
+      // Update the state in the session object
+      socket.request.session.currentFilterStates[listId] = enabled;
+      console.log(
+        `Updated session state for list ${listId}: enabled=${enabled} for user ${currentUserId}`
+      );
+
+      // Save the session to persist the change
+      await new Promise((resolve, reject) => {
+        socket.request.session.save((err) => {
+          if (err) {
+            console.error(
+              `[Socket UpdateFilterState] Error saving session for user ${currentUserId}:`,
+              err
+            );
+            socket.emit("error", { message: "Failed to save filter state" });
+            reject(err);
+          } else {
+            console.log(
+              `[Socket UpdateFilterState] Session saved successfully for user ${currentUserId}.`
+            );
+            // Optional: Emit confirmation back to the *requesting* socket
+            // socket.emit('filterStateUpdated', { id: listId, enabled });
+            resolve();
+          }
+        });
+      });
+
+      // Broadcast the change to other sockets of the same user in the room
+      console.log(
+        `Broadcasting 'filterStateChanged' to room ${currentUserId.toString()} (except sender ${
+          socket.id
+        }) for list ${listId}`
+      );
+      socket
+        .to(currentUserId.toString())
+        .emit("filterStateChanged", { id: listId, enabled });
+    } catch (error) {
+      console.error(
+        `Error processing updateFilterState for user ${currentUserId}, list ${listId}:`,
+        error
+      );
+      socket.emit("error", { message: "Server error updating filter state" }); // Inform client of failure
+    }
+  });
+
+  // --- Disconnect Handler ---
+  socket.on("disconnect", (reason) => {
+    console.log(
+      `Socket disconnected: ${socket.id}. User: ${
+        connectionUserId || "N/A"
+      }. Reason: ${reason}`
+    );
+    // User is automatically removed from rooms on disconnect
+  });
+}); // End of io.on('connection')
 
 // Function to poll for new killmails from RedisQ
 async function pollRedisQ() {

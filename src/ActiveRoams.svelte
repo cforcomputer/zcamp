@@ -112,7 +112,7 @@
   }
 
   function getSystemCount(activity) {
-    return activity.visitedSystems?.size || 1; // Use tracked count
+    return activity.systems?.length || 0;
   }
 
   function getRoamColor(activity) {

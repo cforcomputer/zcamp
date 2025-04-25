@@ -128,6 +128,19 @@ Tech stack:
 - Add a filter gangs to only show roaming gangs (multiple systems)
 - Add a filter for gangs that is a dropdown to show currently active regions, user can also type it in to filter the dropdown to select what they want.
 - Add an option to send alerts if there is a gang in a specific region.
+- Exclude kills where the attacker is only a structure: https://zkillboard.com/kill/126528882/ https://zkillboard.com/related/30001159/202504232200/ 
+- --- Prob Calc for Activity: 30001159-Stargate (EX6-AO) (Current Class: roaming_camp) ---
+Ignoring secondary pod kill 126528730 for probability.
+Ignoring secondary pod kill 126528809 for probability.
+Ignoring secondary pod kill 126528882 for probability.
+Starting probability calculation with 3 relevant kills.
+Activity age (based on relevant kills): 22.7 minutes
+Threat ship score capped at 50% (was 122.0%)
+Threat ship contribution: +50.0%
+Raw probability (capped at 95%): 50.0%
+Final normalized probability: 50%
+https://zkillboard.com/related/30001252/202504232200/
+devils hill should not have counted in the total.
 
 #### Next thing
 

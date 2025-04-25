@@ -77,16 +77,20 @@
   const USER_COLOR = 0x00ffff; // Cyan
   const ROUTE_COLOR = 0x00ff00; // Green
   const DANGER_ROUTE_COLOR = 0xff6600; // Orange
-  const FLASH_COLOR_CAMP = new THREE.Color(0xffdddd); //
-  const FLASH_COLOR_SMARTBOMB = new THREE.Color(0xffccaa); //
-  const FLASH_COLOR_ROAM = new THREE.Color(0xddddff); //
-  const FLASH_COLOR_ROAMING_CAMP = new THREE.Color(0xffddaa); //
-  const FLASH_COLOR_BATTLE = new THREE.Color(0xffaaff); //
-  const SECONDARY_GLOW_COLOR_CAMP = 0xffaaaa; //
-  const SECONDARY_GLOW_COLOR_SMARTBOMB = 0xffbb88; //
-  const SECONDARY_GLOW_COLOR_ROAM = 0xaaaaff; //
-  const SECONDARY_GLOW_COLOR_ROAMING_CAMP = 0xffcc88; //
-  const SECONDARY_GLOW_COLOR_BATTLE = 0xee88ee; //
+  const FLASH_COLOR_CAMP = new THREE.Color(0xffdddd); // Original, light red/pink flash
+  const FLASH_COLOR_SMARTBOMB = new THREE.Color(0xffccaa); // Original, light orange flash
+  const FLASH_COLOR_ROAM = new THREE.Color(0xddddff); // Original, light blue flash
+  const FLASH_COLOR_ROAMING_CAMP = new THREE.Color(0xffddaa); // Original, light orange flash
+  const FLASH_COLOR_BATTLE = new THREE.Color(0xffaaff); // Original, light purple/pink flash
+  const SECONDARY_GLOW_COLOR_CAMP = 0xffaaaa;
+  const SECONDARY_GLOW_COLOR_SMARTBOMB = 0xffbb88;
+  const SECONDARY_GLOW_COLOR_ROAM = 0xaaaaff;
+  const SECONDARY_GLOW_COLOR_ROAMING_CAMP = 0xffcc88;
+  const SECONDARY_GLOW_COLOR_BATTLE = 0xee88ee;
+
+  const CAMP_FLASH_COLOR = 0xff0000; // Bright Red flash for Camps
+  const SMARTBOMB_FLASH_COLOR = 0xff4444; // Slightly less intense Red flash for SB
+  const ROUTE_FLASH_COLOR = 0xffffff; // White flash for all route types
   const classificationIcons = {
     //
     camp: "⛺", //
@@ -695,7 +699,7 @@
       opacity: 0.7, //
     });
     hoverRing = new THREE.Mesh(ringGeometry, ringMaterial); //
-    // hoverRing.rotation.x = -Math.PI / 2; // Keep it flat on the XZ plane
+    hoverRing.rotation.x = Math.PI / 2; // Rotate to face camera
     hoverRing.visible = false; //
     scene.add(hoverRing); //
 
@@ -1225,12 +1229,16 @@
     ) {
       case "camp": //
       case "smartbomb": //
-      case "roaming_camp": // Use camp-style marker for roaming camps too
-      case "battle": // Use camp-style marker for battles
         markerObj = createOrUpdateCampStyleMarker(activity, now, latestKillId); //
         break; //
       case "roam": //
-        markerObj = createOrUpdateRoamStyleMarker(activity, now, latestKillId); //
+      case "roaming_camp": // ADDED - Will draw route
+      case "battle": // ADDED - Will draw route
+        markerObj = createOrUpdateMultiSystemRouteMarker(
+          activity,
+          now,
+          latestKillId
+        ); // Renamed function call
         break; //
       case "activity": // Decide how to represent 'activity' - maybe a smaller grey glow?
         // markerObj = createOrUpdateActivityStyleMarker(activity, now, latestKillId); //
@@ -1377,173 +1385,307 @@
     }
   } //
 
-  // --- NEW: Function to create/update Camp, Smartbomb, Roaming Camp, Battle markers ---
+  // --- NEW: Function to create/update Roam, Roaming Camp, Battle markers ---
+  function createOrUpdateMultiSystemRouteMarker(activity, now, latestKillId) {
+    if (!activity.systems || activity.systems.length < 1) {
+      console.warn(
+        `[UniverseMap] Skipping multi-system route marker ${activity.id} (${activity.classification}): No system data.`
+      );
+      return null;
+    }
+
+    // Sort systems by time to ensure correct path order
+    const sortedSystems = [...activity.systems].sort(
+      (a, b) => new Date(a.time) - new Date(b.time)
+    );
+
+    const points = []; // Stores Vector3 positions for the path line
+    const systemOrder = []; // Stores the original system data in order
+
+    // Loop through the sorted systems from the activity data
+    for (const system of sortedSystems) {
+      const systemIdInt = parseInt(system.id);
+      if (isNaN(systemIdInt)) {
+        console.warn(
+          `[UniverseMap] Skipping system in multi-system route ${activity.id} (${activity.classification}): Invalid system ID ${system.id}`
+        );
+        continue;
+      }
+      const systemObj = solarSystems.get(systemIdInt);
+      if (systemObj) {
+        points.push(systemObj.position.clone());
+        systemOrder.push(system);
+      } else {
+        console.warn(
+          `[UniverseMap Path Draw] System ${systemIdInt} (Name: ${system.name || "N/A"}) NOT FOUND in rendered solarSystems map for activity ${activity.id} (${activity.classification}). System excluded from path line.`
+        );
+      }
+    } // End of loop through systems
+
+    if (points.length < 1) {
+      console.warn(
+        `[UniverseMap] Skipping multi-system route marker ${activity.id} (${activity.classification}): No valid points found on rendered map.`
+      );
+      return null; // Need at least one valid point to place secondary glow
+    }
+
+    // Determine colors and styles based on classification
+    let baseColor, secondaryColor, glowSize, lineWidth, markerType;
+    // FLASH COLOR IS NOW THE SAME FOR ALL ROUTES
+    const flashColor = ROUTE_FLASH_COLOR; // White flash
+
+    switch (activity.classification) {
+      case "roam":
+        baseColor = ROAM_COLOR;
+        secondaryColor = SECONDARY_GLOW_COLOR_ROAM;
+        glowSize = 60;
+        lineWidth = 2;
+        markerType = "roam";
+        break;
+      case "roaming_camp":
+        baseColor = ROAMING_CAMP_COLOR;
+        secondaryColor = SECONDARY_GLOW_COLOR_ROAMING_CAMP;
+        glowSize = 70;
+        lineWidth = 3;
+        markerType = "roaming_camp";
+        break;
+      case "battle":
+        baseColor = BATTLE_COLOR;
+        secondaryColor = SECONDARY_GLOW_COLOR_BATTLE;
+        glowSize = 80;
+        lineWidth = 4;
+        markerType = "battle";
+        break;
+      default: // Fallback
+        baseColor = ROAM_COLOR;
+        secondaryColor = SECONDARY_GLOW_COLOR_ROAM;
+        glowSize = 60;
+        lineWidth = 2;
+        markerType = "unknown_multi_system";
+    }
+
+    const routeGroup = new THREE.Group();
+    let lineObject = null;
+    let secondaryGlowSprite = null;
+
+    // Create path line
+    if (points.length >= 2) {
+      try {
+        const curve = new THREE.CatmullRomCurve3(points);
+        const geometry = new THREE.BufferGeometry().setFromPoints(
+          curve.getPoints(Math.max(64, points.length * 8))
+        );
+        const material = new THREE.LineBasicMaterial({
+          color: new THREE.Color(baseColor),
+          linewidth: lineWidth,
+          transparent: true,
+          opacity: 1.0, // Keep route line opacity high
+        });
+        // Store the HEX value of the base color
+        material.userData = { baseColorHex: baseColor };
+        lineObject = new THREE.Line(geometry, material);
+        routeGroup.add(lineObject);
+      } catch (e) {
+        console.error(
+          `Error creating path line for ${markerType} ${activity.id}:`,
+          e
+        );
+      }
+    } else {
+      console.log(
+        `[UniverseMap Path Draw] Only ${points.length} valid system point(s) found for ${markerType} ${activity.id}. Path line will not be drawn (requires >= 2).`
+      );
+    }
+
+    // Secondary Glow
+    const lastSystemPos = points[points.length - 1];
+    if (lastSystemPos) {
+      const secondaryGlowMaterial = new THREE.SpriteMaterial({
+        map: glowTexture,
+        color: new THREE.Color(secondaryColor),
+        transparent: true,
+        opacity: 0.1, // Base opacity
+        depthWrite: false,
+        sizeAttenuation: true,
+      });
+      secondaryGlowSprite = new THREE.Sprite(secondaryGlowMaterial);
+      secondaryGlowSprite.scale.set(glowSize, glowSize, 1);
+      secondaryGlowSprite.position.copy(lastSystemPos);
+      secondaryGlowSprite.renderOrder = -1;
+      routeGroup.add(secondaryGlowSprite);
+    }
+
+    // Add small system glow markers for visited systems
+    systemOrder.forEach((system) => {
+      const systemIdInt = parseInt(system.id);
+      if (isNaN(systemIdInt)) return;
+      const systemObj = solarSystems.get(systemIdInt);
+
+      const hasMajorActivityMarker = Array.from(activityMarkers.values()).some(
+        (m) =>
+          (m.activityData.systemId &&
+            parseInt(m.activityData.systemId) === systemIdInt &&
+            ["camp", "smartbomb"].includes(m.activityData.classification)) ||
+          (m.activityData.lastSystem?.id &&
+            parseInt(m.activityData.lastSystem.id) === systemIdInt &&
+            ["roaming_camp", "battle"].includes(m.activityData.classification))
+      );
+
+      if (systemObj && !hasMajorActivityMarker) {
+        const glowMaterial = new THREE.SpriteMaterial({
+          map: glowTexture,
+          color: new THREE.Color(baseColor),
+          transparent: true,
+          opacity: 0.6,
+          depthWrite: false,
+        });
+        const glowSprite = new THREE.Sprite(glowMaterial);
+        glowSprite.position.copy(systemObj.position);
+        glowSprite.scale.set(8, 8, 1);
+        routeGroup.add(glowSprite);
+      }
+    });
+
+    // Store HEX numbers in userData
+    routeGroup.userData = {
+      type: markerType,
+      activityData: activity,
+      systems: systemOrder,
+      flashColor: flashColor, // Store designated flash hex (ROUTE_FLASH_COLOR)
+      baseColor: baseColor, // Store base hex
+    };
+
+    // Return the object
+    return {
+      group: routeGroup,
+      activityData: activity,
+      mixer: null,
+      lineMaterial: lineObject?.material,
+      lastKillId: latestKillId,
+      flashEndTime: 0,
+      secondaryGlow: secondaryGlowSprite,
+      secondaryGlowFlashEndTime: 0, // Keep for potential future use
+      type: markerType,
+    };
+  } // End of createOrUpdateMultiSystemRouteMarker
+
+  // --- Function to create/update Camp, Smartbomb markers ---
   function createOrUpdateCampStyleMarker(activity, now, latestKillId) {
-    //
-    const systemId = parseInt(activity.systemId); // // Camp-like activities have a primary systemId
+    const systemId = parseInt(activity.systemId);
     if (isNaN(systemId)) {
-      // <<< DEBUG Check ID
       console.warn(
         `[UniverseMap] Invalid systemId for camp-style marker: ${activity.systemId}`
-      ); //
-      return null; //
+      );
+      return null;
     }
-    const system = solarSystems.get(systemId); //
+    const system = solarSystems.get(systemId);
     if (!system) {
-      //
       console.warn(
         `[UniverseMap] System ${systemId} not found for camp-style marker ${activity.id}`
-      ); // <<< DEBUG
-      return null; // // Cannot place marker if system isn't rendered
+      );
+      return null;
     }
 
-    const group = new THREE.Group(); //
-    group.position.copy(system.position); //
-    let primaryColor, secondaryColor, flashColor; //
-    let baseGlowSize = ((activity.probability || 0) / 100) * 20 + 5; // Use default 0 if undefined // Base size on probability
+    const group = new THREE.Group();
+    group.position.copy(system.position);
+    let primaryColor, secondaryColor, flashColor; // flashColor determined by switch
+    let baseGlowSize = ((activity.probability || 0) / 100) * 20 + 5;
 
-    switch (
-      activity.classification //
-    ) {
-      case "camp": //
-        primaryColor = CAMP_COLOR; //
-        secondaryColor = SECONDARY_GLOW_COLOR_CAMP; //
-        flashColor = FLASH_COLOR_CAMP; //
-        break; //
-      case "smartbomb": //
-        primaryColor = SMARTBOMB_COLOR; //
-        secondaryColor = SECONDARY_GLOW_COLOR_SMARTBOMB; //
-        flashColor = FLASH_COLOR_SMARTBOMB; //
-        baseGlowSize *= 1.1; // Slightly larger for smartbombs
-        break; //
-      case "roaming_camp": //
-        primaryColor = ROAMING_CAMP_COLOR; //
-        secondaryColor = SECONDARY_GLOW_COLOR_ROAMING_CAMP; //
-        flashColor = FLASH_COLOR_ROAMING_CAMP; //
-        baseGlowSize *= 1.2; // Larger for roaming camps
-        break; //
-      case "battle": //
-        primaryColor = BATTLE_COLOR; //
-        secondaryColor = SECONDARY_GLOW_COLOR_BATTLE; //
-        flashColor = FLASH_COLOR_BATTLE; //
-        baseGlowSize = //
-          30 + //
-          (Math.min(activity.metrics?.partyMetrics?.characters || 0, 100) / //
-            100) * //
-            30; // Size based on participants for battles
-        break; //
-      default: // Fallback, should not happen if called correctly
-        primaryColor = CAMP_COLOR; //
-        secondaryColor = SECONDARY_GLOW_COLOR_CAMP; //
-        flashColor = FLASH_COLOR_CAMP; //
+    switch (activity.classification) {
+      case "camp":
+        primaryColor = CAMP_COLOR;
+        secondaryColor = SECONDARY_GLOW_COLOR_CAMP;
+        flashColor = CAMP_FLASH_COLOR; // Use defined constant
+        break;
+      case "smartbomb":
+        primaryColor = SMARTBOMB_COLOR;
+        secondaryColor = SECONDARY_GLOW_COLOR_SMARTBOMB;
+        flashColor = SMARTBOMB_FLASH_COLOR; // Use defined constant
+        baseGlowSize *= 1.1;
+        break;
+      default: // Fallback
+        primaryColor = CAMP_COLOR;
+        secondaryColor = SECONDARY_GLOW_COLOR_CAMP;
+        flashColor = CAMP_FLASH_COLOR; // Default flash for safety
     }
 
     // Primary Glow
     const glowMaterial = new THREE.SpriteMaterial({
-      //
-      map: glowTexture, //
-      color: new THREE.Color(primaryColor), //
-      transparent: true, //
-      opacity: Math.min(0.8, (activity.probability || 0) / 100), //
-      depthWrite: false, //
-      sizeAttenuation: true, //
+      map: glowTexture,
+      color: new THREE.Color(primaryColor), // Set base color
+      transparent: true,
+      opacity: Math.min(0.8, (activity.probability || 0) / 100),
+      depthWrite: false,
+      sizeAttenuation: true,
     });
-    const glowSprite = new THREE.Sprite(glowMaterial); //
-    glowSprite.scale.set(baseGlowSize, baseGlowSize, 1); //
-    group.add(glowSprite); //
+    const glowSprite = new THREE.Sprite(glowMaterial);
+    glowSprite.scale.set(baseGlowSize, baseGlowSize, 1);
+    group.add(glowSprite);
 
-    // Secondary Glow (Positioned at the primary system for camps/SB, last system for roaming/battle)
-    const lastSystemIdStr = activity.lastSystem?.id;
-    const lastSystemIdInt = lastSystemIdStr ? parseInt(lastSystemIdStr) : NaN;
-
-    let secondaryGlowTargetSystem = system; // Default to primary system (where the group is anchored)
-    if (
-      (activity.classification === "roaming_camp" ||
-        activity.classification === "battle") &&
-      !isNaN(lastSystemIdInt) &&
-      solarSystems.has(lastSystemIdInt)
-    ) {
-      secondaryGlowTargetSystem = solarSystems.get(lastSystemIdInt);
-    } else if (
-      (activity.classification === "roaming_camp" ||
-        activity.classification === "battle") &&
-      !isNaN(lastSystemIdInt)
-    ) {
-      console.warn(
-        `[UniverseMap] Last system ${lastSystemIdInt} for secondary glow (Activity ${activity.id}) not found in rendered map. Using primary system ${systemId}.`
-      );
-    }
-    const secondaryGlowSize = baseGlowSize * 10.0; //
+    // Secondary Glow
+    const secondaryGlowTargetSystem = system;
+    const secondaryGlowSize = baseGlowSize * 10.0;
     const secondaryGlowMaterial = new THREE.SpriteMaterial({
-      //
-      map: glowTexture, //
-      color: new THREE.Color(secondaryColor), //
-      transparent: true, //
-      opacity: 0.1, //
-      depthWrite: false, //
-      sizeAttenuation: true, //
+      map: glowTexture,
+      color: new THREE.Color(secondaryColor),
+      transparent: true,
+      opacity: 0.1, // Base opacity
+      depthWrite: false,
+      sizeAttenuation: true,
     });
-    const secondaryGlowSprite = new THREE.Sprite(secondaryGlowMaterial); //
-    secondaryGlowSprite.scale.set(secondaryGlowSize, secondaryGlowSize, 1); //
-    secondaryGlowSprite.renderOrder = -1; //
+    const secondaryGlowSprite = new THREE.Sprite(secondaryGlowMaterial);
+    secondaryGlowSprite.scale.set(secondaryGlowSize, secondaryGlowSize, 1);
+    secondaryGlowSprite.renderOrder = -1;
+    secondaryGlowSprite.position.set(0, 0, 0);
+    group.add(secondaryGlowSprite);
 
-    // The group is positioned at 'system.position'.
-    // We want the sprite to appear at 'secondaryGlowTargetSystem.position' in world space.
-    // So, the sprite's local position within the group needs to be the difference.
-    const relativePosition = new THREE.Vector3().subVectors(
-      secondaryGlowTargetSystem.position, // Target world position
-      system.position // Group's world position (origin)
-    );
-    secondaryGlowSprite.position.copy(relativePosition);
-
-    group.add(secondaryGlowSprite); // Add to the main group
-
-    // Animation Mixer
-    const mixer = new THREE.AnimationMixer(glowSprite); //
-    const track = new THREE.KeyframeTrack( //
-      ".scale", //
-      [0, PULSE_DURATION / 2, PULSE_DURATION], //
+    // Animation Mixer (still used for base pulse)
+    const mixer = new THREE.AnimationMixer(glowSprite);
+    const track = new THREE.KeyframeTrack(
+      ".scale", // Property to animate
+      [0, PULSE_DURATION / 2, PULSE_DURATION], // Time points
       [
-        //
-        baseGlowSize, //
-        baseGlowSize, //
-        baseGlowSize, //
-        baseGlowSize * 1.3, //
-        baseGlowSize * 1.3, //
-        baseGlowSize, //
-        baseGlowSize, //
-        baseGlowSize, //
-        baseGlowSize, //
-      ] //
+        // Values at corresponding times (x,y,z for scale)
+        baseGlowSize,
+        baseGlowSize,
+        baseGlowSize, // Start scale
+        baseGlowSize * 1.3,
+        baseGlowSize * 1.3,
+        baseGlowSize * 1.3, // Mid scale (larger)
+        baseGlowSize,
+        baseGlowSize,
+        baseGlowSize, // End scale (back to start)
+      ]
     );
-    const clip = new THREE.AnimationClip("pulse", PULSE_DURATION, [track]); //
-    const action = mixer.clipAction(clip); //
-    action.setLoop(THREE.LoopRepeat); //
-    action.play(); //
+    const clip = new THREE.AnimationClip("pulse", PULSE_DURATION, [track]);
+    const action = mixer.clipAction(clip);
+    action.setLoop(THREE.LoopRepeat);
+    action.play();
 
+    // Store HEX numbers in userData
     group.userData = {
-      //
-      type: activity.classification, // Store the specific classification
-      activityData: activity, //
-      name: system.data.itemname, //
-      probability: activity.probability, //
-      flashColor: flashColor, // Store flash color for animation loop
-      baseColor: primaryColor, // Store base color
-      baseGlowSize: baseGlowSize, //
+      type: activity.classification,
+      activityData: activity,
+      name: system.data.itemname,
+      probability: activity.probability,
+      flashColor: flashColor, // Store designated flash hex
+      baseColor: primaryColor, // Store base hex
+      baseGlowSize: baseGlowSize,
     };
-    return {
-      //
-      group: group, //
-      activityData: activity, //
-      mixer: mixer, //
-      lastKillId: latestKillId, //
-      flashEndTime: 0, //
-      secondaryGlow: secondaryGlowSprite, //
-      secondaryGlowFlashEndTime: 0, //
-      type: activity.classification, // Store type for update logic
-    }; //
-  } //
 
+    return {
+      group: group,
+      activityData: activity,
+      mixer: mixer, // Mixer still needed for base pulse
+      lastKillId: latestKillId,
+      flashEndTime: 0,
+      secondaryGlow: secondaryGlowSprite,
+      secondaryGlowFlashEndTime: 0, // Keep for potential future use
+      type: activity.classification,
+    };
+  } // End of createOrUpdateCampStyleMarker
+
+  // --- NEW: Function to create/update Roam markers ---
   // --- NEW: Function to create/update Roam markers ---
   function createOrUpdateRoamStyleMarker(activity, now, latestKillId) {
     //
@@ -1555,72 +1697,90 @@
       return null; //
     }
 
+    // Sort systems by time to ensure correct path order
     const sortedSystems = [...activity.systems].sort(
       //
       (a, b) => new Date(a.time) - new Date(b.time) //
     );
-    const points = []; //
-    const systemOrder = []; //
+
+    const points = []; // Stores Vector3 positions for the path line
+    const systemOrder = []; // Stores the original system data in order
+
+    // Loop through the sorted systems from the activity data
     for (const system of sortedSystems) {
       //
+      // Ensure system ID is a valid number
       const systemIdInt = parseInt(system.id); //
       if (isNaN(systemIdInt)) {
         // <<< DEBUG Check ID
         console.warn(
           `[UniverseMap] Skipping system in roam ${activity.id}: Invalid system ID ${system.id}`
         ); //
-        continue; //
+        continue; // Skip this system if ID is invalid
       }
+
+      // Try to find this system in the currently rendered map data
       const systemObj = solarSystems.get(systemIdInt); //
+
       if (systemObj) {
-        //
+        // System found on map - add its position for the line and store its data
         points.push(systemObj.position.clone()); //
         systemOrder.push(system); //
       } else {
+        // --- ADDED: Detailed Logging for Missing Systems ---
         console.warn(
-          `[UniverseMap] System ${systemIdInt} not found for roam ${activity.id}`
-        ); // <<< DEBUG
+          `[UniverseMap Path Draw] System ${systemIdInt} (Name: ${system.name || "N/A"}) NOT FOUND in rendered solarSystems map for roam ${activity.id}. System excluded from path line.`
+        );
+        // --- END Logging ---
       }
-    }
+    } // End of loop through systems
 
+    // Check if we found enough valid points on the map for visualization
     if (points.length < 1) {
       //
       console.warn(
-        `[UniverseMap] Skipping roam marker ${activity.id}: No valid points found.`
-      ); // <<< DEBUG
-      return null; // // Need at least one valid point
+        `[UniverseMap] Skipping roam marker ${activity.id}: No valid points found on rendered map.`
+      ); // <<< DEBUG - Adjusted message
+      return null; // Need at least one valid point to place secondary glow
     }
 
-    const roamGroup = new THREE.Group(); //
-    let lineObject = null; //
-    let secondaryGlowSprite = null; //
+    const roamGroup = new THREE.Group(); // Group to hold line, glows, etc.
+    let lineObject = null; // Reference to the Line object
+    let secondaryGlowSprite = null; // Reference to the secondary glow sprite
 
-    // Create path line if more than one point
+    // Create path line ONLY if we have 2 or more valid points on the map
     if (points.length >= 2) {
       //
       try {
+        // Create a smooth curve through the valid points
         const curve = new THREE.CatmullRomCurve3(points); //
         const geometry = new THREE.BufferGeometry().setFromPoints(
           //
-          curve.getPoints(Math.max(64, points.length * 8)) //
+          curve.getPoints(Math.max(64, points.length * 8)) // Generate points along the curve
         );
+        // Material for the line (matches the 'old' style from previous steps)
         const material = new THREE.LineBasicMaterial({
-          color: new THREE.Color(ROAM_COLOR).multiplyScalar(1.5), // Keep color bright
-          linewidth: 2.5, // Slightly thicker
+          color: new THREE.Color(ROAM_COLOR), // Base color
+          linewidth: 2, // Thickness
           transparent: true,
-          opacity: 0.98,
+          opacity: 0.7, // Initial opacity for pulsing
         });
-        material.userData = { baseColor: new THREE.Color(ROAM_COLOR) }; // Store base color
-        lineObject = new THREE.Line(geometry, material); //
-        roamGroup.add(lineObject); //
+        material.userData = { baseColor: new THREE.Color(ROAM_COLOR) }; // Store base color for animation
+        lineObject = new THREE.Line(geometry, material); // Create the line mesh
+        roamGroup.add(lineObject); // Add line to the group
       } catch (e) {
-        console.error("Error creating roam path line:", e); //
+        console.error("Error creating roam path line:", e); // Log error if curve fails
         // Continue without the line if curve creation fails
       }
+    } else {
+      // Log if line isn't drawn due to insufficient points
+      console.log(
+        `[UniverseMap Path Draw] Only ${points.length} valid system point(s) found for roam ${activity.id}. Path line will not be drawn (requires >= 2).`
+      );
     }
 
-    // Secondary Glow at the last known system
-    const lastSystemPos = points[points.length - 1]; //
+    // Secondary Glow at the last known system's position *on the map*
+    const lastSystemPos = points[points.length - 1]; // Position of the last valid point
     if (lastSystemPos) {
       //
       const secondaryGlowMaterial = new THREE.SpriteMaterial({
@@ -1628,39 +1788,40 @@
         map: glowTexture, //
         color: new THREE.Color(SECONDARY_GLOW_COLOR_ROAM), //
         transparent: true, //
-        opacity: 0.1, //
+        opacity: 0.1, // Base opacity
         depthWrite: false, //
         sizeAttenuation: true, //
       });
       secondaryGlowSprite = new THREE.Sprite(secondaryGlowMaterial); //
-      secondaryGlowSprite.scale.set(60, 60, 1); //
-      secondaryGlowSprite.position.copy(lastSystemPos); //
-      secondaryGlowSprite.renderOrder = -1; //
-      roamGroup.add(secondaryGlowSprite); //
+      secondaryGlowSprite.scale.set(60, 60, 1); // Size of the glow
+      secondaryGlowSprite.position.copy(lastSystemPos); // Position it at the last valid point
+      secondaryGlowSprite.renderOrder = -1; // Draw behind other elements
+      roamGroup.add(secondaryGlowSprite); // Add glow to the group
     }
 
-    // Add system glow markers for visited systems (excluding camp systems)
+    // Add small system glow markers for visited systems (if found on map and no camp there)
     systemOrder.forEach((system) => {
       //
       const systemIdInt = parseInt(system.id); //
-      if (isNaN(systemIdInt)) return; // <<< DEBUG Skip if invalid
-      const systemObj = solarSystems.get(systemIdInt); //
+      if (isNaN(systemIdInt)) return; // Skip if invalid ID
+      const systemObj = solarSystems.get(systemIdInt); // Get the rendered system object again
+
       // Check if this system also hosts a camp-like activity marker
       const hasCampMarker = Array.from(activityMarkers.values()).some(
         //
         (
           m //
         ) =>
-          m.activityData.systemId === systemIdInt && //
+          m.activityData.systemId === systemIdInt && // Check system ID
           ["camp", "smartbomb", "roaming_camp", "battle"].includes(
+            // Check if it's a camp-like type
             //
             m.activityData.classification //
           )
       );
 
       if (systemObj && !hasCampMarker) {
-        //
-        // Only add roam glow if no camp marker exists
+        // Only add roam glow if system exists on map AND no camp marker exists there
         const glowMaterial = new THREE.SpriteMaterial({
           //
           map: glowTexture, //
@@ -1670,33 +1831,36 @@
           depthWrite: false, //
         });
         const glowSprite = new THREE.Sprite(glowMaterial); //
-        glowSprite.position.copy(systemObj.position); //
+        glowSprite.position.copy(systemObj.position); // Place at system position
         glowSprite.scale.set(8, 8, 1); // Roam system marker size
-        roamGroup.add(glowSprite); //
+        roamGroup.add(glowSprite); // Add to the main roam group
       }
     });
 
+    // Store relevant data in the group's userData
     roamGroup.userData = {
       //
-      type: "roam", //
-      activityData: activity, //
-      systems: systemOrder, // Store the ordered systems
-      flashColor: FLASH_COLOR_ROAM, // Store flash color
+      type: "roam", // Mark the type
+      activityData: activity, // Store the full activity data
+      systems: systemOrder, // Store the ordered systems actually used/found
+      flashColor: FLASH_COLOR_ROAM, // Store flash color for animation
       baseColor: ROAM_COLOR, // Store base color
     };
+
+    // Return the object needed by updateActivityVisualizations
     return {
       //
-      group: roamGroup, //
-      activityData: activity, //
+      group: roamGroup, // The THREE.Group containing all visuals
+      activityData: activity, // The activity data
       mixer: null, // Roams don't use mixer currently
-      lineMaterial: lineObject?.material, // Store material for animation
-      lastKillId: latestKillId, //
-      flashEndTime: 0, //
-      secondaryGlow: secondaryGlowSprite, //
-      secondaryGlowFlashEndTime: 0, //
-      type: "roam", // Store type for update logic
+      lineMaterial: lineObject?.material, // The material of the line (if created) for animation
+      lastKillId: latestKillId, // Store the latest kill ID for flash detection
+      flashEndTime: 0, // Initialize flash timer
+      secondaryGlow: secondaryGlowSprite, // Reference to the secondary glow sprite
+      secondaryGlowFlashEndTime: 0, // Initialize secondary flash timer
+      type: "roam", // Store type again for easier access in update logic
     }; //
-  } //
+  } // End of createOrUpdateRoamStyleMarker
 
   // --- User Location Marker (remains mostly same) ---
   function updateUserLocationMarker(newUserLocation) {
@@ -2551,160 +2715,140 @@
   }
 
   // --- Animation Loop ---
+
   // --- Animation Loop ---
   function animate(time) {
-    //
-    if (!mounted) return; //
-    frameId = requestAnimationFrame(animate); //
+    if (!mounted) return;
+    frameId = requestAnimationFrame(animate);
 
-    const now = clock.getElapsedTime(); // Use THREE.Clock for consistent time
-    const deltaTime = now - lastAnimationTime; //
-    lastAnimationTime = now; //
+    const now = clock.getElapsedTime();
+    const deltaTime = now - lastAnimationTime;
+    lastAnimationTime = now;
 
-    // --- CHANGE: Update unified activity markers ---
     activityMarkers.forEach((markerObj) => {
-      //
-      // Update mixer if it exists (for camp-style pulse animation)
-      if (markerObj.mixer) markerObj.mixer.update(deltaTime); //
+      if (markerObj.mixer) markerObj.mixer.update(deltaTime); // Update camp pulse mixer
 
-      // Find relevant visual components for this marker
-      // Note: Not all markers have all components
       const glowSprite = markerObj.group?.children.find(
-        // Primary glow for camp-style
         (c) =>
           c.isSprite &&
           c.material.map === glowTexture &&
           c !== markerObj.secondaryGlow
       );
-      const secondaryGlow = markerObj.secondaryGlow; // Secondary glow for all types
-      const activity = markerObj.activityData; // The raw activity data
+      const secondaryGlow = markerObj.secondaryGlow;
+      const activity = markerObj.activityData;
+      const lineMat = markerObj.lineMaterial;
 
-      // Determine colors based on classification stored in markerObj when created/updated
-      let flashColor = FLASH_COLOR_CAMP; // Default
-      let baseColor = CAMP_COLOR; // Default
-      let secondaryBaseOpacity = 0.1;
-      let secondaryFlashOpacityBoost = 0.3;
+      // --- Define Default Flash Colors (used if userData is missing) ---
+      const defaultCampFlash = CAMP_FLASH_COLOR; // 0xff0000
+      const defaultSmartbombFlash = SMARTBOMB_FLASH_COLOR; // 0xff4444
+      const defaultRouteFlash = ROUTE_FLASH_COLOR; // 0xffffff
 
-      switch (
-        markerObj.type // Use stored type for consistency
-      ) {
-        case "camp":
-          flashColor = FLASH_COLOR_CAMP;
-          baseColor = CAMP_COLOR;
-          break;
-        case "smartbomb":
-          flashColor = FLASH_COLOR_SMARTBOMB;
-          baseColor = SMARTBOMB_COLOR;
-          secondaryBaseOpacity = 0.15;
-          secondaryFlashOpacityBoost = 0.35;
-          break;
-        case "roaming_camp":
-          flashColor = FLASH_COLOR_ROAMING_CAMP;
-          baseColor = ROAMING_CAMP_COLOR;
-          secondaryBaseOpacity = 0.15;
-          secondaryFlashOpacityBoost = 0.35;
-          break;
-        case "battle":
-          flashColor = FLASH_COLOR_BATTLE;
-          baseColor = BATTLE_COLOR;
-          secondaryBaseOpacity = 0.2;
-          secondaryFlashOpacityBoost = 0.4;
-          break;
-        case "roam":
-          flashColor = FLASH_COLOR_ROAM; // Flash color for roam
-          baseColor = ROAM_COLOR; // Base color for roam
-          secondaryBaseOpacity = 0.1;
-          secondaryFlashOpacityBoost = 0.3;
-          break;
+      // --- Retrieve HEX colors from userData, providing type-specific defaults ---
+      const flashColorHex =
+        markerObj.group?.userData?.flashColor ||
+        (markerObj.type === "camp"
+          ? defaultCampFlash
+          : markerObj.type === "smartbomb"
+            ? defaultSmartbombFlash
+            : defaultRouteFlash);
+
+      const baseColorHex =
+        markerObj.group?.userData?.baseColor ||
+        (markerObj.type === "camp"
+          ? CAMP_COLOR
+          : markerObj.type === "smartbomb"
+            ? SMARTBOMB_COLOR
+            : markerObj.type === "roaming_camp"
+              ? ROAMING_CAMP_COLOR
+              : markerObj.type === "battle"
+                ? BATTLE_COLOR
+                : ROAM_COLOR); // Base defaults
+
+      // --- Determine Secondary Glow base opacity ---
+      let secondaryBaseOpacity = 0.1; // Default (roam)
+      if (markerObj.type === "smartbomb" || markerObj.type === "roaming_camp") {
+        secondaryBaseOpacity = 0.15;
+      } else if (markerObj.type === "battle") {
+        secondaryBaseOpacity = 0.2;
       }
 
-      // --- Handle Flashing State (if flashEndTime is active) ---
+      // --- Handle Flashing State ---
       if (markerObj.flashEndTime > 0 && markerObj.flashEndTime > now) {
-        const flashProgress = Math.max(
-          0,
-          1 - (markerObj.flashEndTime - now) / FLASH_DURATION
-        );
-        const flashSine = Math.sin(flashProgress * Math.PI); // Ease in/out effect
+        // FLASH STATE - Simple Color Change
 
-        // Flash primary visual (glowSprite for camps, lineMat for roams)
+        // Set Primary visual color DIRECTLY to flash color
         if (glowSprite) {
-          // Camp-style flash logic (scale, color, opacity)
-          const baseScale = markerObj.group.userData.baseGlowSize || 10;
-          const flashScaleMultiplier = 1 + flashSine * 1.0; // Adjusted flash size multiplier
-          glowSprite.scale.setScalar(baseScale * flashScaleMultiplier);
-          glowSprite.material.color.lerpColors(
-            new THREE.Color(flashColor),
-            new THREE.Color(baseColor),
-            flashProgress // Interpolate color based on progress
+          // Camp/SB Flash
+          glowSprite.material.color.set(flashColorHex); // Set flash color (Red)
+          // NO scale change - Mixer handles base pulse, we override color only
+          // Keep base opacity based on probability
+          glowSprite.material.opacity = Math.min(
+            0.8,
+            (activity?.probability || 0) / 100
           );
-          glowSprite.material.opacity = 0.9 + flashSine * 0.1; // Flash opacity slightly
-        } else if (markerObj.type === "roam" && markerObj.lineMaterial) {
-          // --- Roam line FLASH logic ---
-          const lineMat = markerObj.lineMaterial; // Get material
-          lineMat.opacity = 1.0; // Keep full opacity during flash
-          lineMat.color.lerpColors(
-            new THREE.Color(flashColor), // Use roam's specific flash color
-            new THREE.Color(baseColor), // Use roam's specific base color
-            flashProgress // Interpolate color based on progress
-          );
-          // --- End Roam line FLASH logic ---
+        } else if (lineMat) {
+          // Route Line Flash
+          lineMat.color.set(flashColorHex); // Set flash color (White)
+          // Keep base opacity
+          lineMat.opacity = 1.0;
         }
 
-        // Flash secondary glow (common to most types)
+        // Flash secondary glow (increase opacity briefly)
         if (secondaryGlow) {
-          secondaryGlow.material.opacity =
-            secondaryBaseOpacity + flashSine * secondaryFlashOpacityBoost;
+          // Use secondaryGlowFlashEndTime for independent secondary flash if needed,
+          // but simpler to just flash with primary for now.
+          secondaryGlow.material.opacity = secondaryBaseOpacity + 0.3; // Simple opacity boost
         }
       }
       // --- Handle Normal State / Pulse ---
       else {
-        // Reset flash time if it just ended in this frame
+        // Reset flash timer if it just ended
         if (markerObj.flashEndTime > 0 && markerObj.flashEndTime <= now) {
           markerObj.flashEndTime = 0;
         }
 
         // Apply normal state / pulse animation
         if (glowSprite) {
-          // Camp-style markers: Reset properties potentially changed by flash/mixer
-          // Mixer handles the scale pulse, just ensure color/opacity are correct
-          glowSprite.material.color.set(baseColor); // Reset color
+          // Camp/SB (Mixer handles scale pulse)
+          glowSprite.material.color.set(baseColorHex); // Set back to base color
           glowSprite.material.opacity = Math.min(
             0.8,
-            (activity?.probability || 0) / 100 // Base opacity based on probability
-          );
-          // Base scale is reset by the mixer animation action if running
-          if (!markerObj.mixer?.clipAction?.("pulse")?.isRunning()) {
+            (activity?.probability || 0) / 100
+          ); // Base opacity
+          // Ensure scale reset fallback (if mixer stopped)
+          if (
+            markerObj.mixer &&
+            !markerObj.mixer.clipAction("pulse")?.isRunning()
+          ) {
             const baseScale = markerObj.group?.userData?.baseGlowSize || 10;
-            glowSprite.scale.setScalar(baseScale); // Fallback scale reset
+            glowSprite.scale.setScalar(baseScale);
           }
-        } else if (markerObj.type === "roam" && markerObj.lineMaterial) {
-          // --- Roam line PULSE logic ---
-          const lineMat = markerObj.lineMaterial; // Get the material
-          const pulseSpeed = 4; // Adjust speed of the pulse
-          const minOpacity = 0.6; // Minimum opacity during pulse (e.g., 60%)
-          const maxOpacity = 1.0; // Maximum opacity (should match base opacity set in create function)
+        } else if (lineMat) {
+          // Route Line Pulse (Roam/RC/Battle)
+          // --- Route Line PULSE color logic --- START ---
+          const pulseSpeed = 3; // Adjust pulse speed if desired
+          const brightPulseColor = new THREE.Color(0xffffff); // Pulse towards white
+          const pulseFactor = (Math.sin(now * pulseSpeed) + 1) / 2; // Oscillates 0-1
 
-          // Calculate a value oscillating between 0 and 1
-          const pulseFactor = (Math.sin(now * pulseSpeed) + 1) / 2;
+          lineMat.opacity = 1.0; // Keep opacity high
 
-          // Modulate opacity between minOpacity and maxOpacity
-          lineMat.opacity =
-            minOpacity + pulseFactor * (maxOpacity - minOpacity);
-
-          // Ensure base color is set (no color pulsing needed based on request)
-          lineMat.color.set(ROAM_COLOR);
-          // --- End Roam line PULSE logic ---
+          // Lerp color between base and white for pulse effect
+          lineMat.color.lerpColors(
+            new THREE.Color(baseColorHex), // Create Color from stored hex
+            brightPulseColor,
+            pulseFactor * 1.0 // Lerp fully to white at peak
+          );
+          // --- Route Line PULSE color logic --- END ---
         }
 
-        // Pulse secondary glow (common to most types)
+        // Pulse secondary glow opacity normally
         if (secondaryGlow) {
-          const pulseFactorSec = (Math.sin(now * 3) + 1) / 2; // Slower pulse
+          const pulseFactorSec = (Math.sin(now * 2.5) + 1) / 2; // Gentle pulse
           secondaryGlow.material.opacity =
-            secondaryBaseOpacity + pulseFactorSec * 0.2; // Pulse base opacity slightly
+            secondaryBaseOpacity + pulseFactorSec * 0.15; // Pulse base opacity slightly
         }
       }
-    });
-    // --- END CHANGE for activity marker update ---
+    }); // End loop through activityMarkers
 
     // Update user location marker animation
     if (userLocationMarker.mixer) userLocationMarker.mixer.update(deltaTime);
@@ -3111,21 +3255,10 @@
     height: 100%;
     background-color: #000; /* Base background */
   }
-  .loading {
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    color: white;
-    background-color: rgba(0, 0, 0, 0.8); /* Background helps visibility */
-    padding: 20px 30px;
-    border-radius: 8px; /* Keep rounded corners */
-    z-index: 20;
-    box-shadow: 0 0 10px rgba(0, 0, 0, 0.5); /* Keep shadow for contrast */
-    text-align: center;
-    font-size: 1.2em;
-    white-space: nowrap;
-  }
+
+  /* --- START: Loading/Error Style Changes --- */
+
+  /* Common styles for centering */
   .loading,
   .error {
     position: absolute;
@@ -3133,18 +3266,30 @@
     left: 50%;
     transform: translate(-50%, -50%);
     color: white;
+    z-index: 20;
+    text-align: center;
+  }
+
+  /* Specific styles for loading (NO BOX) */
+  .loading {
+    font-size: 1.2em;
+    white-space: nowrap;
+    /* Removed: background-color, padding, border-radius, border, box-shadow */
+    text-shadow:
+      0 0 5px black,
+      0 0 5px black; /* Add text shadow for visibility */
+  }
+
+  /* Specific styles for error (WITH BOX) */
+  .error {
     background-color: rgba(0, 0, 0, 0.8); /* Darker background */
     padding: 20px 30px; /* More padding */
     border-radius: 8px;
-    z-index: 20;
-    border: 1px solid rgba(255, 255, 255, 0.2);
+    border: 1px solid rgba(255, 107, 107, 0.5); /* Error border color */
     box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
-    text-align: center;
+    color: #ff6b6b; /* Error text color */
   }
-  .error {
-    color: #ff6b6b; /* Error color */
-    border-color: rgba(255, 107, 107, 0.5);
-  }
+  /* --- END: Loading/Error Style Changes --- */
 
   /* --- THREE.js CSS2D Labels --- */
   :global(.system-label) {

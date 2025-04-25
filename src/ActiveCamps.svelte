@@ -26,12 +26,12 @@
 
   // --- Subscribe to stores ---
   let currentTargetId;
-  let selectionActive;
+  let selectionActive; // Renamed from isTargetSelectionActive for brevity in template
   const unsubTarget = selectedCampCrusherTargetId.subscribe((value) => {
     currentTargetId = value;
   });
   const unsubSelection = isTargetSelectionActive.subscribe((value) => {
-    selectionActive = value;
+    selectionActive = value; // Keep local reactive variable in sync
   });
   // --- END Store Subscriptions ---
 
@@ -96,7 +96,9 @@
         ["camp", "smartbomb", "roaming_camp", "battle"].includes(
           activity.classification
         ) &&
+        // Ensure it either has a stargate name OR is classified as a battle
         (activity.stargateName || activity.classification === "battle") &&
+        // Ensure probability is valid or it's a battle (battles show regardless of probability)
         (activity.probability === undefined ||
           activity.probability > 0 ||
           activity.classification === "battle")
@@ -111,9 +113,10 @@
       alert("Please log in to select a Camp Crusher target.");
       return;
     }
+    // Require stargateName for targeting consistency, even for battles.
     if (!activity?.id || !activity?.systemId || !activity?.stargateName) {
       console.error("Invalid activity data for target selection:", activity);
-      alert("Cannot select this target due to missing data.");
+      alert("Cannot select this target due to missing stargate data.");
       return;
     }
     if (currentTargetId) {
@@ -130,7 +133,7 @@
         body: JSON.stringify({
           campId: activity.id,
           systemId: activity.systemId,
-          stargateName: activity.stargateName,
+          stargateName: activity.stargateName, // Required for target setting
         }),
       });
       const data = await response.json();
@@ -177,12 +180,13 @@
         activity.kills?.[0]?.pinpoints?.celestialData?.solarsystemname ||
         activity.systemName ||
         null;
+      // Require stargateName for pinning consistency.
       if (!activity.systemId || !activity.stargateName) {
         console.error(
           "Cannot pin: Missing systemId or stargateName in activity",
           activity
         );
-        alert("Cannot pin this item: missing required data.");
+        alert("Cannot pin this item: missing required stargate data.");
         return;
       }
       const response = await fetch("/api/pinned-systems", {
@@ -191,7 +195,7 @@
         credentials: "include",
         body: JSON.stringify({
           system_id: activity.systemId,
-          stargate_name: activity.stargateName,
+          stargate_name: activity.stargateName, // Required for pinning
           system_name: systemName,
         }),
       });
@@ -280,9 +284,10 @@
         action: () => setDestination(activity.systemId, false),
       },
     ];
+    // Only allow pinning if it has a stargateName (consistency)
     if (
       isLoggedIn &&
-      ["camp", "smartbomb"].includes(activity.classification) &&
+      ["camp", "smartbomb", "battle"].includes(activity.classification) && // Allow pinning battles if they have stargate name
       activity.stargateName
     ) {
       options.push({ label: "Pin System", action: () => pinSystem(activity) });
@@ -297,7 +302,8 @@
   }
   function getProbabilityColor(probability) {
     /* ... */
-    if (probability >= 80) return "#ff4444"; // Red
+    // Treat battle classification as high probability for color
+    if (probability === "battle" || probability >= 80) return "#ff4444"; // Red
     if (probability >= 60) return "#ff8c00"; // Orange
     if (probability >= 40) return "#ffd700"; // Yellow
     return "#90ee90"; // Green
@@ -309,7 +315,7 @@
         (a) =>
           a?.ship_type_id &&
           [22456, 22464, 22452, 22460, 12013, 12017, 12021, 12025].includes(
-            a.ship_type_id
+            a.ship_type_id // Interdictor and HIC type IDs
           )
       )
     );
@@ -389,7 +395,9 @@
               <div
                 class="relative bg-eve-dark/90 bg-gradient-to-r from-eve-secondary/90 to-eve-secondary/40 p-3 border-t-2"
                 style="border-color: {getProbabilityColor(
-                  activity.probability || 0
+                  activity.classification === 'battle'
+                    ? 'battle'
+                    : activity.probability || 0
                 )}"
               >
                 {#if isLoggedIn}
@@ -415,7 +423,7 @@
                         />
                       </svg>
                     </button>
-                  {:else if selectionActive && ["camp", "smartbomb"].includes(activity.classification) && activity.stargateName}
+                  {:else if selectionActive && ["camp", "smartbomb", "battle"].includes(activity.classification) && activity.stargateName}
                     <button
                       type="button"
                       title="Set as Target"
@@ -461,10 +469,14 @@
                     <span
                       class="px-2 py-1 rounded text-black font-bold text-sm"
                       style="background-color: {getProbabilityColor(
-                        activity.probability || 0
+                        activity.classification === 'battle'
+                          ? 'battle'
+                          : activity.probability || 0
                       )}"
                     >
-                      {Math.round(activity.probability || 0)}% Confidence
+                      {activity.classification === "battle"
+                        ? "Battle"
+                        : `${Math.round(activity.probability || 0)}% Conf.`}
                     </span>
                   </div>
                   <button
@@ -492,12 +504,12 @@
                     class="flex justify-between py-0.5 border-b border-white/10"
                   >
                     <span class="text-gray-400">Location:</span>
-                    <span class="text-white"
-                      >{activity.stargateName ||
+                    <span class="text-white">
+                      {activity.stargateName ||
                         (activity.classification === "battle"
-                          ? "Battle Zone"
-                          : "Unknown Gate")}</span
-                    >
+                          ? "Battle Zone (System Wide)"
+                          : "Unknown Location")}
+                    </span>
                   </div>
                   <div
                     class="flex justify-between py-0.5 border-b border-white/10"
@@ -666,9 +678,12 @@
                 role="button"
                 tabindex="0"
               >
-                <td class="px-4 py-2"
-                  >{activity.stargateName || "Battle Zone"}</td
-                >
+                <td class="px-4 py-2">
+                  {activity.stargateName ||
+                    (activity.classification === "battle"
+                      ? "Battle Zone (System Wide)"
+                      : "Unknown Location")}
+                </td>
                 <td class="px-4 py-2"
                   ><span
                     class="text-lg"
@@ -681,8 +696,13 @@
                   ><span
                     class="px-2 py-1 rounded text-black text-sm"
                     style="background-color: {getProbabilityColor(
-                      activity.probability || 0
-                    )}">{Math.round(activity.probability || 0)}%</span
+                      activity.classification === 'battle'
+                        ? 'battle'
+                        : activity.probability || 0
+                    )}"
+                    >{activity.classification === "battle"
+                      ? "Battle"
+                      : `${Math.round(activity.probability || 0)}%`}</span
                   ></td
                 >
                 <td class="px-4 py-2"
