@@ -1,38 +1,38 @@
 <script>
   import { onMount, onDestroy } from "svelte";
   import { writable, get } from "svelte/store";
-  import { activeActivities } from "./activityManager.js"; // [cite: 1793]
+  import { activeActivities } from "./activityManager.js"; //
   import {
     selectedCampCrusherTargetId,
     currentTargetEndTime,
     isTargetSelectionActive,
     cancelTarget,
-  } from "./campCrusherTargetStore.js"; // [cite: 1793]
-  import socket from "./socket.js"; // Ensure socket is imported [cite: 1794]
+    isCampCrusherPanelVisible, // --- NEW: Import panel visibility ---
+    hideCampCrusherPanel, // --- NEW: Import helper to hide panel ---
+  } from "./campCrusherTargetStore.js"; //
+  import socket from "./socket.js"; // Ensure socket is imported
 
   // DEBUG LOG 1: Check if import is resolved at module level
   console.log(
     "%cCampCrusher: Module Top Level - activeActivities:",
     "color: blue; font-weight: bold;",
-    activeActivities // [cite: 1793]
+    activeActivities //
   );
 
   let timeRemaining = null;
   let countdownInterval = null;
   let targetEndTime = null; // Store the Date object when countdown is active
-  let characterName = null; // [cite: 1795]
-  let userBashbucks = 0;
+  let characterName = null; //
+  let userBashbucks = 0; // Bashbucks will be shown when this component is rendered
   let isLoadingStats = true;
-  let selectedTargetObject = null; // [cite: 1796]
-  let isCancelling = false; // Loading state for cancellation [cite: 1797]
-  // Removed isSetting as it wasn't used
+  let selectedTargetObject = null; //
+  let isCancelling = false; // Loading state for cancellation
 
   // --- Subscribe to stores ---
-  // Use reactive variables derived from stores where possible
-  // Let the subscriptions primarily trigger updates via functions
-  let currentTargetId; // [cite: 1797]
-  let currentEndTimeISO; // [cite: 1798]
-  let selectionActive; // [cite: 1799]
+  let currentTargetId; //
+  let currentEndTimeISO; //
+  let selectionActive; //
+  // No need to subscribe to isCampCrusherPanelVisible here, parent handles rendering
 
   const unsubTargetId = selectedCampCrusherTargetId.subscribe((value) => {
     console.log(
@@ -42,8 +42,7 @@
     );
     currentTargetId = value; // Keep local variable in sync if needed elsewhere
     updateSelectedTargetObject(); // Update display object when ID changes
-    // triggerCountdownUpdate(); // Countdown is now triggered by endTimeISO change
-  }); // [cite: 1799]
+  }); //
 
   const unsubEndTime = currentTargetEndTime.subscribe((value) => {
     console.log(
@@ -53,59 +52,31 @@
     );
     currentEndTimeISO = value; // Store the ISO string
     triggerCountdownUpdate(); // Update countdown logic when end time changes
-  }); // [cite: 1800]
+  }); //
 
   const unsubSelectionActive = isTargetSelectionActive.subscribe((value) => {
-    // console.log('CampCrusher: isTargetSelectionActive store changed:', value); // Less critical log
     selectionActive = value; // Keep local variable in sync
-  }); // [cite: 1801]
+  }); //
 
-  // Subscribing to activeActivities is necessary to update selectedTargetObject if the underlying activity data changes
   const unsubActivities = activeActivities.subscribe((activities) => {
-    // console.log('CampCrusher: activeActivities store changed, updating selected target object if needed.'); // Can be noisy
-    // Update selectedTargetObject if activities change while a target is active
     if (get(selectedCampCrusherTargetId)) {
-      // Use get() here
       updateSelectedTargetObject();
     }
-  }); // [cite: 1802]
+  }); //
 
   // --- Functions ---
 
-  // Finds the activity object matching the current target ID
   function updateSelectedTargetObject() {
-    const targetId = get(selectedCampCrusherTargetId); // Get current target ID from store [cite: 1803]
-
-    // DEBUG LOG 2: Log status at function entry
+    const targetId = get(selectedCampCrusherTargetId); // Get current target ID from store
     console.log(
       "%cCampCrusher: updateSelectedTargetObject - Called. Target ID:",
       "color: green;",
       targetId
     );
 
-    // DEBUG LOG 3: Log activeActivities *before* calling get()
-    console.log(
-      "%cCampCrusher: updateSelectedTargetObject - activeActivities at entry:",
-      "color: green; font-style: italic;",
-      activeActivities // [cite: 1803]
-    );
-
     let activities;
     try {
-      // DEBUG LOG 4: Log just before the potential error
-      console.log(
-        "%cCampCrusher: updateSelectedTargetObject - About to call get(activeActivities)",
-        "color: green; font-weight: bold;"
-      );
-
-      activities = get(activeActivities); // <<< Error happens here according to user [cite: 1803]
-
-      // DEBUG LOG 5: Log the result *after* calling get()
-      console.log(
-        "%cCampCrusher: updateSelectedTargetObject - Result of get(activeActivities):",
-        "color: green;",
-        activities // [cite: 1803]
-      );
+      activities = get(activeActivities); //
     } catch (e) {
       console.error(
         "%cCampCrusher: updateSelectedTargetObject - ERROR during get(activeActivities):",
@@ -127,125 +98,106 @@
 
     if (targetId) {
       selectedTargetObject =
-        activities.find((a) => a && a.id === targetId) || null; // Add check for 'a' [cite: 1804]
+        activities.find((a) => a && a.id === targetId) || null; // Add check for 'a'
       console.log(
         `%cCampCrusher: updateSelectedTargetObject - Found target object for ID ${targetId}:`,
         "color: green;",
-        selectedTargetObject // [cite: 1805]
+        selectedTargetObject //
       );
       if (selectedTargetObject === null && activities.length > 0) {
-        // Target ID exists in store, but not found in current activity list
-        // This is now expected if the activity expired/completed and was removed server-side
         console.log(
           `%cCampCrusher: updateSelectedTargetObject - Target ID ${targetId} exists in store but not in current activities list (likely completed/expired).`,
           "color: orange;"
         );
-        // The stores should be cleared by countdown expiry or server event, but double-check later if needed
       }
     } else {
-      selectedTargetObject = null; // [cite: 1807]
-      // console.log('CampCrusher: updateSelectedTargetObject - No target ID set.'); // Less critical log
+      selectedTargetObject = null; //
     }
   }
 
-  // Clears local countdown state
   function clearCountdownDisplay() {
     if (countdownInterval) {
-      clearInterval(countdownInterval); // [cite: 1808]
+      clearInterval(countdownInterval); //
       countdownInterval = null;
     }
-    timeRemaining = null; // [cite: 1809]
+    timeRemaining = null; //
     targetEndTime = null; // Also clear the Date object
-    console.log("%cCampCrusher: Cleared countdown display.", "color: gray;"); // [cite: 1810]
+    console.log("%cCampCrusher: Cleared countdown display.", "color: gray;"); //
   }
 
-  // Calculates and updates the displayed time remaining
   function updateTimer(endTimeMs, targetIdAtStart) {
-    const now = Date.now(); // [cite: 1811]
+    const now = Date.now(); //
     const remaining = endTimeMs - now;
-    const currentSelectedId = get(selectedCampCrusherTargetId); // Check current ID inside interval [cite: 1812]
+    const currentSelectedId = get(selectedCampCrusherTargetId); // Check current ID inside interval
 
-    // Stop if target changed or remaining is <= 0
     if (currentSelectedId !== targetIdAtStart || remaining <= 0) {
       console.log(
         `%cCampCrusher: Stopping countdown for ${targetIdAtStart}. Current target: ${currentSelectedId}, Remaining ms: ${remaining}`,
-        "color: orange;" // [cite: 1813]
+        "color: orange;" //
       );
-      clearCountdownDisplay(); // Clear interval and display [cite: 1814]
+      clearCountdownDisplay(); // Clear interval and display
 
-      // If expiration is the cause and stores haven't been cleared yet by other means (like server event)
       if (remaining <= 0 && currentSelectedId === targetIdAtStart) {
         console.log(
           `%cCampCrusher: Target ${targetIdAtStart} expired naturally. Clearing stores.`,
-          "color: orange;" // [cite: 1815]
+          "color: orange;" //
         );
-        selectedCampCrusherTargetId.set(null); // [cite: 1815]
-        currentTargetEndTime.set(null); // [cite: 1815]
+        selectedCampCrusherTargetId.set(null); //
+        currentTargetEndTime.set(null); //
       }
     } else {
-      timeRemaining = remaining; // Update display [cite: 1816]
+      timeRemaining = remaining; // Update display
     }
   }
 
-  // Starts or restarts the countdown interval
   function startCountdown(endTimeDate, targetId) {
-    if (countdownInterval) clearInterval(countdownInterval); // Clear existing interval [cite: 1817]
-    const endTimeMs = endTimeDate.getTime(); // [cite: 1818]
+    if (countdownInterval) clearInterval(countdownInterval); // Clear existing interval
+    const endTimeMs = endTimeDate.getTime(); //
     console.log(
       `%cCampCrusher: Starting/Restarting countdown for target ${targetId}. End time: ${endTimeDate.toISOString()}`,
-      "color: cyan;" // [cite: 1819]
+      "color: cyan;" //
     );
 
-    // Initial update
-    updateTimer(endTimeMs, targetId); // [cite: 1820]
+    updateTimer(endTimeMs, targetId); //
 
-    // Set interval only if time is still remaining after initial update
     if (timeRemaining > 0) {
       countdownInterval = setInterval(
         () => updateTimer(endTimeMs, targetId),
         1000
       );
     } else {
-      // If already expired on start, ensure display is clear
       clearCountdownDisplay();
     }
   }
 
-  // **REVISED**: This function now reacts purely to store changes for endTimeISO
   function triggerCountdownUpdate() {
-    // Removed redundant gets, use module-level currentTargetId and currentEndTimeISO
     console.log(
       `%cCampCrusher: triggerCountdownUpdate called. Target ID: ${currentTargetId}, EndTimeISO: ${currentEndTimeISO}`,
-      "color: blue;" // [cite: 1821]
+      "color: blue;" //
     );
     if (currentTargetId && currentEndTimeISO) {
-      const endTime = new Date(currentEndTimeISO); // [cite: 1821]
+      const endTime = new Date(currentEndTimeISO); //
       if (!isNaN(endTime.getTime())) {
-        // [cite: 1822]
-        // Check if date is valid
+        //
         if (endTime.getTime() > Date.now()) {
-          // Valid future end time exists, start/update countdown
           targetEndTime = endTime; // Update the local Date object
-          startCountdown(endTime, currentTargetId); // [cite: 1823]
+          startCountdown(endTime, currentTargetId); //
         } else {
-          // End time is valid but in the past
           console.log(
             "%cCampCrusher: triggerCountdownUpdate - End time is in the past. Clearing display.",
-            "color: orange;" // [cite: 1824]
+            "color: orange;" //
           );
           clearCountdownDisplay();
-          // If stores still hold this ID (e.g., edge case), clear them.
           if (get(selectedCampCrusherTargetId) === currentTargetId) {
             console.log(
               "%cCampCrusher: triggerCountdownUpdate - Clearing potentially stale stores for past target.",
-              "color: orange;" // [cite: 1825]
+              "color: orange;" //
             );
-            selectedCampCrusherTargetId.set(null); // [cite: 1825]
-            currentTargetEndTime.set(null); // [cite: 1825]
+            selectedCampCrusherTargetId.set(null); //
+            currentTargetEndTime.set(null); //
           }
         }
       } else {
-        // End time ISO string was invalid
         console.warn(
           `%cCampCrusher: triggerCountdownUpdate - Invalid Date from endTimeISO: ${currentEndTimeISO}. Clearing display.`,
           "color: red;"
@@ -253,78 +205,81 @@
         clearCountdownDisplay();
       }
     } else {
-      // No target ID or end time in store, ensure display and local state are clear
-      // console.log('CampCrusher: triggerCountdownUpdate - No target/end time. Clearing display.'); // Less critical log
-      clearCountdownDisplay(); // [cite: 1826]
+      clearCountdownDisplay(); //
     }
   }
 
   function formatTime(ms) {
-    if (ms === null || ms < 0) return "0m 0s"; // [cite: 1827]
+    if (ms === null || ms < 0) return "0m 0s"; //
     const totalSeconds = Math.floor(ms / 1000);
     const minutes = Math.floor(totalSeconds / 60);
     const seconds = totalSeconds % 60;
-    return `${minutes}m ${String(seconds).padStart(2, "0")}s`; // [cite: 1828]
+    return `${minutes}m ${String(seconds).padStart(2, "0")}s`; //
   }
 
-  // Toggles the visibility of target selection buttons on cards
+  // Toggles the visibility of target selection buttons on cards AND hides panel if cancelling selection
   function toggleSelectionMode() {
-    if (get(selectedCampCrusherTargetId)) return; // Don't toggle if target active [cite: 1829]
-    isTargetSelectionActive.update((active) => !active); // [cite: 1830]
+    if (get(selectedCampCrusherTargetId)) return; // Don't toggle if target active
+
+    const currentSelectionState = get(isTargetSelectionActive);
+    isTargetSelectionActive.update((active) => !active); // Toggle store
+
+    // --- NEW: If we just turned selection OFF, hide the panel ---
+    if (currentSelectionState) {
+      // i.e., if it *was* true and we are now turning it false
+      hideCampCrusherPanel(); // Use the new helper function from the store
+    }
+    // --- END NEW ---
+
     console.log(
       "%cCampCrusher: Selection mode toggled to:",
       "color: magenta;",
-      get(isTargetSelectionActive) // [cite: 1831]
+      get(isTargetSelectionActive) //
     );
   }
 
-  // --- Use cancelTarget from the store ---
   async function handleCancelClick() {
-    // Local state to prevent double-clicks while API call is in progress
     if (isCancelling) return;
     isCancelling = true;
     try {
-      // We need to get the ID *before* calling the async function
-      // as the store might change while the API call is running
       const idToCancel = get(selectedCampCrusherTargetId);
       if (idToCancel) {
         console.log(`CampCrusher: Initiating cancel for target ${idToCancel}`);
-        // Call the imported cancelTarget function (assuming it exists in campCrusherTargetStore.js)
+        // Call the imported cancelTarget function
         await cancelTarget();
         console.log(`CampCrusher: Cancel API call finished for ${idToCancel}`);
+        // Panel remains visible after cancel
       } else {
         console.warn(
           "CampCrusher: Cancel button clicked but no target ID was set."
         );
       }
     } catch (error) {
-      // The cancelTarget function should handle its own errors/alerts
       console.error(
         "CampCrusher: Error occurred during cancelTarget call:",
         error
       );
     } finally {
-      isCancelling = false; // Reset loading state regardless of outcome
+      isCancelling = false;
     }
   }
 
-  // Fetch initial user/game stats
   async function fetchInitialStats() {
-    isLoadingStats = true; // [cite: 1832]
+    isLoadingStats = true; //
     console.log("%cCampCrusher: Fetching initial stats...", "color: brown;");
     try {
       // Fetch Bashbucks
       const statsResponse = await fetch("/api/campcrushers/stats", {
-        // [cite: 1832]
+        //
         credentials: "include",
       });
       if (statsResponse.ok) {
         const statsData = await statsResponse.json();
-        userBashbucks = statsData.bashbucks || 0; // [cite: 1834]
+        userBashbucks = statsData.bashbucks || 0; //
         console.log("CampCrusher: Bashbucks fetched:", userBashbucks);
       } else if (statsResponse.status !== 401) {
         console.error(
-          // [cite: 1834]
+          //
           "CampCrusher: Failed to fetch camp crusher stats:",
           statsResponse.status
         );
@@ -334,17 +289,16 @@
 
       // Fetch Session (for character name)
       const sessionResponse = await fetch("/api/session", {
-        // [cite: 1835]
+        //
         credentials: "include",
       });
       if (sessionResponse.ok) {
         const sessionData = await sessionResponse.json();
-        characterName = sessionData.user?.character_name; // [cite: 1836]
+        characterName = sessionData.user?.character_name; //
         console.log("CampCrusher: Session fetched, character:", characterName);
-        // Initial target state should be set by store subscriptions
       } else if (sessionResponse.status !== 401) {
         console.error(
-          // [cite: 1836]
+          //
           "CampCrusher: Failed to fetch session data:",
           sessionResponse.status
         );
@@ -352,43 +306,40 @@
         console.log("CampCrusher: Not logged in (session fetch).");
       }
     } catch (error) {
-      console.error("CampCrusher: Error fetching initial stats:", error); // [cite: 1837]
+      console.error("CampCrusher: Error fetching initial stats:", error); //
     } finally {
-      isLoadingStats = false; // [cite: 1837]
+      isLoadingStats = false; //
     }
   }
 
-  // Handle WebSocket updates for bashbucks
   function handleBashbucksUpdate(data) {
-    console.log("CampCrusher: Received bashbucksUpdate:", data); // [cite: 1838]
+    console.log("CampCrusher: Received bashbucksUpdate:", data); //
     if (data && typeof data.newTotal === "number") {
-      userBashbucks = data.newTotal; // [cite: 1839]
+      userBashbucks = data.newTotal; //
     } else if (data && typeof data.change === "number") {
-      userBashbucks += data.change; // [cite: 1840]
+      userBashbucks += data.change; //
     } else {
       console.warn(
         "CampCrusher: Received invalid bashbucksUpdate data, refetching."
       );
-      fetchInitialStats(); // Fallback [cite: 1840]
+      fetchInitialStats(); // Fallback
     }
   }
 
-  // Handle WebSocket updates for target completion/cancellation from server
   function handleTargetCompletedOrCancelled({ targetId }) {
     console.log(
       `%cCampCrusher: Received server event for target ${targetId} completion/cancellation.`,
-      "color: orange;" // [cite: 1841]
+      "color: orange;" //
     );
-    const currentSelectedId = get(selectedCampCrusherTargetId); // Get current value from store [cite: 1841]
+    const currentSelectedId = get(selectedCampCrusherTargetId); // Get current value from store
     if (currentSelectedId === targetId) {
       console.log(
         `%cCampCrusher: Clearing currently selected target ${targetId} based on server event.`,
-        "color: orange;" // [cite: 1842]
+        "color: orange;" //
       );
-      // Setting stores to null will trigger reactive updates via subscriptions
-      selectedCampCrusherTargetId.set(null); // [cite: 1843]
-      currentTargetEndTime.set(null); // [cite: 1843]
-      // clearTargetLocally() will be called via subscription to currentTargetEndTime
+      selectedCampCrusherTargetId.set(null); //
+      currentTargetEndTime.set(null); //
+      // Panel remains visible
     } else {
       console.log(
         `%cCampCrusher: Server event for ${targetId} does not match current target ${currentSelectedId}. Ignoring.`,
@@ -400,27 +351,27 @@
   onMount(() => {
     console.log("%cCampCrusher: Component Mounted.", "color: blue;");
     fetchInitialStats();
-    socket.on("bashbucksUpdate", handleBashbucksUpdate); // [cite: 1844]
-    socket.on("targetCompleted", handleTargetCompletedOrCancelled); // Listen for completion [cite: 1844]
-    socket.on("targetCancelled", handleTargetCompletedOrCancelled); // Listen for cancellation [cite: 1844]
+    socket.on("bashbucksUpdate", handleBashbucksUpdate); //
+    socket.on("targetCompleted", handleTargetCompletedOrCancelled); //
+    socket.on("targetCancelled", handleTargetCompletedOrCancelled); //
 
     // Initial check/update of target object and countdown based on current store values
-    updateSelectedTargetObject(); // [cite: 1844]
-    triggerCountdownUpdate(); // [cite: 1844]
+    updateSelectedTargetObject(); //
+    triggerCountdownUpdate(); //
   });
 
   onDestroy(() => {
     console.log("%cCampCrusher: Component Destroyed.", "color: blue;");
-    if (countdownInterval) clearInterval(countdownInterval); // [cite: 1844]
+    if (countdownInterval) clearInterval(countdownInterval); //
     // Unsubscribe from stores
-    unsubTargetId(); // [cite: 1844]
-    unsubEndTime(); // [cite: 1844]
-    unsubSelectionActive(); // [cite: 1844]
-    unsubActivities(); // [cite: 1844]
+    unsubTargetId(); //
+    unsubEndTime(); //
+    unsubSelectionActive(); //
+    unsubActivities(); //
     // Unsubscribe from socket events
-    socket.off("bashbucksUpdate", handleBashbucksUpdate); // [cite: 1844]
-    socket.off("targetCompleted", handleTargetCompletedOrCancelled); // [cite: 1844]
-    socket.off("targetCancelled", handleTargetCompletedOrCancelled); // [cite: 1844]
+    socket.off("bashbucksUpdate", handleBashbucksUpdate); //
+    socket.off("targetCompleted", handleTargetCompletedOrCancelled); //
+    socket.off("targetCancelled", handleTargetCompletedOrCancelled); //
   });
 </script>
 
@@ -458,6 +409,14 @@
   {:else if !isLoadingStats && characterName}
     <div class="idle-view">
       <button
+        type="button"
+        class="absolute top-1 right-1 w-6 h-6 text-xs retro-button close-button"
+        title="Close Camp Crusher Panel"
+        on:click={hideCampCrusherPanel}
+      >
+        X
+      </button>
+      <button
         class="retro-button main-button"
         on:click={toggleSelectionMode}
         disabled={!!currentTargetId}
@@ -479,53 +438,71 @@
 </div>
 
 <style>
-  /* Styles identical to previous response */
+  /* --- NEW Styles --- */
+  .close-button {
+    background-color: #555;
+    color: #fff;
+    border-color: #777;
+    box-shadow: 2px 2px 0px #333;
+    padding: 2px 4px;
+    font-size: 0.9em;
+    min-width: auto; /* Override default */
+  }
+  .close-button:hover {
+    background-color: #777;
+    color: #fff;
+    box-shadow: 2px 2px 3px #555;
+  }
+  .close-button:active {
+    box-shadow: 1px 1px 0px #333;
+    transform: translate(1px, 1px);
+  }
+
+  /* --- Existing Styles (mostly unchanged) --- */
   .camp-crusher {
-    font-family: "VT323", monospace; /* Retro pixel font */ /* */
-    border: 4px solid #0f0; /* Neon green border */ /* */
+    position: relative; /* Needed for absolute positioning of close button */
+    font-family: "VT323", monospace; /* Retro pixel font */
+    border: 4px solid #0f0; /* Neon green border */
     background: radial-gradient(
       ellipse at center,
       rgba(0, 20, 0, 0.9) 0%,
       rgba(0, 0, 0, 0.95) 100%
     );
     padding: 20px;
-    border-radius: 0; /* Sharp corners */ /* */
+    border-radius: 0; /* Sharp corners */
     box-shadow:
       0 0 15px #0f0,
-      0 0 5px #0f0 inset; /* */
-    text-transform: uppercase; /* */
-    color: #0f0; /* Neon green text */ /* */
-    margin-top: 1em; /* */
+      0 0 5px #0f0 inset;
+    text-transform: uppercase;
+    color: #0f0; /* Neon green text */
+    margin-top: 1em;
   }
 
   .retro-button {
-    background-color: #0f0; /* */
-    color: #000; /* */
-    border: 2px solid #0f0; /* */
-    padding: 8px 15px; /* */
-    font-family: inherit; /* */
-    text-transform: inherit; /* */
-    cursor: pointer; /* */
+    background-color: #0f0;
+    color: #000;
+    border: 2px solid #0f0;
+    padding: 8px 15px;
+    font-family: inherit;
+    text-transform: inherit;
+    cursor: pointer;
     transition:
       background-color 0.2s,
       color 0.2s,
-      box-shadow 0.2s; /* */
-    box-shadow: 3px 3px 0px #0a0; /* Simple shadow */ /* */
-    font-size: 1.1em; /* */
+      box-shadow 0.2s;
+    box-shadow: 3px 3px 0px #0a0; /* Simple shadow */
+    font-size: 1.1em;
   }
   .retro-button:hover:not(:disabled) {
-    /* Added :not(:disabled) */
-    background-color: #000; /* */
-    color: #0f0; /* */
-    box-shadow: 3px 3px 5px #0f0; /* */
+    background-color: #000;
+    color: #0f0;
+    box-shadow: 3px 3px 5px #0f0;
   }
   .retro-button:active:not(:disabled) {
-    /* Added :not(:disabled) */
-    box-shadow: 1px 1px 0px #0a0; /* */
-    transform: translate(2px, 2px); /* */
+    box-shadow: 1px 1px 0px #0a0;
+    transform: translate(2px, 2px);
   }
   .retro-button:disabled {
-    /* Style for disabled state */
     opacity: 0.5;
     cursor: not-allowed;
     box-shadow: 3px 3px 0px grey;
@@ -535,80 +512,77 @@
   }
 
   .main-button {
-    display: block; /* */
-    margin: 0 auto 15px auto; /* Center button */ /* */
-    min-width: 200px; /* */
+    display: block;
+    margin: 0 auto 15px auto; /* Center button */
+    min-width: 200px;
   }
 
   .auth-warning,
   .loading {
-    text-align: center; /* */
-    font-size: 1.2em; /* */
-    padding: 1em; /* */
-    color: #f00; /* Red for warning */ /* */
-    border: 2px dashed #f00; /* */
+    text-align: center;
+    font-size: 1.2em;
+    padding: 1em;
+    color: #f00; /* Red for warning */
+    border: 2px dashed #f00;
   }
   .loading {
-    color: #0f0; /* Green for loading */ /* */
-    border-color: #0f0; /* */
+    color: #0f0; /* Green for loading */
+    border-color: #0f0;
   }
 
   .active-target,
   .idle-view {
-    text-align: center; /* */
+    text-align: center;
   }
 
   .target-header,
   .instruction-text {
-    font-size: 1.3em; /* */
-    margin-bottom: 10px; /* */
-    text-shadow: 0 0 5px #0f0; /* */
+    font-size: 1.3em;
+    margin-bottom: 10px;
+    text-shadow: 0 0 5px #0f0;
   }
 
   .target-name {
-    color: #fff; /* White target name */ /* */
-    font-size: 1.5em; /* */
-    margin: 10px 0; /* */
-    font-weight: bold; /* */
-    text-shadow: 0 0 8px #fff; /* */
+    color: #fff; /* White target name */
+    font-size: 1.5em;
+    margin: 10px 0;
+    font-weight: bold;
+    text-shadow: 0 0 8px #fff;
     word-break: break-all; /* Wrap long names */
   }
 
   .countdown {
-    margin: 15px 0; /* */
-    font-size: 1.2em; /* */
+    margin: 15px 0;
+    font-size: 1.2em;
   }
 
   .timer {
-    font-weight: bold; /* */
-    color: #fff; /* */
-    background-color: #0f0; /* */
-    color: #000; /* */
-    padding: 2px 6px; /* */
-    min-width: 80px; /* Ensure timer width is somewhat stable */ /* */
-    display: inline-block; /* */
-    box-shadow: 2px 2px 0px #0a0; /* */
+    font-weight: bold;
+    color: #fff;
+    background-color: #0f0;
+    color: #000;
+    padding: 2px 6px;
+    min-width: 80px; /* Ensure timer width is somewhat stable */
+    display: inline-block;
+    box-shadow: 2px 2px 0px #0a0;
   }
 
   .cancel-button {
-    margin-top: 15px; /* */
-    background-color: #f00; /* Red cancel button */ /* */
-    color: #fff; /* */
-    border-color: #f00; /* */
-    box-shadow: 3px 3px 0px #a00; /* */
+    margin-top: 15px;
+    background-color: #f00; /* Red cancel button */
+    color: #fff;
+    border-color: #f00;
+    box-shadow: 3px 3px 0px #a00;
   }
   .cancel-button:hover:not(:disabled) {
-    /* Add :not(:disabled) */
-    background-color: #000; /* */
-    color: #f00; /* */
-    box-shadow: 3px 3px 5px #f00; /* */
+    background-color: #000;
+    color: #f00;
+    box-shadow: 3px 3px 5px #f00;
   }
   .cancel-button:active:not(:disabled) {
-    /* Add :not(:disabled) */
-    box-shadow: 1px 1px 0px #a00; /* */
-    transform: translate(2px, 2px); /* */
+    box-shadow: 1px 1px 0px #a00;
+    transform: translate(2px, 2px);
   }
-  /* Add disabled style for cancel button */
   .cancel-button:disabled {
     opacity: 0.5;
     cursor: not-allowed;
@@ -619,23 +593,21 @@
   }
 
   .bashbucks-display {
-    margin-top: 20px; /* */
-    font-size: 1.2em; /* */
+    margin-top: 20px;
+    font-size: 1.2em;
   }
   .bashbucks-display .value {
-    color: #fff; /* */
-    font-weight: bold; /* */
+    color: #fff;
+    font-weight: bold;
   }
 
   .blink {
-    animation: blink-animation 1s steps(2, start) infinite; /* */
+    animation: blink-animation 1s steps(2, start) infinite;
   }
 
   @keyframes blink-animation {
-    /* */
     to {
-      /* */
-      visibility: hidden; /* */
-    } /* */
-  } /* */
+      visibility: hidden;
+    }
+  }
 </style>

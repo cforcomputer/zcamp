@@ -10,9 +10,14 @@
     currentTargetEndTime,
     isTargetSelectionActive, // Import selection state
     cancelTarget, // Import cancelTarget from the store
+    isCampCrusherPanelVisible, // Import panel visibility state
   } from "./campCrusherTargetStore.js";
   import { get } from "svelte/store";
   import { getValidAccessToken } from "./tokenManager.js";
+
+  // --- Debug Flag ---
+  let debug = false; // Set to true to enable probability log hover display
+  // --- End Debug Flag ---
 
   const { THREAT_SHIPS } = CAMP_PROBABILITY_FACTORS;
 
@@ -27,11 +32,16 @@
   // --- Subscribe to stores ---
   let currentTargetId;
   let selectionActive; // Renamed from isTargetSelectionActive for brevity in template
+  let panelVisible; // Local reactive variable for panel visibility
+
   const unsubTarget = selectedCampCrusherTargetId.subscribe((value) => {
     currentTargetId = value;
   });
   const unsubSelection = isTargetSelectionActive.subscribe((value) => {
     selectionActive = value; // Keep local reactive variable in sync
+  });
+  const unsubPanelVisible = isCampCrusherPanelVisible.subscribe((value) => {
+    panelVisible = value;
   });
   // --- END Store Subscriptions ---
 
@@ -40,7 +50,7 @@
     camp: "⛺",
     smartbomb: "⚡",
     roaming_camp: "🏕️",
-    battle: "⚔️",
+    battle: "⚔️", // Keep icon for visual distinction
     roam: "➡️",
     activity: "❓",
   };
@@ -48,7 +58,7 @@
     camp: "Standard Gate Camp",
     smartbomb: "Smartbomb Camp",
     roaming_camp: "Roaming Camp (Multi-System)",
-    battle: "Large Battle (>40 Pilots)",
+    battle: "Large Battle (>40 Pilots)", // Tooltip remains informative
     roam: "Roaming Gang",
     activity: "Unclassified Activity",
   };
@@ -99,6 +109,7 @@
         // Ensure it either has a stargate name OR is classified as a battle
         (activity.stargateName || activity.classification === "battle") &&
         // Ensure probability is valid or it's a battle (battles show regardless of probability)
+        // Keep this filter logic as battles might initially have low prob but should still show
         (activity.probability === undefined ||
           activity.probability > 0 ||
           activity.classification === "battle")
@@ -114,9 +125,17 @@
       return;
     }
     // Require stargateName for targeting consistency, even for battles.
+    // A battle might not always have a single stargateName if it spans multiple locations,
+    // but for the *targeting* mechanism, we require one for now.
     if (!activity?.id || !activity?.systemId || !activity?.stargateName) {
-      console.error("Invalid activity data for target selection:", activity);
-      alert("Cannot select this target due to missing stargate data.");
+      if (activity.classification === "battle" && !activity.stargateName) {
+        alert(
+          "Cannot target this battle: No specific stargate location identified for targeting."
+        );
+      } else {
+        console.error("Invalid activity data for target selection:", activity);
+        alert("Cannot select this target due to missing stargate data.");
+      }
       return;
     }
     if (currentTargetId) {
@@ -150,8 +169,6 @@
     }
   }
 
-  // (cancelTarget is now imported from the store)
-
   onMount(async () => {
     try {
       const response = await fetch("/api/session", { credentials: "include" });
@@ -169,11 +186,12 @@
   onDestroy(() => {
     unsubTarget();
     unsubSelection();
+    unsubPanelVisible();
+    // activityManager.stopUpdates(); // Consider if updates should stop when component unmounts
   });
 
-  // --- Other helper functions (pinSystem, formatValue, getTimeAgo, etc.) ---
+  // --- Other helper functions ---
   async function pinSystem(activity) {
-    /* ... implementation ... */
     if (!isLoggedIn) return;
     try {
       const systemName =
@@ -182,11 +200,17 @@
         null;
       // Require stargateName for pinning consistency.
       if (!activity.systemId || !activity.stargateName) {
-        console.error(
-          "Cannot pin: Missing systemId or stargateName in activity",
-          activity
-        );
-        alert("Cannot pin this item: missing required stargate data.");
+        if (activity.classification === "battle" && !activity.stargateName) {
+          alert(
+            "Cannot pin this battle: No specific stargate location identified for pinning."
+          );
+        } else {
+          console.error(
+            "Cannot pin: Missing systemId or stargateName in activity",
+            activity
+          );
+          alert("Cannot pin this item: missing required stargate data.");
+        }
         return;
       }
       const response = await fetch("/api/pinned-systems", {
@@ -223,20 +247,22 @@
           response.status,
           await response.text()
         );
+        alert(`Failed to pin system: ${response.status}`);
       }
     } catch (error) {
       console.error("Error pinning system:", error);
+      alert(`Error pinning system: ${error.message}`);
     }
   }
+
   function formatValue(value) {
-    /* ... */
     if (!value) return "0 ISK";
     if (value >= 1000000000) return (value / 1000000000).toFixed(2) + "B";
     if (value >= 1000000) return (value / 1000000).toFixed(2) + "M";
     return (value / 1000).toFixed(2) + "K";
   }
+
   function getTimeAgo(timestamp) {
-    /* ... */
     if (!timestamp) return "unknown";
     const now = new Date().getTime();
     const then = new Date(timestamp).getTime();
@@ -245,27 +271,36 @@
     if (minutes === 1) return "1 minute ago";
     return `${minutes} minutes ago`;
   }
+
   async function setDestination(systemId, clearOthers = true) {
-    /* ... */
     try {
       const accessToken = await getValidAccessToken();
+      if (!accessToken) {
+        alert("Please log in with EVE to set destination.");
+        return false;
+      }
       const result = await fetch(
         `https://esi.evetech.net/latest/ui/autopilot/waypoint/?add_to_beginning=false&clear_other_waypoints=${clearOthers}&datasource=tranquility&destination_id=${systemId}`,
         { method: "POST", headers: { Authorization: `Bearer ${accessToken}` } }
       );
       if (!result.ok) {
-        if (result.status === 401)
+        if (result.status === 401) {
           window.dispatchEvent(new CustomEvent("session-expired"));
+          alert("EVE Session expired. Please log in again to set destination.");
+        } else {
+          alert(`Failed to set destination: ESI Error ${result.status}`);
+        }
         throw new Error(`Failed to set destination: ${result.status}`);
       }
       return true;
     } catch (error) {
       console.error("Error setting destination:", error);
+      // Avoid alert here as previous steps likely alerted user already
       return false;
     }
   }
+
   function handleContextMenu(event, activity) {
-    /* ... */
     event.preventDefault();
     const container =
       event.currentTarget.closest(".eve-card") ||
@@ -294,22 +329,28 @@
     }
     contextMenu = { show: true, x, y, options };
   }
+
   function handleMenuSelect(event) {
-    /* ... */
     const option = event.detail;
     option.action();
     contextMenu.show = false;
   }
+
+  /** --- MODIFIED getProbabilityColor Function ---
+   * Determines color based purely on numeric probability.
+   * @param {number} probability - The numeric probability score (0-100).
+   * @returns {string} Hex color code.
+   */
   function getProbabilityColor(probability) {
-    /* ... */
-    // Treat battle classification as high probability for color
-    if (probability === "battle" || probability >= 80) return "#ff4444"; // Red
-    if (probability >= 60) return "#ff8c00"; // Orange
-    if (probability >= 40) return "#ffd700"; // Yellow
+    const probNum = probability || 0; // Default to 0 if null/undefined
+    if (probNum >= 80) return "#ff4444"; // Red
+    if (probNum >= 60) return "#ff8c00"; // Orange
+    if (probNum >= 40) return "#ffd700"; // Yellow
     return "#90ee90"; // Green
   }
+  // --- END MODIFIED Function ---
+
   function hasInterdictor(kills) {
-    /* ... */
     return (kills || []).some((kill) =>
       (kill?.killmail?.attackers || []).some(
         (a) =>
@@ -320,8 +361,9 @@
       )
     );
   }
+
   function formatProbabilityLog(log) {
-    /* ... */
+    // No need to check debug flag here, handled in template
     if (!log || !Array.isArray(log)) return "No probability log available.";
     return log
       .map((entry) =>
@@ -331,21 +373,49 @@
       )
       .join("\n");
   }
+
   function openActivityHistory(activity) {
-    /* ... */
     const latestKill = (activity.kills || [])[activity.kills.length - 1];
     if (latestKill) {
       const killTime = new Date(latestKill.killmail.killmail_time);
       const formattedTime = `${killTime.getUTCFullYear()}${String(killTime.getUTCMonth() + 1).padStart(2, "0")}${String(killTime.getUTCDate()).padStart(2, "0")}${String(killTime.getUTCHours()).padStart(2, "0")}${String(killTime.getUTCMinutes()).padStart(2, "0")}`;
+      // Use lastSystem if available (relevant for roaming camps/battles)
       const systemToLink = activity.lastSystem?.id || activity.systemId;
       if (systemToLink) {
         window.open(
           `https://zkillboard.com/related/${systemToLink}/${formattedTime}/`,
           "_blank"
         );
+      } else {
+        console.warn(
+          "Could not determine system ID to link for zKillboard related page."
+        );
+      }
+    } else {
+      console.warn(
+        "No kills found in activity to link to zKillboard related page."
+      );
+      // Fallback: open system view if no kills found
+      const systemToLink = activity.lastSystem?.id || activity.systemId;
+      if (systemToLink) {
+        window.open(`https://zkillboard.com/system/${systemToLink}/`, "_blank");
       }
     }
   }
+
+  /** --- MODIFIED: Function to show the main Camp Crusher panel AND activate selection ---
+   * Sets the panel visibility and immediately activates target selection mode.
+   */
+  function showCampCrusherPanelAndActivate() {
+    if (isLoggedIn) {
+      console.log("Showing Camp Crusher Panel and Activating Selection Mode.");
+      isCampCrusherPanelVisible.set(true); // Show the panel
+      isTargetSelectionActive.set(true); // Activate selection immediately
+    } else {
+      alert("Please log in with EVE to use Camp Crushers.");
+    }
+  }
+  // --- END MODIFIED Function ---
 </script>
 
 <div class="p-4">
@@ -356,7 +426,24 @@
       <p class="text-gray-400">Loading activities...</p>
     </div>
   {:else if mounted}
-    <div class="flex justify-center mb-8"><CampCrusher /></div>
+    {#if isLoggedIn && !panelVisible}
+      <div class="flex justify-center mb-8">
+        <button
+          type="button"
+          class="camp-crusher-activate-button"
+          on:click={showCampCrusherPanelAndActivate}
+          title="Activate Camp Crushers"
+        >
+          Play Campcrushers
+        </button>
+      </div>
+    {/if}
+
+    {#if panelVisible}
+      <div class="flex justify-center mb-8">
+        <CampCrusher />
+      </div>
+    {/if}
 
     <div class="flex justify-between items-center mb-4">
       <h2 class="text-white text-2xl font-bold">Active Camps & Battles</h2>
@@ -386,18 +473,20 @@
           <div class="group relative">
             <!-- svelte-ignore a11y-no-static-element-interactions -->
             <div
-              class="overflow-hidden rounded-lg {activity.state === 'CRASHED'
+              class="eve-card overflow-hidden rounded-lg {activity.state ===
+              'CRASHED'
                 ? 'opacity-70 grayscale-[0.7]'
                 : ''}"
+              class:retro-card-active={selectionActive &&
+                !currentTargetId &&
+                activity.state !== "CRASHED"}
               on:contextmenu|preventDefault={(e) =>
                 handleContextMenu(e, activity)}
             >
               <div
                 class="relative bg-eve-dark/90 bg-gradient-to-r from-eve-secondary/90 to-eve-secondary/40 p-3 border-t-2"
                 style="border-color: {getProbabilityColor(
-                  activity.classification === 'battle'
-                    ? 'battle'
-                    : activity.probability || 0
+                  activity.probability || 0
                 )}"
               >
                 {#if isLoggedIn}
@@ -428,6 +517,7 @@
                       type="button"
                       title="Set as Target"
                       class="absolute top-2 right-2 w-8 h-8 rounded-full flex items-center justify-center transition-all duration-200 ease-in-out z-10 bg-gray-600 hover:bg-green-500"
+                      class:target-button-active={selectionActive}
                       on:click|stopPropagation={() => handleSetTarget(activity)}
                       aria-pressed={false}
                       aria-label={`Set ${activity.stargateName} as target`}
@@ -449,7 +539,9 @@
                 {/if}
                 <h3 class="text-white text-base font-bold truncate pr-10">
                   {activity.kills?.[0]?.pinpoints?.celestialData
-                    ?.solarsystemname || activity.systemId}
+                    ?.solarsystemname ||
+                    activity.systemName ||
+                    activity.systemId}
                   <span
                     class="ml-2 text-lg"
                     title={classificationTooltips[activity.classification] ||
@@ -469,14 +561,10 @@
                     <span
                       class="px-2 py-1 rounded text-black font-bold text-sm"
                       style="background-color: {getProbabilityColor(
-                        activity.classification === 'battle'
-                          ? 'battle'
-                          : activity.probability || 0
+                        activity.probability || 0
                       )}"
                     >
-                      {activity.classification === "battle"
-                        ? "Battle"
-                        : `${Math.round(activity.probability || 0)}% Conf.`}
+                      {`${Math.round(activity.probability || 0)}%`}
                     </span>
                   </div>
                   <button
@@ -493,6 +581,16 @@
                           `https://zkillboard.com/kill/${latestKill.killID}/`,
                           "_blank"
                         );
+                      } else {
+                        // If no kills, maybe open system view on zkill?
+                        const systemToLink =
+                          activity.lastSystem?.id || activity.systemId;
+                        if (systemToLink) {
+                          window.open(
+                            `https://zkillboard.com/system/${systemToLink}/`,
+                            "_blank"
+                          );
+                        }
                       }
                     }}
                   >
@@ -507,7 +605,7 @@
                     <span class="text-white">
                       {activity.stargateName ||
                         (activity.classification === "battle"
-                          ? "Battle Zone (System Wide)"
+                          ? "Battle Zone"
                           : "Unknown Location")}
                     </span>
                   </div>
@@ -530,7 +628,9 @@
                           );
                           return `${duration}m active`;
                         })()}
-                      {:else}0m active{/if}
+                      {:else}
+                        0m active
+                      {/if}
                     </span>
                   </div>
                   <div
@@ -538,7 +638,9 @@
                   >
                     <span class="text-gray-400">Last Activity:</span>
                     <span class="text-eve-accent italic"
-                      >{getTimeAgo(activity.lastKill)}</span
+                      >{getTimeAgo(
+                        activity.lastKill || activity.lastActivity
+                      )}</span
                     >
                   </div>
                   <div
@@ -548,8 +650,9 @@
                     <span class="text-white flex items-center">
                       {(activity.kills || []).filter(
                         (k) => k?.killmail?.victim?.ship_type_id !== CAPSULE_ID
-                      ).length} kills {#if activity.metrics?.podKills > 0}({activity
-                          .metrics.podKills} pods){/if}
+                      ).length} kills
+                      {#if activity.metrics?.podKills > 0}({activity.metrics
+                          .podKills} pods){/if}
                       {#if hasInterdictor(activity.kills)}<span
                           class="ml-2 cursor-help"
                           title="Interdictor/HICTOR present">⚠️</span
@@ -570,24 +673,30 @@
                     <span class="text-gray-400">Comp:</span>
                     <span class="text-white">
                       {#if activity.metrics?.partyMetrics}
-                        {activity.metrics.partyMetrics.characters} pilots {#if activity.metrics.partyMetrics.corporations > 0}
+                        {activity.metrics.partyMetrics.characters} pilots
+                        {#if activity.metrics.partyMetrics.corporations > 0}
                           from {activity.metrics.partyMetrics.corporations} corps
                           {#if activity.metrics.partyMetrics.alliances > 0}
-                            in {activity.metrics.partyMetrics.alliances} alliances{/if}{/if}
+                            in {activity.metrics.partyMetrics.alliances} alliances
+                          {/if}
+                        {/if}
                       {:else if activity.composition}
                         {activity.composition.activeCount || 0}/{activity
-                          .composition.originalCount || 0} active {#if activity.composition.killedCount > 0}<span
+                          .composition.originalCount || 0} active
+                        {#if activity.composition.killedCount > 0}<span
                             class="text-eve-danger font-bold"
                             >(-{activity.composition.killedCount})</span
                           >{/if}
-                      {:else}Computing...{/if}
+                      {:else}
+                        Computing...
+                      {/if}
                     </span>
                   </div>
-                  {#if activity.state === "CRASHED"}<div
-                      class="text-center py-1 bg-eve-danger/50 rounded mt-1"
-                    >
+                  {#if activity.state === "CRASHED"}
+                    <div class="text-center py-1 bg-eve-danger/50 rounded mt-1">
                       CRASHED
-                    </div>{/if}
+                    </div>
+                  {/if}
                 </div>
               </button>
               {#if activity.metrics?.shipCounts}
@@ -601,6 +710,7 @@
                       aria-label={expandedCompositionCards.has(activity.id)
                         ? "Hide ship details"
                         : "Show ship details"}
+                      aria-expanded={expandedCompositionCards.has(activity.id)}
                     >
                       <span
                         >{expandedCompositionCards.has(activity.id)
@@ -612,11 +722,13 @@
                           ? "▲"
                           : "▼"}</span
                       >
-                      {#if !expandedCompositionCards.has(activity.id)}<span
+                      {#if !expandedCompositionCards.has(activity.id)}
+                        <span
                           class="ml-1 px-1.5 py-0.5 bg-eve-accent/20 rounded-full text-xs"
-                          >{Object.keys(getAccurateShipCounts(activity))
-                            .length}</span
-                        >{/if}
+                        >
+                          {Object.keys(getAccurateShipCounts(activity)).length}
+                        </span>
+                      {/if}
                     </button>
                   </div>
                   {#if expandedCompositionCards.has(activity.id)}
@@ -637,20 +749,27 @@
                             <span class="text-eve-accent">×{count}</span>
                           </div>
                         {/each}
+                        {#if Object.keys(getAccurateShipCounts(activity)).length === 0}
+                          <span class="text-gray-400 italic text-sm"
+                            >No attacker ship data available.</span
+                          >
+                        {/if}
                       </div>
                     </div>
                   {/if}
                 </div>
               {/if}
             </div>
-            <div
-              class="hidden group-hover:block absolute top-full left-0 right-0 z-50 mt-1"
-            >
-              <pre
-                class="bg-eve-primary text-white p-3 rounded border border-eve-accent/20 font-mono text-xs leading-relaxed shadow-lg max-w-[500px] max-h-[400px] overflow-y-auto">{formatProbabilityLog(
-                  activity.probabilityLog
-                )}</pre>
-            </div>
+            {#if debug}
+              <div
+                class="hidden group-hover:block absolute top-full left-0 right-0 z-50 mt-1"
+              >
+                <pre
+                  class="bg-eve-primary text-white p-3 rounded border border-eve-accent/20 font-mono text-xs leading-relaxed shadow-lg max-w-[500px] max-h-[400px] overflow-y-auto">{formatProbabilityLog(
+                    activity.probabilityLog
+                  )}</pre>
+              </div>
+            {/if}
           </div>
         {/each}
       </div>
@@ -659,17 +778,38 @@
         <table class="w-full">
           <thead class="bg-eve-secondary">
             <tr>
-              <th class="px-4 py-2 text-left">Location</th>
-              <th class="px-4 py-2 text-left">Type</th>
-              <th class="px-4 py-2 text-left">Status</th>
-              <th class="px-4 py-2 text-left">Activity</th>
-              <th class="px-4 py-2 text-left">Value</th>
-              <th class="px-4 py-2 text-left">Composition</th>
-              <th class="px-4 py-2 text-left">Last Activity</th>
+              <th
+                class="px-4 py-2 text-left text-sm font-medium text-gray-300 uppercase tracking-wider"
+                >Location</th
+              >
+              <th
+                class="px-4 py-2 text-left text-sm font-medium text-gray-300 uppercase tracking-wider"
+                >Type</th
+              >
+              <th
+                class="px-4 py-2 text-left text-sm font-medium text-gray-300 uppercase tracking-wider"
+                >Status</th
+              >
+              <th
+                class="px-4 py-2 text-left text-sm font-medium text-gray-300 uppercase tracking-wider"
+                >Activity</th
+              >
+              <th
+                class="px-4 py-2 text-left text-sm font-medium text-gray-300 uppercase tracking-wider"
+                >Value</th
+              >
+              <th
+                class="px-4 py-2 text-left text-sm font-medium text-gray-300 uppercase tracking-wider"
+                >Composition</th
+              >
+              <th
+                class="px-4 py-2 text-left text-sm font-medium text-gray-300 uppercase tracking-wider"
+                >Last Activity</th
+              >
             </tr>
           </thead>
           <tbody>
-            {#each activitiesToShow as activity}
+            {#each activitiesToShow as activity (activity.id)}
               <tr
                 class="border-b border-eve-secondary/30 hover:bg-eve-secondary/20 cursor-pointer"
                 on:click={() => openActivityHistory(activity)}
@@ -677,50 +817,72 @@
                   handleContextMenu(e, activity)}
                 role="button"
                 tabindex="0"
+                class:retro-row-active={selectionActive &&
+                  !currentTargetId &&
+                  activity.state !== "CRASHED"}
               >
-                <td class="px-4 py-2">
+                <td class="px-4 py-2 text-white whitespace-nowrap">
                   {activity.stargateName ||
                     (activity.classification === "battle"
-                      ? "Battle Zone (System Wide)"
+                      ? "Battle Zone"
                       : "Unknown Location")}
+                  <span class="text-gray-400 text-xs block"
+                    >{activity.systemName || `(${activity.systemId})`}</span
+                  >
                 </td>
-                <td class="px-4 py-2"
-                  ><span
+                <td class="px-4 py-2">
+                  <span
                     class="text-lg"
                     title={classificationTooltips[activity.classification] ||
                       "Activity"}
-                    >{classificationIcons[activity.classification] || "?"}</span
-                  ></td
-                >
-                <td class="px-4 py-2"
-                  ><span
-                    class="px-2 py-1 rounded text-black text-sm"
+                  >
+                    {classificationIcons[activity.classification] || "?"}
+                  </span>
+                </td>
+                <td class="px-4 py-2">
+                  <span
+                    class="px-2 py-1 rounded text-black text-sm font-bold"
                     style="background-color: {getProbabilityColor(
-                      activity.classification === 'battle'
-                        ? 'battle'
-                        : activity.probability || 0
+                      activity.probability || 0
                     )}"
-                    >{activity.classification === "battle"
-                      ? "Battle"
-                      : `${Math.round(activity.probability || 0)}%`}</span
-                  ></td
+                  >
+                    {`${Math.round(activity.probability || 0)}%`}
+                  </span>
+                </td>
+                <td class="px-4 py-2 text-white">
+                  {(activity.kills || []).length} kills
+                  {#if activity.metrics?.podKills > 0}
+                    <span class="text-gray-400 text-xs"
+                      >({activity.metrics.podKills} pods)</span
+                    >
+                  {/if}
+                  {#if hasInterdictor(activity.kills)}<span
+                      class="ml-1"
+                      title="Interdictor/HICTOR present">⚠️</span
+                    >{/if}
+                </td>
+                <td
+                  class="px-4 py-2 text-eve-danger font-semibold whitespace-nowrap"
                 >
-                <td class="px-4 py-2"
-                  >{(activity.kills || []).length} kills {#if activity.metrics?.podKills > 0}({activity
-                      .metrics.podKills} pods){/if}</td
-                >
-                <td class="px-4 py-2 text-eve-danger font-semibold"
-                  >{formatValue(activity.totalValue)}</td
-                >
-                <td class="px-4 py-2"
-                  >{#if activity.metrics?.partyMetrics}{activity.metrics
-                      .partyMetrics.characters} pilots {#if activity.metrics.partyMetrics.corporations > 0}({activity
-                        .metrics.partyMetrics.corporations} corps){/if}{:else if activity.composition}{activity
-                      .composition.activeCount || 0} pilots{:else}Computing...{/if}</td
-                >
-                <td class="px-4 py-2 text-eve-accent"
-                  >{getTimeAgo(activity.lastKill)}</td
-                >
+                  {formatValue(activity.totalValue)}
+                </td>
+                <td class="px-4 py-2 text-white whitespace-nowrap">
+                  {#if activity.metrics?.partyMetrics}
+                    {activity.metrics.partyMetrics.characters} pilots
+                    {#if activity.metrics.partyMetrics.corporations > 0}
+                      <span class="text-gray-400 text-xs"
+                        >({activity.metrics.partyMetrics.corporations} corps)</span
+                      >
+                    {/if}
+                  {:else if activity.composition}
+                    {activity.composition.activeCount || 0} pilots
+                  {:else}
+                    Computing...
+                  {/if}
+                </td>
+                <td class="px-4 py-2 text-eve-accent whitespace-nowrap">
+                  {getTimeAgo(activity.lastKill || activity.lastActivity)}
+                </td>
               </tr>
             {/each}
           </tbody>
@@ -739,6 +901,152 @@
 />
 
 <style>
+  /* --- Style for Active Target Button --- */
+  .target-button-active {
+    background-color: #0f0 !important; /* Neon green background */
+    box-shadow:
+      0 0 12px #0f0,
+      0 0 6px #3f3 inset; /* Green glow */
+    animation: pulse-target-button 1.5s infinite ease-in-out;
+    border: 1px solid #3f3; /* Slightly brighter border */
+  }
+  .target-button-active:hover {
+    background-color: #3f3 !important; /* Brighter green on hover */
+    box-shadow:
+      0 0 18px #3f3,
+      0 0 8px #6f6 inset;
+  }
+  .target-button-active svg {
+    fill: #000 !important; /* Black icon on green background */
+  }
+
+  @keyframes pulse-target-button {
+    0% {
+      transform: scale(1);
+      box-shadow:
+        0 0 10px #0f0,
+        0 0 4px #3f3 inset;
+    }
+    50% {
+      transform: scale(1.1);
+      box-shadow:
+        0 0 18px #3f3,
+        0 0 8px #6f6 inset;
+    }
+    100% {
+      transform: scale(1);
+      box-shadow:
+        0 0 10px #0f0,
+        0 0 4px #3f3 inset;
+    }
+  }
+  /* --- END Active Target Button Style --- */
+
+  /* --- Styles from previous steps (activate button, retro cards/rows, glow, pulse) --- */
+  .camp-crusher-activate-button {
+    font-family: "VT323", monospace;
+    border: 2px solid #0f0;
+    background: #0a0;
+    padding: 8px 16px;
+    border-radius: 0;
+    box-shadow:
+      0 0 10px #0f0,
+      0 0 3px #0f0 inset,
+      2px 2px 0px #050;
+    text-transform: uppercase;
+    color: #fff;
+    cursor: pointer;
+    font-size: 1.1rem;
+    transition: all 0.2s ease-out;
+    animation: glow 2s infinite alternate;
+  }
+  .camp-crusher-activate-button:hover {
+    background: #0f0;
+    color: #000;
+    box-shadow:
+      0 0 15px #0f0,
+      0 0 5px #0f0 inset,
+      3px 3px 0px #080;
+  }
+  .camp-crusher-activate-button:active {
+    box-shadow:
+      0 0 5px #0f0,
+      0 0 2px #0f0 inset,
+      1px 1px 0px #050;
+    transform: translate(1px, 1px);
+  }
+
+  @keyframes glow {
+    from {
+      box-shadow:
+        0 0 8px #0f0,
+        0 0 2px #0f0 inset,
+        2px 2px 0px #050;
+    }
+    to {
+      box-shadow:
+        0 0 15px #3f3,
+        0 0 5px #3f3 inset,
+        2px 2px 0px #050;
+    }
+  }
+
+  .eve-card.retro-card-active {
+    border: 3px solid #0f0;
+    background: radial-gradient(
+      ellipse at top,
+      rgba(0, 50, 0, 0.8) 0%,
+      rgba(0, 20, 0, 0.9) 100%
+    );
+    box-shadow:
+      0 0 10px #0f0,
+      0 0 5px #0f0 inset;
+    animation: pulse-border 1.5s infinite;
+    cursor: pointer;
+  }
+  .retro-row-active {
+    background-color: rgba(0, 80, 0, 0.4) !important;
+    outline: 2px solid #0f0;
+    outline-offset: -2px;
+    animation: pulse-row 1.5s infinite;
+  }
+  .retro-row-active:hover {
+    background-color: rgba(0, 120, 0, 0.5) !important;
+  }
+
+  @keyframes pulse-border {
+    0% {
+      box-shadow:
+        0 0 8px #0f0,
+        0 0 4px #0f0 inset;
+      border-color: #0f0;
+    }
+    50% {
+      box-shadow:
+        0 0 16px #3f3,
+        0 0 8px #3f3 inset;
+      border-color: #3f3;
+    }
+    100% {
+      box-shadow:
+        0 0 8px #0f0,
+        0 0 4px #0f0 inset;
+      border-color: #0f0;
+    }
+  }
+  @keyframes pulse-row {
+    0% {
+      outline-color: #0f0;
+    }
+    50% {
+      outline-color: #3f3;
+    }
+    100% {
+      outline-color: #0f0;
+    }
+  }
+
+  /* --- Existing Styles --- */
   :global(.killmail-section) {
     height: calc(100vh - 150px);
     overflow-y: auto;

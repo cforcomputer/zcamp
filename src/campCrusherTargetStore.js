@@ -7,6 +7,7 @@ export const currentTargetEndTime = writable(null);
 export const isTargetSelectionActive = writable(false);
 
 // --- NEW: Store for main panel visibility ---
+// This controls whether the full CampCrusher component is rendered
 export const isCampCrusherPanelVisible = writable(false);
 // --- End NEW ---
 
@@ -39,7 +40,8 @@ export async function cancelTarget() {
       selectedCampCrusherTargetId.set(null);
       currentTargetEndTime.set(null);
       isTargetSelectionActive.set(false); // Ensure selection mode is off
-      // isCampCrusherPanelVisible.set(false); // Optionally hide panel on cancel? Or leave it open? Let's leave it open for now.
+      // Keep the panel visible after cancelling a target, user might want to select another
+      // isCampCrusherPanelVisible.set(false); // Do NOT hide panel on cancel
     } else {
       console.error(
         "[Store] Failed to cancel target on backend:",
@@ -61,3 +63,12 @@ export async function cancelTarget() {
     // Clear global loading state if used
   }
 }
+
+// --- NEW Helper to explicitly hide the panel ---
+// Can be called from components if needed, e.g., a close button
+export function hideCampCrusherPanel() {
+  console.log("[Store] Hiding Camp Crusher Panel");
+  isCampCrusherPanelVisible.set(false);
+  isTargetSelectionActive.set(false); // Also ensure selection mode is off when hiding
+}
+// --- End NEW ---

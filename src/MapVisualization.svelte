@@ -40,7 +40,7 @@
   const KM_PER_AU = 149597870.7;
 
   const SIZES = {
-    KILL: { radius: 0.01 },
+    KILL: { radius: 0.0006 },
     SUN: { radius: 0.03 },
     PLANET: { radius: 0.003 },
     MOON: { radius: 0.00009 },

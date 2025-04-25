@@ -376,6 +376,7 @@
   }
 
   function onContextMenu(event) {
+    if (!mapReady) return;
     //
     // <<< DEBUG Add log
     console.log("[UniverseMap] onContextMenu triggered."); //
@@ -2024,6 +2025,7 @@
   } //
 
   async function calculateRoute(destinationId, isNewRoute) {
+    if (!mapReady) return;
     console.log(
       `[calculateRoute] Calculating route to ${destinationId}, isNewRoute: ${isNewRoute}`
     );
@@ -2509,6 +2511,7 @@
   }
 
   function onMouseMove(event) {
+    if (!mapReady) return;
     if (!renderer || !mounted || !scene) return;
     const rect = renderer.domElement.getBoundingClientRect();
     mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
@@ -2552,6 +2555,7 @@
     container.style.cursor = hoveredSystemData ? "pointer" : "auto";
   }
   function onClick(event) {
+    if (!mapReady) return;
     if (!renderer || !mounted) return;
     const currentTime = clock.getElapsedTime() * 1000;
     if (currentTime - lastClickTime < DOUBLE_CLICK_TIME) return;
@@ -2620,6 +2624,7 @@
   }
 
   function onDoubleClick(event) {
+    if (!mapReady) return; // Or: if (!mapReady || !mounted) return;
     if (!renderer || !mounted) return;
     const rect = renderer.domElement.getBoundingClientRect();
     mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
@@ -2715,8 +2720,6 @@
   }
 
   // --- Animation Loop ---
-
-  // --- Animation Loop ---
   function animate(time) {
     if (!mounted) return;
     frameId = requestAnimationFrame(animate);
@@ -2774,30 +2777,40 @@
 
       // --- Handle Flashing State ---
       if (markerObj.flashEndTime > 0 && markerObj.flashEndTime > now) {
-        // FLASH STATE - Simple Color Change
+        // FLASH STATE - Glows: Explosion Fade-In / Lines: Color Change
 
-        // Set Primary visual color DIRECTLY to flash color
+        // Calculate progress of the flash (0.0 at start, 1.0 at end)
+        const timeSinceFlashStart =
+          FLASH_DURATION - (markerObj.flashEndTime - now);
+        const flashProgress = Math.min(
+          1.0,
+          Math.max(0.0, timeSinceFlashStart / FLASH_DURATION)
+        );
+
+        // Apply effect to Primary visual (Glow or Line)
         if (glowSprite) {
-          // Camp/SB Flash
-          glowSprite.material.color.set(flashColorHex); // Set flash color (Red)
-          // NO scale change - Mixer handles base pulse, we override color only
-          // Keep base opacity based on probability
-          glowSprite.material.opacity = Math.min(
+          // Camp/SB Flash - Explosion Fade-In
+          const normalGlowOpacity = Math.min(
             0.8,
             (activity?.probability || 0) / 100
           );
+
+          glowSprite.material.color.set(flashColorHex); // Set flash color
+          // Opacity fades IN from 0 to normalGlowOpacity based on flashProgress
+          glowSprite.material.opacity = normalGlowOpacity * flashProgress;
+          // Mixer handles base scale pulse, no change here needed for scale
         } else if (lineMat) {
-          // Route Line Flash
+          // Route Line Flash - Simple Color Change (Keep existing behavior)
           lineMat.color.set(flashColorHex); // Set flash color (White)
-          // Keep base opacity
-          lineMat.opacity = 1.0;
+          lineMat.opacity = 1.0; // Keep base opacity
         }
 
-        // Flash secondary glow (increase opacity briefly)
+        // Apply effect to secondary glow (Explosion Fade-In)
         if (secondaryGlow) {
-          // Use secondaryGlowFlashEndTime for independent secondary flash if needed,
-          // but simpler to just flash with primary for now.
-          secondaryGlow.material.opacity = secondaryBaseOpacity + 0.3; // Simple opacity boost
+          // Opacity fades IN from 0 to secondaryBaseOpacity based on flashProgress
+          secondaryGlow.material.opacity = secondaryBaseOpacity * flashProgress;
+          // Optional: Could also set secondaryGlow color to flashColorHex if desired
+          // secondaryGlow.material.color.set(flashColorHex);
         }
       }
       // --- Handle Normal State / Pulse ---
@@ -2846,6 +2859,8 @@
           const pulseFactorSec = (Math.sin(now * 2.5) + 1) / 2; // Gentle pulse
           secondaryGlow.material.opacity =
             secondaryBaseOpacity + pulseFactorSec * 0.15; // Pulse base opacity slightly
+          // Ensure secondary glow color is reset if it was changed during flash
+          // secondaryGlow.material.color.set(SECONDARY_GLOW_COLOR_...) // Reset based on type if needed
         }
       }
     }); // End loop through activityMarkers
@@ -2871,52 +2886,58 @@
       Loading map{loadingEllipsis}
     </div>
   {/if}
-  <div class="controls">
-    <div class="control-panel">
-      <div class="search-box">
-        <input
-          type="text"
-          bind:value={searchTerm}
-          placeholder="Search systems (Enter)"
-          on:keydown={handleSearch}
-        />
-      </div>
-      <button
-        class="color-toggle"
-        on:click={toggleColorMode}
-        title="Toggle map coloring"
-      >
-        Color by {colorByRegion ? "Security" : "Region"}
-      </button>
-      <button
-        class="fullscreen-toggle"
-        on:click={toggleFullscreen}
-        title="Toggle Fullscreen"
-      >
-        {isFullscreen ? "Exit Fullscreen" : "Enter Fullscreen"}
-        <svg
-          xmlns="http://www.w3.org/2000/svg"
-          viewBox="0 0 24 24"
-          fill="currentColor"
-          width="1em"
-          height="1em"
-          style="vertical-align: middle; margin-left: 5px;"
-        >
-          {#if isFullscreen}
-            <path
-              d="M5 16h3v3h2v-5H5v2zm3-8H5v2h5V5H8v3zm6 11h2v-3h3v-2h-5v5zm2-11V5h-2v5h5V8h-3z"
-            />
-          {:else}
-            <path
-              d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zm-3-7h3v-3h2V5h-5v5z"
-            />
-          {/if}
-        </svg>
-      </button>
+  {#if mapReady}
+    <div class="controls">
+      <div class="control-panel"></div>
     </div>
-  </div>
 
-  {#if selectedSystem}
+    <div class="controls">
+      <div class="control-panel">
+        <div class="search-box">
+          <input
+            type="text"
+            bind:value={searchTerm}
+            placeholder="Search systems (Enter)"
+            on:keydown={handleSearch}
+          />
+        </div>
+        <button
+          class="color-toggle"
+          on:click={toggleColorMode}
+          title="Toggle map coloring"
+        >
+          Color by {colorByRegion ? "Security" : "Region"}
+        </button>
+        <button
+          class="fullscreen-toggle"
+          on:click={toggleFullscreen}
+          title="Toggle Fullscreen"
+        >
+          {isFullscreen ? "Exit Fullscreen" : "Enter Fullscreen"}
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            viewBox="0 0 24 24"
+            fill="currentColor"
+            width="1em"
+            height="1em"
+            style="vertical-align: middle; margin-left: 5px;"
+          >
+            {#if isFullscreen}
+              <path
+                d="M5 16h3v3h2v-5H5v2zm3-8H5v2h5V5H8v3zm6 11h2v-3h3v-2h-5v5zm2-11V5h-2v5h5V8h-3z"
+              />
+            {:else}
+              <path
+                d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zm-3-7h3v-3h2V5h-5v5z"
+              />
+            {/if}
+          </svg>
+        </button>
+      </div>
+    </div>
+  {/if}
+
+  {#if mapReady && selectedSystem}
     <div class="system-info-panel">
       <!-- svelte-ignore a11y-click-events-have-key-events -->
       <!-- svelte-ignore a11y-no-static-element-interactions -->
@@ -2994,7 +3015,7 @@
   {/if}
   <div class="map-view" bind:this={container}></div>
 
-  {#if dangerWarningsList.length > 0}
+  {#if mapReady && dangerWarningsList.length > 0}
     <div class="danger-tooltip-reactive">
       <div class="danger-header">
         ⚠️ Route Dangers
@@ -3027,13 +3048,15 @@
   {/if}
 </div>
 
-<ContextMenu
-  show={contextMenu.show}
-  x={contextMenu.x}
-  y={contextMenu.y}
-  options={contextMenu.options}
-  on:select={handleMenuSelect}
-/>
+{#if mapReady}
+  <ContextMenu
+    show={contextMenu.show}
+    x={contextMenu.x}
+    y={contextMenu.y}
+    options={contextMenu.options}
+    on:select={handleMenuSelect}
+  />
+{/if}
 
 <style>
   /* --- Base Container & Controls --- */
