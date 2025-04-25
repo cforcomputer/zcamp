@@ -752,7 +752,6 @@ app.get("/api/route/:origin/:destination", async (req, res) => {
 });
 
 // Fetch trophy page data
-// Fetch trophy page data
 app.get("/api/trophy/:characterId", async (req, res) => {
   const characterId = req.params.characterId;
 
@@ -761,25 +760,20 @@ app.get("/api/trophy/:characterId", async (req, res) => {
   }
 
   try {
-    // --- MODIFIED QUERY ---
-    // Fetch Character Name and Bashbucks directly from the users table
+    // --- Fetch Character Name and Bashbucks ---
     const userQuery = `
       SELECT character_name, bashbucks
-      FROM users                -- Query users table
-      WHERE character_id = $1    -- Find by character_id
+      FROM users
+      WHERE character_id = $1
     `;
     const userResult = await pool.query(userQuery, [characterId]);
-    // --- END MODIFIED QUERY ---
 
     if (userResult.rows.length === 0) {
-      // If user not found in the main users table, they don't exist for trophy purposes
       return res.status(404).json({ error: "Character not found" });
     }
-
     const userData = userResult.rows[0];
 
-    // Fetch count of successful attacks (completed camp targets)
-    // This part remains the same as it queries camp_crusher_targets
+    // --- Fetch Successful Attacks Count ---
     const attacksQuery = `
       SELECT COUNT(*) as successfulAttacks
       FROM camp_crusher_targets
@@ -790,10 +784,43 @@ app.get("/api/trophy/:characterId", async (req, res) => {
       attacksResult.rows[0].successfulattacks || 0
     );
 
+    // --- NEW: Fetch Leaderboard to determine Rank ---
+    let rank = null; // Default to null if not found
+    try {
+      const leaderboardQuery = `
+        SELECT
+          cc.character_id
+        FROM camp_crushers cc
+        JOIN users u ON cc.character_id = u.character_id
+        ORDER BY u.bashbucks DESC
+      `;
+      const leaderboardResult = await pool.query(leaderboardQuery);
+
+      const rankIndex = leaderboardResult.rows.findIndex(
+        (player) => player.character_id === characterId
+      );
+
+      if (rankIndex !== -1) {
+        rank = rankIndex + 1; // Rank is index + 1
+      }
+      console.log(
+        `[API Trophy] Found rank ${rank} for character ${characterId}`
+      );
+    } catch (leaderboardError) {
+      console.error(
+        `[API Trophy] Error fetching leaderboard to determine rank for ${characterId}:`,
+        leaderboardError
+      );
+      // Continue without rank if leaderboard fetch fails
+    }
+    // --- END: Leaderboard Fetch ---
+
+    // --- Send Response ---
     res.json({
       characterName: userData.character_name,
-      bashbucks: userData.bashbucks || 0, // Use bashbucks from users table
+      bashbucks: userData.bashbucks || 0,
       successfulAttacks: successfulAttacks,
+      rank: rank, // Include the rank in the response
     });
   } catch (error) {
     console.error(
@@ -2266,7 +2293,7 @@ app.get("/api/session", async (req, res) => {
       `[API GET /api/session] Found ${profilesFromDb.length} profiles in DB.`
     );
 
-    // --- Process Filter Lists using Session State ---
+    // Process Filter Lists using Session State
     console.log(
       "[API GET /api/session] Processing filter lists with session state:",
       req.session.currentFilterStates
@@ -2284,19 +2311,24 @@ app.get("/api/session", async (req, res) => {
     }));
     console.log("[API GET /api/session] Finished processing profiles.");
 
+    // --- START MODIFICATION ---
     res.json({
       user: {
         id: req.session.user.id,
         character_id: req.session.user.character_id,
         character_name: req.session.user.character_name,
-        // Avoid sending tokens unnecessarily unless needed by the direct consumer of /api/session
-        // access_token: req.session.user.access_token,
-        // refresh_token: req.session.user.refresh_token,
+        // UNCOMMENT these lines so tokenManager.js receives the data it needs
+        access_token: req.session.user.access_token,
+        refresh_token: req.session.user.refresh_token,
+        token_expiry: req.session.user.token_expiry, // Ensure this is also present in the session user object
       },
       filterLists: processedFilterLists,
       profiles: processedProfiles,
     });
-    console.log("[API GET /api/session] Sent session data response.");
+    // --- END MODIFICATION ---
+    console.log(
+      "[API GET /api/session] Sent session data response (including tokens)."
+    ); // Modified log
   } catch (err) {
     console.error("[API GET /api/session] Error fetching session data:", err);
     res.status(500).json({ error: "Server error fetching session data" });
@@ -2311,12 +2343,10 @@ app.post("/api/login", async (req, res) => {
 
     if (!username || !password) {
       console.log("[API POST /api/login] Missing username or password.");
-      return res
-        .status(400)
-        .json({
-          success: false,
-          message: "Username and password are required",
-        });
+      return res.status(400).json({
+        success: false,
+        message: "Username and password are required",
+      });
     }
 
     console.log(
