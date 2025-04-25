@@ -16,41 +16,51 @@
   import { getValidAccessToken } from "./tokenManager.js";
 
   // --- Debug Flag ---
-  let debug = false; // Set to true to enable probability log hover display
+  // Set this to true to enable the probability log tooltip on hover over cards
+  let debug = false;
   // --- End Debug Flag ---
 
-  const { THREAT_SHIPS } = CAMP_PROBABILITY_FACTORS;
+  const { THREAT_SHIPS } = CAMP_PROBABILITY_FACTORS; // Assuming THREAT_SHIPS is used, otherwise remove
 
   // --- Component State ---
-  let viewMode = "cards";
-  let isLoading = true;
-  let mounted = false;
-  let isLoggedIn = false;
-  let pinnedSystemsComponent;
-  let expandedCompositionCards = new Set();
+  let viewMode = "cards"; // 'cards' or 'chart'
+  let isLoading = true; // True while fetching initial data or activities
+  let mounted = false; // Tracks if the component has mounted
+  let isLoggedIn = false; // Tracks user login status
+  let pinnedSystemsComponent; // Reference to the PinnedSystemsList component instance
+  let expandedCompositionCards = new Set(); // Set to track which activity cards have ship composition expanded
 
   // --- Subscribe to stores ---
-  let currentTargetId;
-  let selectionActive; // Renamed from isTargetSelectionActive for brevity in template
-  let panelVisible; // Local reactive variable for panel visibility
+  // These variables will reactively update when the corresponding store value changes
+  let currentTargetId; // Holds the ID of the currently selected Camp Crusher target
+  let selectionActive; // True if Camp Crusher target selection mode is active
+  let panelVisible; // True if the main Camp Crusher panel should be visible
 
+  // Subscribe to selectedCampCrusherTargetId store
   const unsubTarget = selectedCampCrusherTargetId.subscribe((value) => {
     currentTargetId = value;
   });
+
+  // Subscribe to isTargetSelectionActive store
   const unsubSelection = isTargetSelectionActive.subscribe((value) => {
-    selectionActive = value; // Keep local reactive variable in sync
+    selectionActive = value;
   });
+
+  // Subscribe to isCampCrusherPanelVisible store
   const unsubPanelVisible = isCampCrusherPanelVisible.subscribe((value) => {
     panelVisible = value;
   });
   // --- END Store Subscriptions ---
 
+  // State for the right-click context menu
   let contextMenu = { show: false, x: 0, y: 0, options: [] };
+
+  // Mappings for activity classification icons and tooltips
   const classificationIcons = {
     camp: "⛺",
     smartbomb: "⚡",
     roaming_camp: "🏕️",
-    battle: "⚔️", // Keep icon for visual distinction
+    battle: "⚔️",
     roam: "➡️",
     activity: "❓",
   };
@@ -58,32 +68,51 @@
     camp: "Standard Gate Camp",
     smartbomb: "Smartbomb Camp",
     roaming_camp: "Roaming Camp (Multi-System)",
-    battle: "Large Battle (>40 Pilots)", // Tooltip remains informative
+    battle: "Large Battle (>40 Pilots)",
     roam: "Roaming Gang",
     activity: "Unclassified Activity",
   };
 
   // --- Helper Functions ---
+
+  /**
+   * Toggles the expansion state of the ship composition section for a given activity card.
+   * @param {Event} e - The click event.
+   * @param {string} activityId - The ID of the activity card.
+   */
   function toggleCompositionExpansion(e, activityId) {
-    e.stopPropagation();
+    e.stopPropagation(); // Prevent click from propagating to parent elements
     if (expandedCompositionCards.has(activityId)) {
       expandedCompositionCards.delete(activityId);
     } else {
       expandedCompositionCards.add(activityId);
     }
+    // Trigger reactivity by reassigning the set
     expandedCompositionCards = expandedCompositionCards;
   }
 
+  /**
+   * Calculates the count of unique attacker ship types involved in an activity's kills.
+   * It ensures each character is only counted once per ship type they flew.
+   * @param {object} activity - The activity object containing kills.
+   * @returns {object} An object mapping shipTypeId to its count.
+   */
   function getAccurateShipCounts(activity) {
-    const uniqueAttackerShips = new Map();
+    const uniqueAttackerShips = new Map(); // Map to store unique character-ship pairs
+
+    // Iterate through each kill associated with the activity
     (activity.kills || []).forEach((kill) => {
+      // Iterate through each attacker in the killmail
       (kill?.killmail?.attackers || []).forEach((attacker) => {
+        // Check if attacker is a player character and not in a capsule
         if (
           attacker?.character_id &&
           attacker?.ship_type_id &&
-          attacker?.ship_type_id !== CAPSULE_ID
+          attacker?.ship_type_id !== CAPSULE_ID // Exclude pods
         ) {
+          // Create a unique key for this character flying this specific ship type
           const key = `${attacker.character_id}-${attacker.ship_type_id}`;
+          // Store minimal data, we only care about the combination's existence
           uniqueAttackerShips.set(key, {
             characterId: attacker.character_id,
             shipTypeId: attacker.ship_type_id,
@@ -91,6 +120,8 @@
         }
       });
     });
+
+    // Count occurrences of each ship type across the unique character-ship pairs
     const shipCounts = {};
     for (const { shipTypeId } of uniqueAttackerShips.values()) {
       shipCounts[shipTypeId] = (shipCounts[shipTypeId] || 0) + 1;
@@ -98,35 +129,43 @@
     return shipCounts;
   }
 
-  // Filter activities
+  // Reactive statement: Filters and sorts activities whenever activeActivities changes
   $: activitiesToShow = ($activeActivities || [])
     .filter(
       (activity) =>
-        activity && // Ensure activity is not null/undefined
+        activity && // Basic check: Ensure activity object exists
+        // Filter 1: Include only specific classifications relevant to this view
         ["camp", "smartbomb", "roaming_camp", "battle"].includes(
           activity.classification
         ) &&
-        // Ensure it either has a stargate name OR is classified as a battle
+        // Filter 2: Must have a specific stargate name OR be classified as a battle
         (activity.stargateName || activity.classification === "battle") &&
-        // Ensure probability is valid or it's a battle (battles show regardless of probability)
-        // Keep this filter logic as battles might initially have low prob but should still show
-        (activity.probability === undefined ||
+        // Filter 3: Must have a calculated probability > 0 OR be a battle
+        // (Ensures battles always show up even if their calculated probability is low initially)
+        (activity.probability === undefined || // Handles case before probability is calculated
           activity.probability > 0 ||
           activity.classification === "battle")
     )
+    // Sort primarily by probability (descending), then by last activity time (descending)
     .sort((a, b) => (b.probability || 0) - (a.probability || 0));
 
+  // Reactive statement: Set loading to false once component is mounted and activities are available
   $: if (mounted && $activeActivities) isLoading = false;
 
-  // Function to SET a target
+  /**
+   * Handles setting a selected activity as the Camp Crusher target.
+   * Performs validation and sends the request to the backend API.
+   * @param {object} activity - The activity object selected as the target.
+   */
   async function handleSetTarget(activity) {
+    // Check 1: User must be logged in
     if (!isLoggedIn) {
       alert("Please log in to select a Camp Crusher target.");
       return;
     }
-    // Require stargateName for targeting consistency, even for battles.
-    // A battle might not always have a single stargateName if it spans multiple locations,
-    // but for the *targeting* mechanism, we require one for now.
+
+    // Check 2: Essential data must exist for targeting (ID, SystemID, StargateName)
+    // We require stargateName even for battles for consistent targeting mechanism.
     if (!activity?.id || !activity?.systemId || !activity?.stargateName) {
       if (activity.classification === "battle" && !activity.stargateName) {
         alert(
@@ -138,6 +177,8 @@
       }
       return;
     }
+
+    // Check 3: Prevent setting a new target if one is already active
     if (currentTargetId) {
       alert("An active target already exists. Please cancel it first.");
       return;
@@ -145,23 +186,30 @@
 
     console.log("Attempting to set target:", activity.id);
     try {
+      // API call to set the target
       const response = await fetch("/api/campcrushers/target", {
         method: "POST",
-        credentials: "include",
+        credentials: "include", // Send cookies
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           campId: activity.id,
           systemId: activity.systemId,
-          stargateName: activity.stargateName, // Required for target setting
+          stargateName: activity.stargateName, // Backend requires this
         }),
       });
+
       const data = await response.json();
-      if (data.success && data.endTime) {
+
+      // If successful, update the stores
+      if (response.ok && data.success && data.endTime) {
         selectedCampCrusherTargetId.set(activity.id);
         currentTargetEndTime.set(data.endTime);
-        isTargetSelectionActive.set(false); // Turn off selection mode
+        isTargetSelectionActive.set(false); // Turn off selection mode automatically
       } else {
-        throw new Error(data.error || "Unknown error setting target");
+        // Handle API errors
+        throw new Error(
+          data.error || "Unknown error setting target on backend"
+        );
       }
     } catch (error) {
       console.error("Error setting camp crusher target:", error);
@@ -169,71 +217,97 @@
     }
   }
 
+  /**
+   * Lifecycle function: Runs after the component is added to the DOM.
+   * Checks login status and starts activity updates.
+   */
   onMount(async () => {
+    // Check initial login status
     try {
       const response = await fetch("/api/session", { credentials: "include" });
       if (response.ok) {
         const data = await response.json();
-        isLoggedIn = !!data.user;
+        isLoggedIn = !!data.user; // Set based on presence of user data
       }
     } catch (error) {
       console.error("Error checking session:", error);
+      isLoggedIn = false; // Assume not logged in on error
     }
-    mounted = true;
-    activityManager.startUpdates();
+    mounted = true; // Mark component as mounted
+    activityManager.startUpdates(); // Start fetching live activity updates
   });
 
+  /**
+   * Lifecycle function: Runs just before the component is removed from the DOM.
+   * Unsubscribes from stores to prevent memory leaks.
+   */
   onDestroy(() => {
+    // Unsubscribe from all stores
     unsubTarget();
     unsubSelection();
     unsubPanelVisible();
-    // activityManager.stopUpdates(); // Consider if updates should stop when component unmounts
+    // Optionally stop activity manager updates if this component is the main driver
+    // activityManager.stopUpdates();
+    console.log("ActiveCamps component destroyed, unsubscribed from stores.");
   });
 
   // --- Other helper functions ---
+
+  /**
+   * Pins a system (associated with an activity) via an API call.
+   * Requires the user to be logged in and the activity to have a stargate name.
+   * @param {object} activity - The activity object containing system details.
+   */
   async function pinSystem(activity) {
-    if (!isLoggedIn) return;
-    try {
-      const systemName =
-        activity.kills?.[0]?.pinpoints?.celestialData?.solarsystemname ||
-        activity.systemName ||
-        null;
-      // Require stargateName for pinning consistency.
-      if (!activity.systemId || !activity.stargateName) {
-        if (activity.classification === "battle" && !activity.stargateName) {
-          alert(
-            "Cannot pin this battle: No specific stargate location identified for pinning."
-          );
-        } else {
-          console.error(
-            "Cannot pin: Missing systemId or stargateName in activity",
-            activity
-          );
-          alert("Cannot pin this item: missing required stargate data.");
-        }
-        return;
+    if (!isLoggedIn) return; // Should ideally be prevented by UI, but double-check
+
+    // Determine system name, preferring pinpoint data
+    const systemName =
+      activity.kills?.[0]?.pinpoints?.celestialData?.solarsystemname ||
+      activity.systemName || // Fallback to systemName on activity object
+      null;
+
+    // Require stargateName for pinning consistency, even for battles.
+    if (!activity.systemId || !activity.stargateName) {
+      if (activity.classification === "battle" && !activity.stargateName) {
+        alert(
+          "Cannot pin this battle: No specific stargate location identified for pinning."
+        );
+      } else {
+        console.error(
+          "Cannot pin: Missing systemId or stargateName in activity",
+          activity
+        );
+        alert("Cannot pin this item: missing required stargate data.");
       }
+      return;
+    }
+
+    try {
       const response = await fetch("/api/pinned-systems", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        credentials: "include",
+        credentials: "include", // Send cookies for authentication
         body: JSON.stringify({
           system_id: activity.systemId,
-          stargate_name: activity.stargateName, // Required for pinning
-          system_name: systemName,
+          stargate_name: activity.stargateName, // Required by backend for pinning
+          system_name: systemName, // Optional, but helpful
         }),
       });
+
       if (response.ok) {
         const data = await response.json();
+        // If successful and API returns the new pin ID, update the PinnedSystemsList component
         if (data.id) {
           pinnedSystemsComponent?.pinSystem({
+            // Call method on child component instance
             id: data.id,
-            user_id: data.user_id || null,
+            user_id: data.user_id || null, // User ID might be useful later
             system_id: activity.systemId,
             stargate_name: activity.stargateName,
-            system_name: data.system_name || `System ${activity.systemId}`, // Prefer API response name
+            system_name: data.system_name || `System ${activity.systemId}`, // Prefer name from API response
             created_at: data.created_at || new Date().toISOString(),
-            probability: activity.probability,
+            probability: activity.probability, // Include probability at time of pinning
           });
         } else {
           console.error(
@@ -242,12 +316,15 @@
           );
         }
       } else {
+        // Handle API errors during pinning
         console.error(
           "Failed to pin system via API:",
           response.status,
           await response.text()
         );
-        alert(`Failed to pin system: ${response.status}`);
+        alert(
+          `Failed to pin system: ${response.statusText || response.status}`
+        );
       }
     } catch (error) {
       console.error("Error pinning system:", error);
@@ -255,60 +332,109 @@
     }
   }
 
+  /**
+   * Formats a large number (ISK value) into a shorter string (K, M, B).
+   * @param {number} value - The number to format.
+   * @returns {string} Formatted string (e.g., "1.23B ISK").
+   */
   function formatValue(value) {
     if (!value) return "0 ISK";
-    if (value >= 1000000000) return (value / 1000000000).toFixed(2) + "B";
-    if (value >= 1000000) return (value / 1000000).toFixed(2) + "M";
-    return (value / 1000).toFixed(2) + "K";
+    if (value >= 1000000000) return (value / 1000000000).toFixed(2) + "B"; // Billions
+    if (value >= 1000000) return (value / 1000000).toFixed(2) + "M"; // Millions
+    return (value / 1000).toFixed(2) + "K"; // Thousands
   }
 
+  /**
+   * Formats a timestamp into a relative time string (e.g., "5 minutes ago").
+   * @param {string | number | Date} timestamp - The timestamp to format.
+   * @returns {string} Relative time string.
+   */
   function getTimeAgo(timestamp) {
     if (!timestamp) return "unknown";
-    const now = new Date().getTime();
+    const now = Date.now();
     const then = new Date(timestamp).getTime();
+    // Check if the timestamp is valid
+    if (isNaN(then)) return "invalid date";
+
     const minutes = Math.floor((now - then) / (1000 * 60));
+
     if (minutes < 1) return "just now";
     if (minutes === 1) return "1 minute ago";
     return `${minutes} minutes ago`;
   }
 
+  /**
+   * Sets the in-game autopilot destination using ESI UI endpoint.
+   * Requires valid ESI token with ui scopes.
+   * @param {number} systemId - The destination solar system ID.
+   * @param {boolean} [clearOthers=true] - Whether to clear existing waypoints.
+   * @returns {Promise<boolean>} True if successful, false otherwise.
+   */
   async function setDestination(systemId, clearOthers = true) {
     try {
-      const accessToken = await getValidAccessToken();
+      const accessToken = await getValidAccessToken(); // Get token via token manager
       if (!accessToken) {
-        alert("Please log in with EVE to set destination.");
+        alert(
+          "Please log in with EVE (including ESI UI scopes) to set destination."
+        );
         return false;
       }
-      const result = await fetch(
-        `https://esi.evetech.net/latest/ui/autopilot/waypoint/?add_to_beginning=false&clear_other_waypoints=${clearOthers}&datasource=tranquility&destination_id=${systemId}`,
-        { method: "POST", headers: { Authorization: `Bearer ${accessToken}` } }
-      );
+      // ESI endpoint for setting waypoints
+      const url = `https://esi.evetech.net/latest/ui/autopilot/waypoint/?add_to_beginning=false&clear_other_waypoints=${clearOthers}&datasource=tranquility&destination_id=${systemId}`;
+      const result = await fetch(url, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+
       if (!result.ok) {
+        // Handle specific ESI errors
         if (result.status === 401) {
-          window.dispatchEvent(new CustomEvent("session-expired"));
-          alert("EVE Session expired. Please log in again to set destination.");
+          // Unauthorized / Token expired
+          window.dispatchEvent(new CustomEvent("session-expired")); // Notify other components
+          alert(
+            "EVE Session expired or invalid scopes. Please log in again to set destination."
+          );
+        } else if (result.status === 403) {
+          // Forbidden / Missing scope
+          alert(
+            "Failed to set destination: Missing required ESI scope (esi-ui.write_waypoint.v1). Please re-authenticate."
+          );
         } else {
+          // Generic error
           alert(`Failed to set destination: ESI Error ${result.status}`);
         }
-        throw new Error(`Failed to set destination: ${result.status}`);
+        throw new Error(`Failed to set destination: ESI ${result.status}`);
       }
-      return true;
+      console.log(`Destination set successfully to system ${systemId}`);
+      return true; // Success
     } catch (error) {
       console.error("Error setting destination:", error);
-      // Avoid alert here as previous steps likely alerted user already
-      return false;
+      // Avoid duplicate alerts if already handled above
+      return false; // Failure
     }
   }
 
+  /**
+   * Handles the contextmenu (right-click) event on activity cards or rows.
+   * Displays a custom context menu with relevant actions.
+   * @param {MouseEvent} event - The contextmenu event.
+   * @param {object} activity - The activity object associated with the clicked item.
+   */
   function handleContextMenu(event, activity) {
-    event.preventDefault();
+    event.preventDefault(); // Prevent default browser context menu
+
+    // Find the container element (card or table) for positioning
     const container =
       event.currentTarget.closest(".eve-card") ||
       event.currentTarget.closest("table");
     if (!container) return;
+
+    // Calculate menu position relative to the container
     const containerBounds = container.getBoundingClientRect();
     const x = event.clientX - containerBounds.left;
     const y = event.clientY - containerBounds.top;
+
+    // Define menu options
     const options = [
       {
         label: "Set Destination",
@@ -319,92 +445,140 @@
         action: () => setDestination(activity.systemId, false),
       },
     ];
-    // Only allow pinning if it has a stargateName (consistency)
+
+    // Add "Pin System" option only if logged in and activity has a stargate name
     if (
       isLoggedIn &&
-      ["camp", "smartbomb", "battle"].includes(activity.classification) && // Allow pinning battles if they have stargate name
-      activity.stargateName
+      ["camp", "smartbomb", "battle"].includes(activity.classification) &&
+      activity.stargateName // Require stargateName for pinning consistency
     ) {
       options.push({ label: "Pin System", action: () => pinSystem(activity) });
     }
+
+    // Update context menu state to show it
     contextMenu = { show: true, x, y, options };
   }
 
+  /**
+   * Handles the 'select' event emitted by the ContextMenu component.
+   * Executes the selected option's action and hides the menu.
+   * @param {CustomEvent} event - The event containing the selected option.
+   */
   function handleMenuSelect(event) {
-    const option = event.detail;
-    option.action();
-    contextMenu.show = false;
+    const option = event.detail; // Get selected option from event detail
+    if (option && typeof option.action === "function") {
+      option.action(); // Execute the action
+    }
+    contextMenu.show = false; // Hide the menu
   }
 
-  /** --- MODIFIED getProbabilityColor Function ---
-   * Determines color based purely on numeric probability.
+  /**
+   * Determines the background/border color based on numeric probability score.
    * @param {number} probability - The numeric probability score (0-100).
    * @returns {string} Hex color code.
    */
   function getProbabilityColor(probability) {
     const probNum = probability || 0; // Default to 0 if null/undefined
-    if (probNum >= 80) return "#ff4444"; // Red
-    if (probNum >= 60) return "#ff8c00"; // Orange
-    if (probNum >= 40) return "#ffd700"; // Yellow
-    return "#90ee90"; // Green
+    if (probNum >= 80) return "#ff4444"; // Red (High danger)
+    if (probNum >= 60) return "#ff8c00"; // Orange (Medium-High danger)
+    if (probNum >= 40) return "#ffd700"; // Yellow (Medium danger)
+    return "#90ee90"; // Green (Low danger / Initial state)
   }
-  // --- END MODIFIED Function ---
 
+  /**
+   * Checks if any kill in the activity involves an Interdictor or HIC.
+   * @param {Array<object>} kills - The array of kill objects for the activity.
+   * @returns {boolean} True if an Interdictor or HIC is present among attackers.
+   */
   function hasInterdictor(kills) {
-    return (kills || []).some((kill) =>
-      (kill?.killmail?.attackers || []).some(
-        (a) =>
-          a?.ship_type_id &&
-          [22456, 22464, 22452, 22460, 12013, 12017, 12021, 12025].includes(
-            a.ship_type_id // Interdictor and HIC type IDs
-          )
-      )
+    const interdictorTypeIds = [
+      // Interdictors
+      22456, // Flycatcher
+      22464, // Eris
+      22452, // Heretic
+      22460, // Sabre
+      // Heavy Interdictors (HICs)
+      12013, // Devoter
+      12017, // Onyx
+      12021, // Phobos
+      12025, // Broadsword
+    ];
+    return (kills || []).some(
+      (
+        kill // Iterate through kills
+      ) =>
+        (kill?.killmail?.attackers || []).some(
+          (
+            a // Iterate through attackers
+          ) => a?.ship_type_id && interdictorTypeIds.includes(a.ship_type_id) // Check ship type
+        )
     );
   }
 
+  /**
+   * Formats the probability log array into a readable string for display.
+   * @param {Array<string|object>} log - The probability log array.
+   * @returns {string} Formatted log string.
+   */
   function formatProbabilityLog(log) {
-    // No need to check debug flag here, handled in template
     if (!log || !Array.isArray(log)) return "No probability log available.";
+    // Format each entry, handling objects with JSON stringify
     return log
-      .map((entry) =>
-        typeof entry === "object"
-          ? JSON.stringify(entry, null, 2)
-          : String(entry)
+      .map(
+        (entry) =>
+          typeof entry === "object"
+            ? JSON.stringify(entry, null, 2) // Pretty print objects
+            : String(entry) // Convert others to string
       )
-      .join("\n");
+      .join("\n"); // Join entries with newlines
   }
 
+  /**
+   * Opens the zKillboard related page for the activity's time and location.
+   * Falls back to the system page if no kills are available.
+   * @param {object} activity - The activity object.
+   */
   function openActivityHistory(activity) {
+    // Find the timestamp of the latest kill
     const latestKill = (activity.kills || [])[activity.kills.length - 1];
+
     if (latestKill) {
       const killTime = new Date(latestKill.killmail.killmail_time);
+      // Format time as YYYYMMDDHHMM for zKillboard URL
       const formattedTime = `${killTime.getUTCFullYear()}${String(killTime.getUTCMonth() + 1).padStart(2, "0")}${String(killTime.getUTCDate()).padStart(2, "0")}${String(killTime.getUTCHours()).padStart(2, "0")}${String(killTime.getUTCMinutes()).padStart(2, "0")}`;
-      // Use lastSystem if available (relevant for roaming camps/battles)
+      // Use the system ID where the *last* activity occurred, or fallback to primary system ID
       const systemToLink = activity.lastSystem?.id || activity.systemId;
+
       if (systemToLink) {
-        window.open(
-          `https://zkillboard.com/related/${systemToLink}/${formattedTime}/`,
-          "_blank"
-        );
+        const url = `https://zkillboard.com/related/${systemToLink}/${formattedTime}/`;
+        console.log(`Opening zKillboard related: ${url}`);
+        window.open(url, "_blank", "noopener,noreferrer"); // Open in new tab safely
       } else {
         console.warn(
           "Could not determine system ID to link for zKillboard related page."
         );
       }
     } else {
+      // If no kills exist in the activity data (e.g., only classification), open system page
       console.warn(
-        "No kills found in activity to link to zKillboard related page."
+        "No kills found in activity to link to zKillboard related page. Opening system page instead."
       );
-      // Fallback: open system view if no kills found
       const systemToLink = activity.lastSystem?.id || activity.systemId;
       if (systemToLink) {
-        window.open(`https://zkillboard.com/system/${systemToLink}/`, "_blank");
+        const url = `https://zkillboard.com/system/${systemToLink}/`;
+        console.log(`Opening zKillboard system: ${url}`);
+        window.open(url, "_blank", "noopener,noreferrer");
+      } else {
+        console.warn(
+          "Could not determine system ID to link for zKillboard system page."
+        );
       }
     }
   }
 
-  /** --- MODIFIED: Function to show the main Camp Crusher panel AND activate selection ---
-   * Sets the panel visibility and immediately activates target selection mode.
+  /**
+   * Shows the main Camp Crusher panel AND immediately activates selection mode.
+   * Called when the "Play Campcrushers" button is clicked.
    */
   function showCampCrusherPanelAndActivate() {
     if (isLoggedIn) {
@@ -412,10 +586,10 @@
       isCampCrusherPanelVisible.set(true); // Show the panel
       isTargetSelectionActive.set(true); // Activate selection immediately
     } else {
+      // Should ideally not happen if button is hidden, but provide feedback
       alert("Please log in with EVE to use Camp Crushers.");
     }
   }
-  // --- END MODIFIED Function ---
 </script>
 
 <div class="p-4">
@@ -570,25 +744,26 @@
                   <button
                     type="button"
                     class="px-3 py-1 bg-eve-accent text-black font-medium rounded hover:bg-eve-accent/80 transition-colors"
-                    title="View Latest Kill"
+                    title="View Latest Kill on zKillboard"
                     on:click|stopPropagation={(e) => {
-                      e.preventDefault();
+                      e.preventDefault(); // Prevent card body click
                       const latestKill = (activity.kills || [])[
                         activity.kills.length - 1
                       ];
                       if (latestKill) {
                         window.open(
                           `https://zkillboard.com/kill/${latestKill.killID}/`,
-                          "_blank"
+                          "_blank",
+                          "noopener,noreferrer"
                         );
                       } else {
-                        // If no kills, maybe open system view on zkill?
                         const systemToLink =
                           activity.lastSystem?.id || activity.systemId;
                         if (systemToLink) {
                           window.open(
                             `https://zkillboard.com/system/${systemToLink}/`,
-                            "_blank"
+                            "_blank",
+                            "noopener,noreferrer"
                           );
                         }
                       }
@@ -602,12 +777,12 @@
                     class="flex justify-between py-0.5 border-b border-white/10"
                   >
                     <span class="text-gray-400">Location:</span>
-                    <span class="text-white">
-                      {activity.stargateName ||
+                    <span class="text-white"
+                      >{activity.stargateName ||
                         (activity.classification === "battle"
                           ? "Battle Zone"
-                          : "Unknown Location")}
-                    </span>
+                          : "Unknown Location")}</span
+                    >
                   </div>
                   <div
                     class="flex justify-between py-0.5 border-b border-white/10"
@@ -628,9 +803,7 @@
                           );
                           return `${duration}m active`;
                         })()}
-                      {:else}
-                        0m active
-                      {/if}
+                      {:else}0m active{/if}
                     </span>
                   </div>
                   <div
@@ -673,17 +846,13 @@
                     <span class="text-gray-400">Comp:</span>
                     <span class="text-white">
                       {#if activity.metrics?.partyMetrics}
-                        {activity.metrics.partyMetrics.characters} pilots
-                        {#if activity.metrics.partyMetrics.corporations > 0}
+                        {activity.metrics.partyMetrics.characters} pilots {#if activity.metrics.partyMetrics.corporations > 0}
                           from {activity.metrics.partyMetrics.corporations} corps
                           {#if activity.metrics.partyMetrics.alliances > 0}
-                            in {activity.metrics.partyMetrics.alliances} alliances
-                          {/if}
-                        {/if}
+                            in {activity.metrics.partyMetrics.alliances} alliances{/if}{/if}
                       {:else if activity.composition}
                         {activity.composition.activeCount || 0}/{activity
-                          .composition.originalCount || 0} active
-                        {#if activity.composition.killedCount > 0}<span
+                          .composition.originalCount || 0} active {#if activity.composition.killedCount > 0}<span
                             class="text-eve-danger font-bold"
                             >(-{activity.composition.killedCount})</span
                           >{/if}
@@ -748,12 +917,11 @@
                             >
                             <span class="text-eve-accent">×{count}</span>
                           </div>
-                        {/each}
-                        {#if Object.keys(getAccurateShipCounts(activity)).length === 0}
+                        {:else}
                           <span class="text-gray-400 italic text-sm"
                             >No attacker ship data available.</span
                           >
-                        {/if}
+                        {/each}
                       </div>
                     </div>
                   {/if}
@@ -868,8 +1036,7 @@
                 </td>
                 <td class="px-4 py-2 text-white whitespace-nowrap">
                   {#if activity.metrics?.partyMetrics}
-                    {activity.metrics.partyMetrics.characters} pilots
-                    {#if activity.metrics.partyMetrics.corporations > 0}
+                    {activity.metrics.partyMetrics.characters} pilots {#if activity.metrics.partyMetrics.corporations > 0}
                       <span class="text-gray-400 text-xs"
                         >({activity.metrics.partyMetrics.corporations} corps)</span
                       >
@@ -891,7 +1058,6 @@
     {/if}
   {/if}
 </div>
-
 <ContextMenu
   show={contextMenu.show}
   x={contextMenu.x}
@@ -942,7 +1108,7 @@
   }
   /* --- END Active Target Button Style --- */
 
-  /* --- Styles from previous steps (activate button, retro cards/rows, glow, pulse) --- */
+  /* --- Styles for initial activate button, retro cards/rows --- */
   .camp-crusher-activate-button {
     font-family: "VT323", monospace;
     border: 2px solid #0f0;
@@ -1046,8 +1212,9 @@
     }
   }
 
-  /* --- Existing Styles --- */
+  /* --- General/Existing Styles --- */
   :global(.killmail-section) {
+    /* Example for potential global style */
     height: calc(100vh - 150px);
     overflow-y: auto;
   }

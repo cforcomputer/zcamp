@@ -117,7 +117,7 @@
   function createKillpointMeshVisual(position) {
     // Use a slightly smaller radius than the sprite might visually represent
     // Or adjust SIZES.KILL if needed. Let's use half for distinction.
-    const meshRadius = SIZES.KILL.radius * 0.5;
+    const meshRadius = SIZES.KILL.radius * 0.0005;
     const geometry = new THREE.SphereGeometry(meshRadius, 16, 8); // Simple sphere
 
     // Use a material that can glow and react slightly to light
