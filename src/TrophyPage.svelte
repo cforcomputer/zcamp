@@ -6,15 +6,13 @@
   let isLoading = true;
 
   onMount(async () => {
-    // Extract characterId from URL. This depends on your routing setup.
-    // Example for non-SvelteKit:
+    // ... (your existing onMount logic remains the same) ...
     const pathSegments = window.location.pathname.split("/");
-    characterId = pathSegments[pathSegments.length - 1]; // If using SvelteKit:
-    // $: characterId = $page.params.characterId;
+    characterId = pathSegments[pathSegments.length - 1];
     if (characterId) {
       try {
-        isLoading = true; // Ensure loading state is true
-        const response = await fetch(`/api/trophy/${characterId}`); // Fetch from the updated JSON API route
+        isLoading = true;
+        const response = await fetch(`/api/trophy/${characterId}`);
         if (!response.ok) {
           const errorData = await response.json();
           throw new Error(
@@ -32,9 +30,10 @@
       error = "No character ID found in URL.";
       isLoading = false;
     }
-  }); // Helper function to format rank with ordinal suffix (1st, 2nd, 3rd, 4th...)
+  });
 
   function formatRank(rank) {
+    // ... (your existing formatRank function remains the same) ...
     if (!rank) return "N/A";
     const j = rank % 10,
       k = rank % 100;
@@ -54,33 +53,44 @@
 <svelte:head>
   <title
     >{profileData
-      ? `${profileData.characterName}'s Trophy Page`
-      : "Trophy Page"}</title
-  > <link rel="stylesheet" href="/global.css" />
-  <link rel="stylesheet" href="/build/bundle.css" />
+      ? `${profileData.characterName}'s Bashboard Stats`
+      : "Stats Page"}</title
+  >
   <style>
-    /* Minimal styling for standalone page */
-    body {
-      /* --- Background Image Styling --- */
+    /* NEW Wrapper Style */
+    .trophy-page-wrapper {
+      position: fixed; /* Or absolute if preferred */
+      inset: 0; /* Fill viewport top, left, right, bottom */
+      z-index: -10; /* Sit behind other content */
+
+      /* --- Background Image Styling (Moved here) --- */
       background-image: url("/bg.jpg"); /* Make sure bg.jpg is in /public */
-      background-size: cover; /* Scale the image to cover the entire body */
-      background-position: center center; /* Center the image */
-      background-repeat: no-repeat; /* Prevent the image from repeating */
-      background-attachment: fixed; /* Keep the background fixed during scroll */
+      background-size: cover;
+      background-position: center center;
+      background-repeat: no-repeat;
+      background-attachment: fixed; /* Still works on a fixed/full-height element */
       /* --- End Background Image Styling --- */
 
-      @apply text-gray-300 font-sans; /* Original Tailwind colors */
+      /* Apply layout styles here to center the card */
       display: flex;
       justify-content: center;
       align-items: center;
-      min-height: 100vh;
-      padding: 2rem;
+      padding: 2rem; /* Padding for the card inside */
     }
+
+    /* REMOVE the body selector entirely from here */
+    /* body { ... } */
+
+    /* Keep trophy-card and other specific styles */
     .trophy-card {
       /* Make background semi-transparent to see the body background */
       @apply bg-eve-secondary/90 p-8 rounded-lg shadow-xl border border-eve-accent/30 max-w-md w-full; /* Tailwind colors */
       backdrop-filter: blur(4px); /* Optional: Add a blur effect */
       -webkit-backdrop-filter: blur(4px); /* Safari support */
+
+      /* Ensure card is above the wrapper background */
+      position: relative;
+      z-index: 1;
     }
     h1 {
       @apply text-3xl font-bold text-eve-accent mb-6 text-center; /* Tailwind colors */
@@ -105,40 +115,42 @@
   </style>
 </svelte:head>
 
-<main class="trophy-card">
-  {#if isLoading}
-    <p class="loading">Loading profile...</p>
-  {:else if error}
-    <p class="error">Error: {error}</p>
-  {:else if profileData}
-    <h1>{profileData.characterName}</h1>
-    <div class="space-y-4">
-      <div class="stat">
-        <span class="stat-label">Leaderboard Rank</span>
-        <span class="stat-value">
-          {#if profileData.rank}
-            {formatRank(profileData.rank)} <span aria-hidden="true">🏆</span>
-          {:else}
-            Unranked
-          {/if}
-        </span>
+<div class="trophy-page-wrapper">
+  <main class="trophy-card">
+    {#if isLoading}
+      <p class="loading">Loading profile...</p>
+    {:else if error}
+      <p class="error">Error: {error}</p>
+    {:else if profileData}
+      <h1>{profileData.characterName}</h1>
+      <div class="space-y-4">
+        <div class="stat">
+          <span class="stat-label">Leaderboard Rank</span>
+          <span class="stat-value">
+            {#if profileData.rank}
+              {formatRank(profileData.rank)} <span aria-hidden="true">🏆</span>
+            {:else}
+              Unranked
+            {/if}
+          </span>
+        </div>
+        <div class="stat">
+          <span class="stat-label">Bashbucks</span>
+          <span class="stat-value"
+            >{profileData.bashbucks?.toLocaleString() || 0}
+            <span aria-hidden="true">💎</span></span
+          >
+        </div>
+        <div class="stat">
+          <span class="stat-label">Camps Crushed</span>
+          <span class="stat-value"
+            >{profileData.successfulAttacks?.toLocaleString() || 0}
+            <span aria-hidden="true">💥</span></span
+          >
+        </div>
       </div>
-      <div class="stat">
-        <span class="stat-label">Bashbucks</span>
-        <span class="stat-value"
-          >{profileData.bashbucks?.toLocaleString() || 0}
-          <span aria-hidden="true">💎</span></span
-        >
-      </div>
-      <div class="stat">
-        <span class="stat-label">Gates Crushed</span>
-        <span class="stat-value"
-          >{profileData.successfulAttacks?.toLocaleString() || 0}
-          <span aria-hidden="true">💥</span></span
-        >
-      </div>
-    </div>
-  {:else}
-    <p class="error">Profile not found.</p>
-  {/if}
-</main>
+    {:else}
+      <p class="error">Profile not found.</p>
+    {/if}
+  </main>
+</div>

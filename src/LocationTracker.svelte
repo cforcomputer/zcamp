@@ -297,6 +297,7 @@
 
   /**
    * Formats details for a single threat activity for TTS or display.
+   * MODIFIED: Removed confidence percentage display.
    * @param {object} activity - The activity object containing threat details.
    * @returns {string} A formatted string describing the threat.
    */
@@ -304,62 +305,63 @@
     if (!activity) return "Unknown threat";
 
     const classification = activity.classification || "threat";
-    // Make classification more readable (e.g., "roaming_camp" -> "roaming camp")
     const prettyClassification = classification.replace("_", " ");
     let details = []; // Array to build the detail string parts
 
-    // Add Confidence % (for non-battle) or Pilot Count (for battles)
+    // Add Pilot Count (for battles) - Confidence % part is REMOVED
     if (classification === "battle") {
-      // Safely access nested properties for pilot count
       const pilots =
         (activity.metrics &&
           activity.metrics.partyMetrics &&
           activity.metrics.partyMetrics.characters) ||
         0;
       details.push(`${pilots} pilot${pilots !== 1 ? "s" : ""}`);
-    } else if (typeof activity.probability === "number") {
-      // Add probability percentage if available
-      details.push(`${Math.round(activity.probability)}% conf.`);
     }
+    /* REMOVED THIS BLOCK:
+    else if (typeof activity.probability === "number") {
+      // Add probability percentage if available
+      details.push(`${Math.round(activity.probability)}% conf.`); // <-- THIS LINE IS GONE
+    }
+    */
 
     // Add Location Detail (Gate Name or Celestial Name if available)
     if (activity.stargateName) {
-      // Attempt to shorten common gate names like "Stargate (Other System)" to "Other System Gate"
       const shortGateName = activity.stargateName
         .replace(/Stargate\s*\((.*?)\)/i, "$1 Gate")
         .trim();
       details.push(`at ${shortGateName}`);
     } else if (activity.celestialName) {
-      // Fallback to celestial name if gate name isn't present
       details.push(`at ${activity.celestialName}`);
     }
 
     // Add Ship Composition (Example - ADJUST BASED ON YOUR ACTUAL DATA)
-    // This part is hypothetical and needs to match your 'activity' object structure.
     if (
       Array.isArray(activity.composition) &&
       activity.composition.length > 0
     ) {
-      // Example: Show top 3 ship type names, separated by comma
       const compSummary = activity.composition
         .slice(0, 3)
         .map((ship) => ship.typeName || "ship")
         .join(", ");
       details.push(
         `w/ ${compSummary}${activity.composition.length > 3 ? "..." : ""}`
-      ); // Add ellipsis if more than 3
+      );
     } else if (activity.shipType) {
-      // Simpler fallback if only a single ship type is known
       details.push(`w/ ${activity.shipType}`);
     }
 
     // Combine the parts into a final string
-    return `${prettyClassification} (${details.join(", ")})`;
+    // Ensure we don't have empty parentheses if details array is empty
+    const detailString = details.join(", ");
+    return detailString
+      ? `${prettyClassification} (${detailString})`
+      : prettyClassification;
   }
 
   /**
    * Generates a summary string of nearby threats (current system, adjacent systems, further out).
    * MODIFIED: Threshold 10%, all types, last seen time added, DEBUG logging added.
+   * MODIFIED: Removed gate name prefix from adjacent system warnings.
    * @param {Array} activities - The list of currently active threat activities.
    * @returns {string} A formatted summary string, potentially multi-line.
    */
@@ -442,13 +444,14 @@
             `[DEBUG getCampSummary] --- Checking Connected System: ${connectedSystemName} (ID: ${connectedSystemId}) ---`
           );
 
+          // Note: gateName calculation remains useful for DEBUGGING, but is not prepended to the warning anymore.
           const celestialData = Array.isArray($currentLocation.celestialData)
             ? $currentLocation.celestialData
             : [];
           const gateToSystem = celestialData.find(
             (cel) => cel && cel.destinationid === connectedSystemId
           );
-          let gateName = `Gate to ${connectedSystemName}`;
+          let gateName = `Gate to ${connectedSystemName}`; // Keep for logging/context
           if (gateToSystem && gateToSystem.itemname) {
             gateName =
               gateToSystem.itemname
@@ -456,7 +459,7 @@
                 .trim() || gateToSystem.itemname;
           }
           console.log(
-            `[DEBUG getCampSummary] Gate Name in Current System: ${gateName}`
+            `[DEBUG getCampSummary] Gate Name in Current System (for context): ${gateName}`
           );
 
           let gateSpecificWarnings = [];
@@ -464,11 +467,9 @@
           // --- 2a. Direct Dangers IN Adjacent System ---
           const directDangers = relevantActivities.filter((activity) => {
             const activitySystemId = activity?.systemId;
-            // Log comparison
             console.log(
               `[DEBUG getCampSummary] Comparing direct: activitySystemId=${activitySystemId} (type: ${typeof activitySystemId}) vs connectedSystemId=${connectedSystemId} (type: ${typeof connectedSystemId})`
             );
-            // Ensure types match for comparison if necessary, though === should handle this if both are numbers or both strings
             return String(activitySystemId) === String(connectedSystemId);
           });
           console.log(
@@ -481,6 +482,7 @@
                 const lastSeen = getTimeAgo(
                   activity.lastActivity || activity.lastKill
                 );
+                // Call the MODIFIED formatThreatDetails
                 return `${formatThreatDetails(activity)}, last seen ${lastSeen}`;
               })
               .join("; ");
@@ -518,26 +520,30 @@
                 const lastSeen = getTimeAgo(
                   activity.lastActivity || activity.lastKill
                 );
+                // Call the MODIFIED formatThreatDetails
                 return `${formatThreatDetails(activity)} in ${dangerSystemName}, last seen ${lastSeen}`;
               })
               .join("; ");
+            // Use the *target* system name in the warning, not the gate name from current system
             gateSpecificWarnings.push(
-              `Further threat${neighboringDangers.length > 1 ? "s" : ""} detected on gate towards ${connectedSystemName}: ${dangerSummary}`
+              `Further threat${neighboringDangers.length > 1 ? "s" : ""} detected towards ${connectedSystemName}: ${dangerSummary}`
             );
           }
 
           // --- Combine warnings for this gate ---
           if (gateSpecificWarnings.length > 0) {
             console.log(
-              `[DEBUG getCampSummary] Adding warnings for gate '${gateName}':`,
+              `[DEBUG getCampSummary] Adding warnings related to destination '${connectedSystemName}':`,
               gateSpecificWarnings
             );
+            // *** MODIFICATION HERE: Removed the gateName prefix ***
             connectedSystemWarnings.push(
-              `⚠️ ${gateName}: ${gateSpecificWarnings.join(" | ")}`
+              // `⚠️ ${gateName}: ${gateSpecificWarnings.join(" | ")}`  <-- OLD
+              `⚠️ ${gateSpecificWarnings.join(" | ")}` // <-- NEW (No gateName prefix)
             );
           } else {
             console.log(
-              `[DEBUG getCampSummary] No specific warnings found for gate '${gateName}'.`
+              `[DEBUG getCampSummary] No specific warnings found related to destination '${connectedSystemName}'.`
             );
           }
         });

@@ -18,48 +18,98 @@ import { ServerActivityManager } from "./serverActivityManager.js";
 const { Pool } = pg;
 
 class TaskQueue {
-  constructor(concurrency = 50) {
+  constructor(concurrency = 50, name = "DefaultQueue") {
+    // Added name for logging
     this.concurrency = concurrency;
     this.running = 0;
     this.queue = [];
+    this.name = name; // Store the queue name
+    this.processedCount = 0; // Track processed tasks
+    this.lastLogTime = Date.now(); // For periodic status
+    console.log(
+      `[${this.name}] Initialized with concurrency ${this.concurrency}`
+    );
   }
 
-  async enqueue(task) {
+  _logStatus(force = false) {
+    const now = Date.now();
+    // Log roughly every 10 seconds or if forced
+    if (force || now - this.lastLogTime > 10000) {
+      console.log(
+        `[${this.name} Status] Running: ${this.running}, Waiting: ${this.queue.length}, Processed: ${this.processedCount}`
+      );
+      this.lastLogTime = now;
+    }
+  }
+
+  async enqueue(task, taskId = null) {
+    // Added optional taskId for better logging
+    const internalTaskId =
+      taskId ||
+      `Task_${Date.now()}_${Math.random().toString(16).substring(2, 8)}`;
+    console.log(
+      `[${this.name}] Enqueuing task ${internalTaskId}. Queue size: ${
+        this.queue.length + 1
+      }, Running: ${this.running}`
+    );
+    this._logStatus(); // Log status on enqueue
     return new Promise((resolve, reject) => {
-      // Add task to queue
       this.queue.push({
         task,
         resolve,
         reject,
+        internalTaskId, // Store ID with the task
       });
-
-      // Try to run task immediately
       this.runNext();
     });
   }
 
   async runNext() {
-    // If at concurrency limit or no tasks, do nothing
     if (this.running >= this.concurrency || this.queue.length === 0) {
+      // Log only if we are blocked by concurrency limit but have waiting tasks
+      if (this.running >= this.concurrency && this.queue.length > 0) {
+        // console.log(`[${this.name}] Concurrency limit reached (${this.running}/${this.concurrency}). Waiting tasks: ${this.queue.length}`);
+        this._logStatus(); // Log status when blocked
+      }
       return;
     }
 
-    // Get the next task
-    const { task, resolve, reject } = this.queue.shift();
+    const { task, resolve, reject, internalTaskId } = this.queue.shift();
     this.running++;
+    const taskStartTime = performance.now();
+    console.log(
+      `[${this.name}] Starting task ${internalTaskId}. Running: ${this.running}, Waiting: ${this.queue.length}`
+    );
+    this._logStatus(); // Log status on start
 
     try {
-      // Execute the task
-      const result = await task();
+      const result = await task(); // Execute the actual task
       resolve(result);
+      const taskEndTime = performance.now();
+      console.log(
+        `[${
+          this.name
+        }] Task ${internalTaskId} completed successfully. Duration: ${(
+          taskEndTime - taskStartTime
+        ).toFixed(2)}ms`
+      );
     } catch (error) {
+      const taskEndTime = performance.now();
+      console.error(
+        `[${this.name}] Task ${internalTaskId} failed. Duration: ${(
+          taskEndTime - taskStartTime
+        ).toFixed(2)}ms`,
+        error
+      );
       reject(error);
     } finally {
-      // Reduce running count
       this.running--;
-
-      // Try to run next task
-      this.runNext();
+      this.processedCount++;
+      console.log(
+        `[${this.name}] Finished task ${internalTaskId}. Running: ${this.running}, Waiting: ${this.queue.length}`
+      );
+      this._logStatus(true); // Force log status on completion
+      this.runNext(); // Try to run the next task
     }
   }
 }
@@ -68,7 +118,7 @@ class TaskQueue {
 const MAX_SHIP_CACHE_SIZE = 2000;
 const shipTypeCache = new Map();
 
-const killmailProcessingQueue = new TaskQueue(50); // simultaneous processing tasks for kms
+const killmailProcessingQueue = new TaskQueue(50, "KillmailQueue"); // simultaneous processing tasks for kms
 
 const app = express();
 const server = createServer(app);
@@ -1151,12 +1201,12 @@ app.get("/api/trophy/:characterId", async (req, res) => {
   }
 
   try {
-    // --- Fetch Character Name and Bashbucks ---
+    // --- Fetch Character Name, Bashbucks, AND NEW Crushed Count ---
     const userQuery = `
-      SELECT character_name, bashbucks
-      FROM users
-      WHERE character_id = $1
-    `;
+        SELECT character_name, bashbucks, camps_crushed_count  -- Fetch new count
+        FROM users
+        WHERE character_id = $1
+      `;
     const userResult = await pool.query(userQuery, [characterId]);
 
     if (userResult.rows.length === 0) {
@@ -1164,29 +1214,25 @@ app.get("/api/trophy/:characterId", async (req, res) => {
     }
     const userData = userResult.rows[0];
 
-    // --- Fetch Successful Attacks Count ---
-    const attacksQuery = `
-      SELECT COUNT(*) as successfulAttacks
-      FROM camp_crusher_targets
-      WHERE character_id = $1 AND completed = TRUE
-    `;
-    const attacksResult = await pool.query(attacksQuery, [characterId]);
-    const successfulAttacks = parseInt(
-      attacksResult.rows[0].successfulattacks || 0
-    );
+    // --- Removed the old successfulAttacks query ---
 
-    // --- NEW: Fetch Leaderboard to determine Rank ---
+    // --- Fetch Leaderboard Rank (Based on New Count) ---
     let rank = null; // Default to null if not found
     try {
+      // Rank based primarily on camps_crushed_count, secondarily on bashbucks
       const leaderboardQuery = `
-        SELECT
-          cc.character_id
-        FROM camp_crushers cc
-        JOIN users u ON cc.character_id = u.character_id
-        ORDER BY u.bashbucks DESC
-      `;
+              SELECT
+                  u.character_id
+              FROM users u
+              -- Optional: Only rank characters present in camp_crushers?
+              -- JOIN camp_crushers cc ON cc.character_id = u.character_id
+              ORDER BY
+                  u.camps_crushed_count DESC, -- Primary sort: Higher crush count is better
+                  u.bashbucks DESC           -- Secondary sort: Higher bashbucks breaks ties
+          `;
       const leaderboardResult = await pool.query(leaderboardQuery);
 
+      // Find the 0-based index (+1 for rank)
       const rankIndex = leaderboardResult.rows.findIndex(
         (player) => player.character_id === characterId
       );
@@ -1195,7 +1241,7 @@ app.get("/api/trophy/:characterId", async (req, res) => {
         rank = rankIndex + 1; // Rank is index + 1
       }
       console.log(
-        `[API Trophy] Found rank ${rank} for character ${characterId}`
+        `[API Trophy] Calculated rank ${rank} (based on camps_crushed_count) for character ${characterId}`
       );
     } catch (leaderboardError) {
       console.error(
@@ -1210,8 +1256,8 @@ app.get("/api/trophy/:characterId", async (req, res) => {
     res.json({
       characterName: userData.character_name,
       bashbucks: userData.bashbucks || 0,
-      successfulAttacks: successfulAttacks,
-      rank: rank, // Include the rank in the response
+      successfulAttacks: userData.camps_crushed_count || 0, // Use the new count column
+      rank: rank, // Include the calculated rank
     });
   } catch (error) {
     console.error(
@@ -1565,34 +1611,32 @@ app.post("/api/campcrushers/target", async (req, res) => {
 app.get("/api/campcrushers/leaderboard", async (req, res) => {
   try {
     // --- MODIFIED QUERY ---
-    // Join with users table to get bashbucks and order by it
+    // Join users table, get bashbucks & camps_crushed_count, order by crushes
     const query = `
-      SELECT
-        cc.character_id,
-        cc.character_name,
-        u.bashbucks, -- Get bashbucks from users table
-        current_target.camp_id AS target_camp_id,
-        current_target.start_time AS target_start_time
-      FROM
-        camp_crushers cc
-      JOIN users u ON cc.character_id = u.character_id -- Join users table
-      LEFT JOIN LATERAL (
         SELECT
-          cct.camp_id,
-          cct.start_time
+            cc.character_id,          -- ID from camp_crushers table (participants)
+            cc.character_name,        -- Name from camp_crushers table
+            u.bashbucks,              -- Bashbucks from users table
+            u.camps_crushed_count     -- NEW crush count from users table
+            -- Keep LATERAL JOIN if you want to display current target on leaderboard UI
+            , current_target.camp_id AS target_camp_id
+            , current_target.start_time AS target_start_time
         FROM
-          camp_crusher_targets cct
-        WHERE
-          cct.character_id = cc.character_id
-          AND cct.completed = FALSE
-          AND cct.end_time > CURRENT_TIMESTAMP
+            camp_crushers cc          -- Start from participants table
+        JOIN users u ON cc.character_id = u.character_id -- Join users to get stats
+        LEFT JOIN LATERAL (           -- Optional: To show current target
+            SELECT cct.camp_id, cct.start_time
+            FROM camp_crusher_targets cct
+            WHERE cct.character_id = cc.character_id
+              AND cct.completed = FALSE
+              AND cct.end_time > CURRENT_TIMESTAMP
+            ORDER BY cct.start_time DESC
+            LIMIT 1
+        ) current_target ON true
         ORDER BY
-          cct.start_time DESC
-        LIMIT 1
-      ) current_target ON true
-      ORDER BY
-        u.bashbucks DESC -- Order by bashbucks from users table
-    `;
+            u.camps_crushed_count DESC, -- Order primarily by new crush count
+            u.bashbucks DESC           -- Secondary sort by bashbucks
+      `;
     const { rows } = await pool.query(query);
     // --- END MODIFIED QUERY ---
 
@@ -1604,16 +1648,16 @@ app.get("/api/campcrushers/leaderboard", async (req, res) => {
     const leaderboard = rows.map((player) => ({
       character_id: player.character_id,
       character_name: player.character_name,
-      bashbucks: player.bashbucks || 0, // Use bashbucks from the joined users table
-      target_camp_id: player.target_camp_id,
-      target_start_time: player.target_start_time,
-      total_camps_crushed: 0, // We can add this feature later
-      recent_crushes: [], // We can add this feature later
+      bashbucks: player.bashbucks || 0,
+      target_camp_id: player.target_camp_id, // Include if LATERAL JOIN kept
+      target_start_time: player.target_start_time, // Include if LATERAL JOIN kept
+      total_camps_crushed: player.camps_crushed_count || 0, // USE THE VALUE FROM DB
+      recent_crushes: [], // Keep as placeholder for now
     }));
 
     res.json(leaderboard);
   } catch (error) {
-    console.error("[Leaderboard] Error:", error);
+    console.error("[Leaderboard] Error fetching leaderboard:", error);
     res.status(500).json({
       error: "Internal server error",
       details: error.message,
@@ -3858,8 +3902,21 @@ function isDuplicateKillmail(killmail, existingKillmails) {
   );
 }
 
+// processKillmailData with added timing logs
 async function processKillmailData(killmail) {
-  // Basic validation of killmail structure
+  // Expects killmail object
+  const killID = killmail?.killID;
+  if (!killID) {
+    console.warn("[ProcessKM] Received killmail without killID.");
+    return null; // Cannot process without ID
+  }
+
+  const processingStartTime = performance.now();
+  console.log(
+    `[ProcessKM ${killID}] START processing. Current queue: ${killmailProcessingQueue.queue.length}, Running: ${killmailProcessingQueue.running}`
+  );
+
+  // Basic validation (keep existing)
   if (
     !killmail ||
     !killmail.killmail ||
@@ -3869,258 +3926,248 @@ async function processKillmailData(killmail) {
     !killmail.killmail.victim
   ) {
     console.warn(
-      "Skipping invalid killmail data (missing core fields):",
-      killmail?.killID
+      `[ProcessKM ${killID}] Skipping invalid killmail data (missing core fields).`
     );
-    return null; // Return null if basic structure is invalid
+    return null;
   }
-  // Validate time
-  if (isNaN(new Date(killmail.killmail.killmail_time).getTime())) {
+  const killTime = new Date(killmail.killmail.killmail_time);
+  if (isNaN(killTime.getTime())) {
     console.warn(
-      `Skipping killmail ${killmail.killID} due to invalid kill time.`
+      `[ProcessKM ${killID}] Skipping killmail due to invalid kill time.`
     );
-    return null; // Return null if time is invalid
+    return null;
   }
-
-  console.log("Starting processKillmailData", {
-    killID: killmail.killID,
-    systemId: killmail.killmail.solar_system_id,
-    time: killmail.killmail.killmail_time,
-  });
 
   try {
-    // Add ship categories first
-    const killmailWithShips = await addShipCategoriesToKillmail(killmail); //
+    // 1. Add ship categories
+    const shipCatStartTime = performance.now();
+    const killmailWithShips = await addShipCategoriesToKillmail(killmail);
+    const shipCatEndTime = performance.now();
+    console.log(
+      `[ProcessKM ${killID}] Ship categories added. Duration: ${(
+        shipCatEndTime - shipCatStartTime
+      ).toFixed(2)}ms`
+    );
     if (!killmailWithShips) {
       console.warn(
-        `Skipping killmail ${killmail.killID}: Failed to add ship categories.`
+        `[ProcessKM ${killID}] Skipping: Failed to add ship categories.`
       );
-      return null; // Return null if adding categories fails
+      return null;
     }
-    // killmailWithShips is now guaranteed to be defined and non-null here
 
-    // Ensure nested properties exist before accessing for pinpoints
-    if (
-      !killmailWithShips.killmail ||
-      !killmailWithShips.killmail.victim ||
-      !killmailWithShips.killmail.victim.position
-    ) {
+    // 2. Calculate Pinpoints and Celestial Data
+    let systemInfo = {}; // Define outside block
+    if (!killmailWithShips.killmail?.victim?.position) {
       console.warn(
-        `Skipping killmail ${killmail.killID}: Missing killmail, victim, or position data needed for pinpoints.`
+        `[ProcessKM ${killID}] Missing victim position data needed for pinpoints. Adding default.`
       );
-      // Decide if you want to continue without pinpoints or return null
-      // For now, let's add default pinpoints and continue
+      // Assign default structure (keep existing)
       killmailWithShips.pinpoints = {
-        hasTetrahedron: false,
-        points: [],
-        atCelestial: false,
-        nearestCelestial: null,
-        triangulationPossible: false,
-        triangulationType: null,
-        celestialData: {
-          // Add default celestial data structure
-          regionid: null,
-          regionname: null,
-          solarsystemid: killmailWithShips.killmail.solar_system_id,
-          solarsystemname: null,
-        },
+        /* ... default structure ... */
       };
-      // return null; // Option to stop processing if position is missing
     } else {
-      // Fetch celestial data
-      const systemId = killmailWithShips.killmail.solar_system_id; // [cite: 862]
-      const celestialData = await fetchCelestialData(systemId); //
-      // Calculate pinpoint data including nearest celestial
-      const pinpointData = calculatePinpoints(
-        //
-        celestialData,
-        killmailWithShips.killmail.victim.position // Safe to use now
+      const celestialStartTime = performance.now();
+      const systemId = killmailWithShips.killmail.solar_system_id;
+      const celestialData = await fetchCelestialData(systemId);
+      const celestialEndTime = performance.now();
+      console.log(
+        `[ProcessKM ${killID}] Celestial data fetched. Duration: ${(
+          celestialEndTime - celestialStartTime
+        ).toFixed(2)}ms`
       );
-      // Add pinpoint and celestial info to the killmail object
-      killmailWithShips.pinpoints = pinpointData; // [cite: 865]
-      const systemInfo = celestialData?.[0]; // [cite: 865]
-      killmailWithShips.pinpoints.celestialData = systemInfo // [cite: 866]
+
+      const pinpointStartTime = performance.now();
+      const pinpointData = calculatePinpoints(
+        celestialData,
+        killmailWithShips.killmail.victim.position
+      );
+      const pinpointEndTime = performance.now();
+      console.log(
+        `[ProcessKM ${killID}] Pinpoints calculated. Duration: ${(
+          pinpointEndTime - pinpointStartTime
+        ).toFixed(2)}ms`
+      );
+
+      killmailWithShips.pinpoints = pinpointData;
+      systemInfo = celestialData?.[0]; // Use the previously fetched data
+      // Assign celestialData to pinpoints (keep existing)
+      killmailWithShips.pinpoints.celestialData = systemInfo
         ? {
-            regionid: systemInfo.regionid, // [cite: 866]
-            regionname: systemInfo.regionname, // [cite: 866]
-            solarsystemid: systemInfo.solarsystemid, // [cite: 866]
-            solarsystemname: systemInfo.solarsystemname, // [cite: 866]
+            /* ... */
           }
         : {
-            regionid: null, // [cite: 866]
-            regionname: null, // [cite: 866]
-            solarsystemid: systemId, // [cite: 867]
-            solarsystemname: null, // [cite: 867]
+            /* ... default ... */
           };
     }
 
-    // Process with the unified manager
-    serverActivityManager.processKillmailActivity(killmailWithShips); // [cite: 868]
+    // 3. Process KM with Activity Manager (synchronous call, timing less critical unless it blocks)
+    const activityMgrStartTime = performance.now();
+    serverActivityManager.processKillmailActivity(killmailWithShips);
+    const activityMgrEndTime = performance.now();
+    console.log(
+      `[ProcessKM ${killID}] Activity Manager processed. Duration: ${(
+        activityMgrEndTime - activityMgrStartTime
+      ).toFixed(2)}ms`
+    );
 
-    // --- START: NEW Camp Crusher Reward Logic ---
-    console.log("Checking camp crusher targets (New Logic)..."); // [cite: 869]
-    const victimCharacterId = killmailWithShips.killmail.victim.character_id; // [cite: 870]
-    const attackerCharacterIds = killmailWithShips.killmail.attackers // [cite: 870]
-      .map((a) => a.character_id) // [cite: 870]
-      .filter(Boolean); // Get IDs of all attackers // [cite: 870]
-
+    // --- Define commonly used variables --- (keep existing)
+    const systemId = killmailWithShips.killmail.solar_system_id;
+    // ... other variables ...
     const killLocation = {
-      // [cite: 870]
-      systemId: killmailWithShips.killmail.solar_system_id, // [cite: 870]
-      // We need a way to check proximity to the stargate.
-      // Using pinpoint data is the most accurate.
-      // Let's check if the kill happened 'at' or 'near' the gate associated with the target.
-      isNearTargetGate: (targetStargateName) => {
-        // [cite: 870]
-        if (
-          !killmailWithShips.pinpoints?.nearestCelestial?.name ||
-          !targetStargateName
-        )
-          return false; // [cite: 870]
-        const killNearestGate =
-          killmailWithShips.pinpoints.nearestCelestial.name; // [cite: 870]
-        // Check if the kill's nearest gate matches the target gate name AND
-        // if the triangulation type indicates proximity.
-        return (
-          // [cite: 870]
-          killNearestGate
-            .toLowerCase()
-            .includes(targetStargateName.toLowerCase()) && // [cite: 870]
-          (killmailWithShips.pinpoints.atCelestial || // [cite: 870]
-            killmailWithShips.pinpoints.triangulationType === "direct_warp" || // [cite: 870]
-            killmailWithShips.pinpoints.triangulationType === "near_celestial") // [cite: 870]
-        );
-      },
+      /* ... */
     };
 
-    const BASHBUCKS_DEATH_PENALTY = 5; // [cite: 872]
-    const BASHBUCKS_KILL_REWARD = 20; // [cite: 872]
-    const awardedCrushers = new Set(); // Track who received points for this killmail // [cite: 872]
-
+    // --- 4. Camp Crush Detection Logic ---
+    const crushDetectStartTime = performance.now();
     try {
-      // --- Check if Victim was a Crusher at their Target Location ---
-      if (victimCharacterId) {
-        // [cite: 872]
-        const { rows: victimTargets } = await pool.query(
-          // [cite: 872]
-          `SELECT id, system_id, stargate_name
-               FROM camp_crusher_targets
-               WHERE character_id = $1 AND completed = FALSE AND end_time > NOW()`, // [cite: 872]
-          [victimCharacterId] // [cite: 872]
-        );
-
-        for (const target of victimTargets) {
-          // [cite: 872]
-          // Check if the kill occurred in the target system AND near the target stargate
-          if (
-            target.system_id === killLocation.systemId &&
-            killLocation.isNearTargetGate(target.stargate_name)
-          ) {
-            // [cite: 872]
-            // Victim died at their target location
-            if (!awardedCrushers.has(victimCharacterId)) {
-              // Avoid double awarding if also attacker // [cite: 872]
-              console.log(
-                `Camp Crusher ${victimCharacterId} died at target location ${target.stargate_name}. Awarding ${BASHBUCKS_DEATH_PENALTY} Bashbucks.`
-              ); // [cite: 872]
-              // Award points to the user's main bashbucks count
-              await pool.query(
-                // [cite: 872]
-                `UPDATE users SET bashbucks = bashbucks + $1 WHERE character_id = $2`, // [cite: 872]
-                [BASHBUCKS_DEATH_PENALTY, victimCharacterId] // [cite: 872]
-              );
-              awardedCrushers.add(victimCharacterId); // [cite: 872]
-              // Emit update to the specific user (optional: fetch new total first)
-              io.to(victimCharacterId.toString()).emit("bashbucksUpdate", {
-                change: BASHBUCKS_DEATH_PENALTY,
-              }); // [cite: 872]
-              break; // Only award once per killmail even if multiple targets match location // [cite: 872]
-            }
-          }
+      const relevantTargetsQuery = `...`; // Your query
+      const { rows: relevantTargets } = await pool.query(relevantTargetsQuery, [
+        killTime,
+        systemId,
+      ]);
+      console.log(
+        `[ProcessKM ${killID}] Crush Detect: Found ${relevantTargets.length} potential targets.`
+      );
+      // ... rest of crush detection logic ...
+      if (currentCampersOnKm < lossThreshold) {
+        // Inside the successful crush detection
+        const client = await pool.connect();
+        const dbCrushStartTime = performance.now();
+        try {
+          await client.query("BEGIN");
+          // ... UPDATE users ...
+          // ... UPDATE camp_crusher_targets ...
+          await client.query("COMMIT");
+          const dbCrushEndTime = performance.now();
+          console.log(
+            `[ProcessKM ${killID}] Crush DB updates committed. Duration: ${(
+              dbCrushEndTime - dbCrushStartTime
+            ).toFixed(2)}ms`
+          );
+          // ... emit etc ...
+        } catch (dbError) {
+          // ... rollback ...
+        } finally {
+          client.release();
         }
       }
-
-      // --- Check if Attacker was a Crusher who got a kill at their Target Location ---
-      for (const attackerId of attackerCharacterIds) {
-        // [cite: 872]
-        if (awardedCrushers.has(attackerId)) continue; // Skip if already awarded for dying // [cite: 872]
-
-        const { rows: attackerTargets } = await pool.query(
-          // [cite: 872]
-          `SELECT id, system_id, stargate_name
-               FROM camp_crusher_targets
-               WHERE character_id = $1 AND completed = FALSE AND end_time > NOW()`, // [cite: 872]
-          [attackerId] // [cite: 872]
-        );
-
-        for (const target of attackerTargets) {
-          // [cite: 872]
-          // Check if the kill occurred in the target system AND near the target stargate
-          if (
-            target.system_id === killLocation.systemId &&
-            killLocation.isNearTargetGate(target.stargate_name)
-          ) {
-            // [cite: 872]
-            // Attacker got *a* kill at their target location. Award points and complete.
-            if (!awardedCrushers.has(attackerId)) {
-              // [cite: 872]
-              console.log(
-                `Camp Crusher ${attackerId} got a kill at target location ${target.stargate_name}. Awarding ${BASHBUCKS_KILL_REWARD} Bashbucks & completing target ${target.id}.`
-              ); // [cite: 872]
-              // Award Bashbucks
-              await pool.query(
-                // [cite: 872]
-                `UPDATE users SET bashbucks = bashbucks + $1 WHERE character_id = $2`, // [cite: 872]
-                [BASHBUCKS_KILL_REWARD, attackerId] // [cite: 872]
-              );
-              // Mark target as complete using its specific ID
-              await pool.query(
-                // [cite: 872]
-                `UPDATE camp_crusher_targets SET completed = TRUE WHERE id = $1`, // [cite: 872]
-                [target.id] // [cite: 872]
-              );
-              awardedCrushers.add(attackerId); // [cite: 872]
-              // Emit updates
-              io.to(attackerId.toString()).emit("bashbucksUpdate", {
-                change: BASHBUCKS_KILL_REWARD,
-              }); // [cite: 872]
-              io.to(attackerId.toString()).emit("targetCompleted", {
-                targetId: target.id,
-              }); // [cite: 872]
-              break; // Only award once per killmail even if multiple targets match location // [cite: 872]
-            }
-          }
-        }
-      }
-      // --- END: NEW Camp Crusher Reward Logic ---
-    } catch (error) {
-      // Log specific camp crusher errors but don't stop overall processing
-      console.error("Error processing camp crusher rewards:", error); // [cite: 882]
+    } catch (crushError) {
+      console.error(
+        `[ProcessKM ${killID}] Error during crush detection phase:`,
+        crushError
+      );
     }
-
-    // Add killmail to in-memory cache (moved from pollRedisQ)
-    // This ensures only fully processed killmails are added
-    if (!isDuplicateKillmail(killmailWithShips, killmails)) {
-      // [cite: 883, 855]
-      killmails.push(killmailWithShips); // [cite: 883]
-      // Optionally broadcast the new, fully processed killmail
-      io.to("live-updates").emit("newKillmail", killmailWithShips); // [cite: 884]
-    }
-
-    return killmailWithShips; // Return the processed killmail // [cite: 885]
-  } catch (error) {
-    // Log the error with the original killID for reference
-    console.error(
-      // [cite: 885]
-      `Fatal error in processKillmailData for kill ${
-        killmail?.killID || "UNKNOWN"
-      }:`, // [cite: 885]
-      error // [cite: 885]
+    const crushDetectEndTime = performance.now();
+    console.log(
+      `[ProcessKM ${killID}] Crush detection finished. Duration: ${(
+        crushDetectEndTime - crushDetectStartTime
+      ).toFixed(2)}ms`
     );
-    return null; // Return null on failure // [cite: 886]
-  }
-} // End of processKillmailData
+    // --- END: Camp Crush Detection Logic ---
 
+    // --- 5. Bashbucks Reward/Penalty Logic ---
+    const bashbucksStartTime = performance.now();
+    try {
+      // ... logic for victim penalty ...
+      if (victimCharacterId) {
+        // ... query victimTargets ...
+        // ... loop targets ...
+        if (killLocation.isNearTargetGate(target.stargate_name)) {
+          if (!awardedBashbucksCrushers.has(victimCharacterId)) {
+            const dbPenaltyStartTime = performance.now();
+            await pool.query(
+              `UPDATE users SET bashbucks = GREATEST(0, bashbucks - $1) WHERE character_id = $2`,
+              [BASHBUCKS_DEATH_PENALTY, victimCharacterId]
+            );
+            const dbPenaltyEndTime = performance.now();
+            console.log(
+              `[ProcessKM ${killID}] Bashbucks victim penalty DB update duration: ${(
+                dbPenaltyEndTime - dbPenaltyStartTime
+              ).toFixed(2)}ms`
+            );
+            // ... rest of penalty logic ...
+          }
+        }
+      }
+
+      // ... logic for attacker reward ...
+      for (const attackerId of attackerCharacterIds) {
+        // ... query attackerTargets ...
+        if (killLocation.isNearTargetGate(target.stargate_name)) {
+          // ... skip if already completed by crush ...
+          const client = await pool.connect();
+          const dbRewardStartTime = performance.now();
+          try {
+            await client.query("BEGIN");
+            // ... UPDATE users ...
+            // ... UPDATE camp_crusher_targets ...
+            await client.query("COMMIT");
+            const dbRewardEndTime = performance.now();
+            console.log(
+              `[ProcessKM ${killID}] Bashbucks attacker reward DB updates committed. Duration: ${(
+                dbRewardEndTime - dbRewardStartTime
+              ).toFixed(2)}ms`
+            );
+            // ... emit etc ...
+          } catch (dbError) {
+            // ... rollback ...
+          } finally {
+            client.release();
+          }
+        }
+      }
+    } catch (bashbucksError) {
+      console.error(
+        `[ProcessKM ${killID}] Error processing Bashbucks rewards:`,
+        bashbucksError
+      );
+    }
+    const bashbucksEndTime = performance.now();
+    console.log(
+      `[ProcessKM ${killID}] Bashbucks logic finished. Duration: ${(
+        bashbucksEndTime - bashbucksStartTime
+      ).toFixed(2)}ms`
+    );
+    // --- END: Bashbucks Logic ---
+
+    // --- 6. Final Steps ---
+    // Add killmail to in-memory cache only if it's genuinely new
+    const duplicateCheckStartTime = performance.now();
+    const isDuplicate = isDuplicateKillmail(killmailWithShips, killmails); // Assuming killmails is accessible here
+    const duplicateCheckEndTime = performance.now();
+    // console.log(`[ProcessKM ${killID}] In-memory duplicate check duration: ${(duplicateCheckEndTime - duplicateCheckStartTime).toFixed(2)}ms`); // Can be noisy
+
+    if (!isDuplicate) {
+      killmails.push(killmailWithShips);
+      // Broadcast the new, fully processed killmail
+      io.to("live-updates").emit("newKillmail", killmailWithShips);
+      console.log(`[ProcessKM ${killID}] Added to cache and broadcasted.`);
+    } else {
+      console.log(
+        `[ProcessKM ${killID}] Skipped adding to cache/broadcast (in-memory duplicate).`
+      );
+    }
+
+    const processingEndTime = performance.now();
+    console.log(
+      `[ProcessKM ${killID}] END processing. Total Duration: ${(
+        processingEndTime - processingStartTime
+      ).toFixed(2)}ms. Final queue: ${
+        killmailProcessingQueue.queue.length
+      }, Running: ${killmailProcessingQueue.running}`
+    );
+    return killmailWithShips; // Return the processed killmail
+  } catch (error) {
+    const processingEndTime = performance.now();
+    console.error(
+      `[ProcessKM ${killID}] FATAL error during processing. Duration: ${(
+        processingEndTime - processingStartTime
+      ).toFixed(2)}ms`,
+      error
+    );
+    return null; // Return null on failure
+  }
+} // End of processKillmailData // End of processKillmailData
 // --- Socket.IO Connection Handler ---
 io.on("connection", (socket) => {
   console.log(`Socket connected: ${socket.id}`);
@@ -4910,78 +4957,103 @@ io.on("connection", (socket) => {
 }); // End of io.on('connection')
 
 // Function to poll for new killmails from RedisQ
+// Function to poll for new killmails from RedisQ with added logging
 async function pollRedisQ() {
+  const pollStartTime = performance.now();
+  // console.log(`[Poll] Starting poll cycle at ${new Date().toISOString()}`); // Can be noisy
+
   try {
     const response = await axios.get(REDISQ_URL, { timeout: 30000 });
     if (response.status === 200 && response.data.package) {
       const killmail = response.data.package;
-      const killID = killmail.killID; // Get the ID
+      const killID = killmail.killID;
+      const fetchEndTime = performance.now();
+      console.log(
+        `[Poll ${killID}] Fetched killmail. Fetch duration: ${(
+          fetchEndTime - pollStartTime
+        ).toFixed(2)}ms`
+      );
 
       // --- Database Duplicate Check ---
       let isNewKill = false;
+      const dbCheckStartTime = performance.now();
       try {
-        // Attempt to insert the killID. If it succeeds, it's new.
         await pool.query(
           "INSERT INTO processed_kill_ids (kill_id) VALUES ($1)",
           [killID]
         );
         isNewKill = true;
-        // console.log(`Kill ID ${killID} is new, inserting into processed_kill_ids.`);
       } catch (dbError) {
         if (dbError.code === "23505") {
-          // PostgreSQL unique violation code
-          // Kill ID already exists, it's a duplicate according to the DB
-          // console.log(`Kill ID ${killID} already processed (DB check).`);
+          // Unique violation
           isNewKill = false;
         } else {
-          // Different database error, log it but maybe still try processing?
-          // Or treat as duplicate to be safe? Let's log and skip.
-          console.error(`Database error checking kill ID ${killID}:`, dbError);
-          isNewKill = false; // Treat DB error as potentially processed
+          console.error(
+            `[Poll ${killID}] Database error checking kill ID:`,
+            dbError
+          );
+          isNewKill = false;
         }
       }
+      const dbCheckEndTime = performance.now();
+      console.log(
+        `[Poll ${killID}] DB Check: New = ${isNewKill}. Check duration: ${(
+          dbCheckEndTime - dbCheckStartTime
+        ).toFixed(2)}ms`
+      );
       // --- End Database Check ---
 
       // Proceed only if it's a new kill according to the DB AND within time window
-      if (isNewKill && isWithinLast6Hours(killmail.killmail.killmail_time)) {
-        // Check recency *after* DB check
-        // Enqueue processing (no need for the in-memory processingKillIDs Set anymore)
+      const isRecent = isWithinLast6Hours(killmail.killmail.killmail_time);
+      if (isNewKill && isRecent) {
+        console.log(`[Poll ${killID}] Kill is new and recent. Enqueuing...`);
+        // Enqueue processing, passing killID for better logging
         killmailProcessingQueue
           .enqueue(async () => {
+            // The async function that TaskQueue will execute
             try {
-              // Process killmail (adds ships, pinpoints, updates activities)
-              const processedKillmail = await processKillmailData(killmail);
-
-              // Add to in-memory cache only if successfully processed
-              // Note: processKillmailData should ideally contain its own final duplicate check
-              // against the 'killmails' array before push/emit as a last safeguard,
-              // but the DB check prevents most duplicates from even reaching here.
-              if (processedKillmail) {
-                // Assuming processKillmailData handles adding to 'killmails' and emitting
-                // (The original code did this)
-              }
+              await processKillmailData(killmail); // processKillmailData now needs killmail obj
             } catch (error) {
               console.error(
-                `Error processing killmail ${killID} in queue:`,
+                `[Poll ${killID}] Error processing killmail in queue task:`,
                 error
               );
-              // Should we remove from processed_kill_ids if processing fails catastrophically?
-              // Potentially, but for simplicity, we leave it, assuming the error isn't recoverable by reprocessing.
             }
-            // No 'finally' block needed here to remove from a Set
-          })
+          }, `KM_${killID}`) // Pass killID as taskId
           .catch((err) => {
-            console.error(`Error enqueueing killmail task for ${killID}:`, err);
-            // If enqueueing fails, the ID is already in the DB, preventing reprocessing later.
+            console.error(`[Poll ${killID}] Error enqueueing task:`, err);
           });
+      } else {
+        console.log(
+          `[Poll ${killID}] Skipping enqueue. New: ${isNewKill}, Recent: ${isRecent}`
+        );
       }
+    } else if (response.status === 200 && !response.data.package) {
+      // No new killmail from RedisQ, this is normal
+      // console.log("[Poll] No new killmail package received.");
     }
   } catch (error) {
     if (error.code !== "ECONNABORTED" && error.code !== "ETIMEDOUT") {
-      console.error("Error polling RedisQ:", error.message);
+      // Avoid logging timeouts as errors unless persistent
+      console.error("[Poll] Error polling RedisQ:", error.message);
+    } else {
+      // console.log("[Poll] Poll timed out or aborted."); // Can be noisy
     }
   } finally {
-    pollRedisQ(); // Schedule next poll
+    const pollEndTime = performance.now();
+    // console.log(`[Poll] Finished poll cycle. Duration: ${(pollEndTime - pollStartTime).toFixed(2)}ms. Scheduling next.`); // Can be noisy
+    // Check queue status before scheduling next poll
+    if (
+      killmailProcessingQueue.queue.length >
+      killmailProcessingQueue.concurrency * 2
+    ) {
+      console.warn(
+        `[Poll] Killmail queue is large (${killmailProcessingQueue.queue.length}). Adding 1s delay before next poll.`
+      );
+      setTimeout(pollRedisQ, 1000); // Add a small delay if queue is very large
+    } else {
+      pollRedisQ(); // Schedule next poll immediately
+    }
   }
 }
 

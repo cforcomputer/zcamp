@@ -1387,24 +1387,55 @@
   } //
 
   // --- NEW: Function to create/update Roam, Roaming Camp, Battle markers ---
+  // --- NEW: Function to create/update Roam, Roaming Camp, Battle markers ---
   function createOrUpdateMultiSystemRouteMarker(activity, now, latestKillId) {
     if (!activity.systems || activity.systems.length < 1) {
       console.warn(
         `[UniverseMap] Skipping multi-system route marker ${activity.id} (${activity.classification}): No system data.`
       );
       return null;
-    }
+    } // Sort systems by time to ensure correct path order
 
-    // Sort systems by time to ensure correct path order
-    const sortedSystems = [...activity.systems].sort(
+    let sortedSystems = [...activity.systems].sort(
       (a, b) => new Date(a.time) - new Date(b.time)
-    );
+    ); // +++ CHANGE: Determine markerType early for path length check +++
+
+    let markerType;
+    switch (activity.classification) {
+      case "roam":
+        markerType = "roam";
+        break;
+      case "roaming_camp":
+        markerType = "roaming_camp";
+        break;
+      case "battle":
+        markerType = "battle";
+        break;
+      default:
+        markerType = "unknown_multi_system";
+        break;
+    } // +++ END CHANGE +++
+    // +++ CHANGE: Limit path length for roaming camps +++
+    const MAX_PATH_LENGTH = 10;
+    let systemsToVisualize = sortedSystems; // Default to using all sorted systems
+
+    if (
+      markerType === "roaming_camp" &&
+      sortedSystems.length > MAX_PATH_LENGTH
+    ) {
+      console.log(
+        `[UniverseMap Path Draw] Roaming camp ${activity.id} path truncated from ${sortedSystems.length} to ${MAX_PATH_LENGTH} systems.`
+      );
+      // Keep only the last MAX_PATH_LENGTH systems based on time
+      systemsToVisualize = sortedSystems.slice(-MAX_PATH_LENGTH);
+    }
+    // +++ END CHANGE +++
 
     const points = []; // Stores Vector3 positions for the path line
-    const systemOrder = []; // Stores the original system data in order
+    const systemOrderForViz = []; // Stores the *visualized* system data in order
+    // +++ CHANGE: Loop through the potentially truncated systemsToVisualize array +++
 
-    // Loop through the sorted systems from the activity data
-    for (const system of sortedSystems) {
+    for (const system of systemsToVisualize) {
       const systemIdInt = parseInt(system.id);
       if (isNaN(systemIdInt)) {
         console.warn(
@@ -1415,56 +1446,54 @@
       const systemObj = solarSystems.get(systemIdInt);
       if (systemObj) {
         points.push(systemObj.position.clone());
-        systemOrder.push(system);
+        systemOrderForViz.push(system); // Store the original system data used for the point
       } else {
         console.warn(
           `[UniverseMap Path Draw] System ${systemIdInt} (Name: ${system.name || "N/A"}) NOT FOUND in rendered solarSystems map for activity ${activity.id} (${activity.classification}). System excluded from path line.`
         );
       }
     } // End of loop through systems
+    // +++ END CHANGE +++
 
     if (points.length < 1) {
       console.warn(
         `[UniverseMap] Skipping multi-system route marker ${activity.id} (${activity.classification}): No valid points found on rendered map.`
       );
       return null; // Need at least one valid point to place secondary glow
-    }
+    } // Determine colors and styles based on classification (using pre-determined markerType)
 
-    // Determine colors and styles based on classification
-    let baseColor, secondaryColor, glowSize, lineWidth, markerType;
-    // FLASH COLOR IS NOW THE SAME FOR ALL ROUTES
+    let baseColor, secondaryColor, glowSize, lineWidth; // FLASH COLOR IS NOW THE SAME FOR ALL ROUTES
     const flashColor = ROUTE_FLASH_COLOR; // White flash
 
-    switch (activity.classification) {
+    switch (
+      markerType // Use markerType directly now
+    ) {
       case "roam":
         baseColor = ROAM_COLOR;
         secondaryColor = SECONDARY_GLOW_COLOR_ROAM;
         glowSize = 60;
         lineWidth = 2;
-        markerType = "roam";
         break;
       case "roaming_camp":
         baseColor = ROAMING_CAMP_COLOR;
         secondaryColor = SECONDARY_GLOW_COLOR_ROAMING_CAMP;
         glowSize = 70;
         lineWidth = 3;
-        markerType = "roaming_camp";
         break;
       case "battle":
         baseColor = BATTLE_COLOR;
         secondaryColor = SECONDARY_GLOW_COLOR_BATTLE;
         glowSize = 80;
         lineWidth = 4;
-        markerType = "battle";
         break;
       default: // Fallback
         baseColor = ROAM_COLOR;
         secondaryColor = SECONDARY_GLOW_COLOR_ROAM;
         glowSize = 60;
         lineWidth = 2;
-        markerType = "unknown_multi_system";
     }
 
+    // ... (rest of the function creating lines, glows etc. using the 'points' array) ...
     const routeGroup = new THREE.Group();
     let lineObject = null;
     let secondaryGlowSprite = null;
@@ -1516,20 +1545,39 @@
       routeGroup.add(secondaryGlowSprite);
     }
 
-    // Add small system glow markers for visited systems
-    systemOrder.forEach((system) => {
+    // +++ CHANGE: Add small system glow markers ONLY for the visualized systems +++
+    systemOrderForViz.forEach((system) => {
+      // Use systemOrderForViz here
       const systemIdInt = parseInt(system.id);
       if (isNaN(systemIdInt)) return;
       const systemObj = solarSystems.get(systemIdInt);
 
+      // Check if this system ALSO hosts a major marker (camp, sb, rc_end, battle_end)
+      // This check prevents drawing a small path node glow on top of a larger primary marker
       const hasMajorActivityMarker = Array.from(activityMarkers.values()).some(
-        (m) =>
-          (m.activityData.systemId &&
-            parseInt(m.activityData.systemId) === systemIdInt &&
-            ["camp", "smartbomb"].includes(m.activityData.classification)) ||
-          (m.activityData.lastSystem?.id &&
-            parseInt(m.activityData.lastSystem.id) === systemIdInt &&
-            ["roaming_camp", "battle"].includes(m.activityData.classification))
+        (m) => {
+          const mAct = m.activityData;
+          const mClass = mAct.classification;
+          const mSysId = mAct.systemId ? parseInt(mAct.systemId) : NaN;
+          const mLastSysId = mAct.lastSystem?.id
+            ? parseInt(mAct.lastSystem.id)
+            : NaN;
+
+          // Check for camp/sb at this system ID
+          if (
+            (mClass === "camp" || mClass === "smartbomb") &&
+            mSysId === systemIdInt
+          )
+            return true;
+          // Check for rc/battle where the *last known system* is this system ID
+          if (
+            (mClass === "roaming_camp" || mClass === "battle") &&
+            mLastSysId === systemIdInt
+          )
+            return true;
+
+          return false;
+        }
       );
 
       if (systemObj && !hasMajorActivityMarker) {
@@ -1542,18 +1590,20 @@
         });
         const glowSprite = new THREE.Sprite(glowMaterial);
         glowSprite.position.copy(systemObj.position);
-        glowSprite.scale.set(8, 8, 1);
+        glowSprite.scale.set(8, 8, 1); // Small marker size for path node
         routeGroup.add(glowSprite);
       }
     });
+    // +++ END CHANGE +++
 
     // Store HEX numbers in userData
     routeGroup.userData = {
       type: markerType,
       activityData: activity,
-      systems: systemOrder,
-      flashColor: flashColor, // Store designated flash hex (ROUTE_FLASH_COLOR)
-      baseColor: baseColor, // Store base hex
+      // Store the *visualized* system order (potentially truncated)
+      systems: systemOrderForViz,
+      flashColor: flashColor,
+      baseColor: baseColor,
     };
 
     // Return the object
@@ -1565,11 +1615,10 @@
       lastKillId: latestKillId,
       flashEndTime: 0,
       secondaryGlow: secondaryGlowSprite,
-      secondaryGlowFlashEndTime: 0, // Keep for potential future use
+      secondaryGlowFlashEndTime: 0,
       type: markerType,
     };
   } // End of createOrUpdateMultiSystemRouteMarker
-
   // --- Function to create/update Camp, Smartbomb markers ---
   function createOrUpdateCampStyleMarker(activity, now, latestKillId) {
     const systemId = parseInt(activity.systemId);
@@ -2720,6 +2769,7 @@
   }
 
   // --- Animation Loop ---
+  // --- Animation Loop ---
   function animate(time) {
     if (!mounted) return;
     frameId = requestAnimationFrame(animate);
@@ -2739,14 +2789,13 @@
       );
       const secondaryGlow = markerObj.secondaryGlow;
       const activity = markerObj.activityData;
-      const lineMat = markerObj.lineMaterial;
+      const lineMat = markerObj.lineMaterial; // --- Define Default Flash Colors (used if userData is missing) ---
 
-      // --- Define Default Flash Colors (used if userData is missing) ---
       const defaultCampFlash = CAMP_FLASH_COLOR; // 0xff0000
       const defaultSmartbombFlash = SMARTBOMB_FLASH_COLOR; // 0xff4444
       const defaultRouteFlash = ROUTE_FLASH_COLOR; // 0xffffff
-
       // --- Retrieve HEX colors from userData, providing type-specific defaults ---
+
       const flashColorHex =
         markerObj.group?.userData?.flashColor ||
         (markerObj.type === "camp"
@@ -2766,16 +2815,18 @@
               : markerObj.type === "battle"
                 ? BATTLE_COLOR
                 : ROAM_COLOR); // Base defaults
+      // Retrieve base glow size if available (for scale animation)
 
+      const baseGlowSize = markerObj.group?.userData?.baseGlowSize || 10; // Default size if not found
       // --- Determine Secondary Glow base opacity ---
+
       let secondaryBaseOpacity = 0.1; // Default (roam)
       if (markerObj.type === "smartbomb" || markerObj.type === "roaming_camp") {
         secondaryBaseOpacity = 0.15;
       } else if (markerObj.type === "battle") {
         secondaryBaseOpacity = 0.2;
-      }
+      } // --- Handle Flashing State ---
 
-      // --- Handle Flashing State ---
       if (markerObj.flashEndTime > 0 && markerObj.flashEndTime > now) {
         // FLASH STATE - Glows: Explosion Fade-In / Lines: Color Change
 
@@ -2785,42 +2836,56 @@
         const flashProgress = Math.min(
           1.0,
           Math.max(0.0, timeSinceFlashStart / FLASH_DURATION)
-        );
+        ); // +++ CHANGE: Apply easing function for smoother animation +++
+        // Use ease-out cubic for a more "fluid" effect
 
+        const easedProgress = 1 - Math.pow(1 - flashProgress, 3); // +++ END CHANGE +++
         // Apply effect to Primary visual (Glow or Line)
         if (glowSprite) {
-          // Camp/SB Flash - Explosion Fade-In
+          // Camp/SB Flash - Explosion Fade-In with Scale
           const normalGlowOpacity = Math.min(
             0.8,
             (activity?.probability || 0) / 100
           );
 
           glowSprite.material.color.set(flashColorHex); // Set flash color
-          // Opacity fades IN from 0 to normalGlowOpacity based on flashProgress
-          glowSprite.material.opacity = normalGlowOpacity * flashProgress;
-          // Mixer handles base scale pulse, no change here needed for scale
+          // +++ CHANGE: Use eased progress for opacity +++
+
+          glowSprite.material.opacity = normalGlowOpacity * easedProgress; // +++ END CHANGE +++
+          // +++ CHANGE: Add scale animation during flash +++
+          // Expand rapidly, then maybe settle slightly back. Adjust multiplier as needed.
+          const targetScale = baseGlowSize * (1 + easedProgress * 1.5); // Expand up to 2.5x base size
+          glowSprite.scale.set(targetScale, targetScale, targetScale); // Stop the base pulse mixer during flash to avoid conflict
+          if (
+            markerObj.mixer &&
+            markerObj.mixer.clipAction("pulse")?.isRunning()
+          ) {
+            markerObj.mixer.clipAction("pulse").stop();
+          } // +++ END CHANGE +++
         } else if (lineMat) {
           // Route Line Flash - Simple Color Change (Keep existing behavior)
           lineMat.color.set(flashColorHex); // Set flash color (White)
           lineMat.opacity = 1.0; // Keep base opacity
-        }
+        } // Apply effect to secondary glow (Explosion Fade-In)
 
-        // Apply effect to secondary glow (Explosion Fade-In)
         if (secondaryGlow) {
-          // Opacity fades IN from 0 to secondaryBaseOpacity based on flashProgress
-          secondaryGlow.material.opacity = secondaryBaseOpacity * flashProgress;
-          // Optional: Could also set secondaryGlow color to flashColorHex if desired
-          // secondaryGlow.material.color.set(flashColorHex);
+          // +++ CHANGE: Use eased progress for secondary glow opacity +++
+          secondaryGlow.material.opacity = secondaryBaseOpacity * easedProgress; // +++ END CHANGE +++
         }
-      }
-      // --- Handle Normal State / Pulse ---
+      } // --- Handle Normal State / Pulse ---
       else {
         // Reset flash timer if it just ended
         if (markerObj.flashEndTime > 0 && markerObj.flashEndTime <= now) {
-          markerObj.flashEndTime = 0;
-        }
+          markerObj.flashEndTime = 0; // +++ CHANGE: Restart pulse mixer if it was stopped for flash +++
+          if (glowSprite && markerObj.mixer) {
+            const action = markerObj.mixer.clipAction("pulse");
+            if (action && !action.isRunning()) {
+              action.reset().play(); // Reset and play the base pulse
+            } // Also reset scale to base immediately after flash ends
+            glowSprite.scale.set(baseGlowSize, baseGlowSize, baseGlowSize);
+          } // +++ END CHANGE +++
+        } // Apply normal state / pulse animation
 
-        // Apply normal state / pulse animation
         if (glowSprite) {
           // Camp/SB (Mixer handles scale pulse)
           glowSprite.material.color.set(baseColorHex); // Set back to base color
@@ -2828,52 +2893,55 @@
             0.8,
             (activity?.probability || 0) / 100
           ); // Base opacity
-          // Ensure scale reset fallback (if mixer stopped)
-          if (
-            markerObj.mixer &&
-            !markerObj.mixer.clipAction("pulse")?.isRunning()
-          ) {
-            const baseScale = markerObj.group?.userData?.baseGlowSize || 10;
-            glowSprite.scale.setScalar(baseScale);
-          }
+          // Base pulse scale is handled by the mixer if running
         } else if (lineMat) {
           // Route Line Pulse (Roam/RC/Battle)
-          // --- Route Line PULSE color logic --- START ---
-          const pulseSpeed = 3; // Adjust pulse speed if desired
-          const brightPulseColor = new THREE.Color(0xffffff); // Pulse towards white
-          const pulseFactor = (Math.sin(now * pulseSpeed) + 1) / 2; // Oscillates 0-1
 
-          lineMat.opacity = 1.0; // Keep opacity high
+          // +++ CHANGE: Special bright pulse for Roaming Camps +++
+          if (markerObj.type === "roaming_camp") {
+            const pulseSpeed = 5; // Faster pulse for RC
+            const brightPulseColor = new THREE.Color(0xffffff); // Pulse to pure white
+            const pulseFactor = (Math.sin(now * pulseSpeed) + 1) / 2; // Oscillates 0-1 faster
 
-          // Lerp color between base and white for pulse effect
-          lineMat.color.lerpColors(
-            new THREE.Color(baseColorHex), // Create Color from stored hex
-            brightPulseColor,
-            pulseFactor * 1.0 // Lerp fully to white at peak
-          );
-          // --- Route Line PULSE color logic --- END ---
-        }
+            lineMat.opacity = 1.0; // Always fully opaque
+            // Lerp color aggressively towards white
 
-        // Pulse secondary glow opacity normally
+            lineMat.color.lerpColors(
+              new THREE.Color(baseColorHex),
+              brightPulseColor,
+              pulseFactor * 1.0 // Make it reach full white intensity at peak
+            );
+          } else {
+            // --- Original Route Line PULSE color logic (for roam/battle) ---
+            const pulseSpeed = 3;
+            const brightPulseColor = new THREE.Color(0xffffff);
+            const pulseFactor = (Math.sin(now * pulseSpeed) + 1) / 2;
+
+            lineMat.opacity = 1.0; // Lerp color between base and slightly brighter for pulse effect
+
+            lineMat.color.lerpColors(
+              new THREE.Color(baseColorHex),
+              brightPulseColor,
+              pulseFactor * 0.7 // Less intense pulse than RC (adjust factor 0.0-1.0)
+            );
+          } // +++ END CHANGE +++
+        } // Pulse secondary glow opacity normally
+
         if (secondaryGlow) {
           const pulseFactorSec = (Math.sin(now * 2.5) + 1) / 2; // Gentle pulse
           secondaryGlow.material.opacity =
             secondaryBaseOpacity + pulseFactorSec * 0.15; // Pulse base opacity slightly
-          // Ensure secondary glow color is reset if it was changed during flash
-          // secondaryGlow.material.color.set(SECONDARY_GLOW_COLOR_...) // Reset based on type if needed
         }
       }
     }); // End loop through activityMarkers
-
     // Update user location marker animation
-    if (userLocationMarker.mixer) userLocationMarker.mixer.update(deltaTime);
 
-    // Ensure region labels remain visible
+    if (userLocationMarker.mixer) userLocationMarker.mixer.update(deltaTime); // Ensure region labels remain visible
+
     regionLabelCache.forEach((cacheEntry) => {
       if (cacheEntry.label) cacheEntry.label.visible = true;
-    });
+    }); // Update controls and render the scene
 
-    // Update controls and render the scene
     if (controls) controls.update();
     if (renderer && camera) renderer.render(scene, camera);
     if (labelRenderer && camera) labelRenderer.render(scene, camera);
@@ -3060,6 +3128,19 @@
 
 <style>
   /* --- Base Container & Controls --- */
+  .context-menu-wrapper {
+    position: absolute; /* Needed for z-index context */
+    /* Ensure it's above other UI elements and map labels */
+    /* Higher than danger tooltip (1000) and info panel (100) */
+    z-index: 1100;
+    /* Position is handled by the ContextMenu component itself via x, y props,
+       so no top/left needed here, but position:absolute is required for z-index. */
+    pointer-events: none; /* Wrapper shouldn't block interactions */
+  }
+  .context-menu-wrapper > :global(.context-menu-class) {
+    /* Assuming ContextMenu has a root class like this */
+    pointer-events: auto;
+  }
   .universe-map-container {
     position: relative; /* Needed for absolute positioning of children */
     width: 100%;
@@ -3325,6 +3406,7 @@
     pointer-events: none; /* Allow clicks to pass through */
     user-select: none; /* Prevent text selection */
     border: 1px solid rgba(255, 255, 255, 0.2); /* Subtle border */
+    z-index: 1; /* Lower z-index than context menu */
   }
   :global(.region-label) {
     font-size: 18px; /* Larger region labels */
@@ -3340,6 +3422,7 @@
       0 0 4px black; /* Stronger shadow */
     /* Color is set dynamically via style attribute */
     border: 1px solid rgba(255, 255, 255, 0.1); /* Very subtle border */
+    z-index: 1; /* Lower z-index than context menu */
   }
 
   /* --- Reactive Danger Warnings Box (Bottom Right) --- */

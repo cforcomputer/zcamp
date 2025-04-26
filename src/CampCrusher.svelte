@@ -227,7 +227,9 @@
     // --- NEW: If we just turned selection OFF, hide the panel ---
     if (currentSelectionState) {
       // i.e., if it *was* true and we are now turning it false
-      hideCampCrusherPanel(); // Use the new helper function from the store
+      // NOTE: Original code hid panel here, but user request implies keeping panel visible
+      // If you want to hide the panel when CANCEL SELECTION is clicked, uncomment the next line:
+      // hideCampCrusherPanel(); // Use the new helper function from the store
     }
     // --- END NEW ---
 
@@ -248,7 +250,7 @@
         // Call the imported cancelTarget function
         await cancelTarget();
         console.log(`CampCrusher: Cancel API call finished for ${idToCancel}`);
-        // Panel remains visible after cancel
+        // Panel remains visible after cancel (as per comments in original code)
       } else {
         console.warn(
           "CampCrusher: Cancel button clicked but no target ID was set."
@@ -339,7 +341,7 @@
       );
       selectedCampCrusherTargetId.set(null); //
       currentTargetEndTime.set(null); //
-      // Panel remains visible
+      // Panel remains visible (as per comments in original code)
     } else {
       console.log(
         `%cCampCrusher: Server event for ${targetId} does not match current target ${currentSelectedId}. Ignoring.`,
@@ -409,14 +411,6 @@
   {:else if !isLoadingStats && characterName}
     <div class="idle-view">
       <button
-        type="button"
-        class="absolute top-1 right-1 w-6 h-6 text-xs retro-button close-button"
-        title="Close Camp Crusher Panel"
-        on:click={hideCampCrusherPanel}
-      >
-        X
-      </button>
-      <button
         class="retro-button main-button"
         on:click={toggleSelectionMode}
         disabled={!!currentTargetId}
@@ -438,29 +432,11 @@
 </div>
 
 <style>
-  /* --- NEW Styles --- */
-  .close-button {
-    background-color: #555;
-    color: #fff;
-    border-color: #777;
-    box-shadow: 2px 2px 0px #333;
-    padding: 2px 4px;
-    font-size: 0.9em;
-    min-width: auto; /* Override default */
-  }
-  .close-button:hover {
-    background-color: #777;
-    color: #fff;
-    box-shadow: 2px 2px 3px #555;
-  }
-  .close-button:active {
-    box-shadow: 1px 1px 0px #333;
-    transform: translate(1px, 1px);
-  }
+  /* Removed the .close-button CSS rules from here */
 
   /* --- Existing Styles (mostly unchanged) --- */
   .camp-crusher {
-    position: relative; /* Needed for absolute positioning of close button */
+    position: relative; /* Still needed if other absolute elements exist or might be added */
     font-family: "VT323", monospace; /* Retro pixel font */
     border: 4px solid #0f0; /* Neon green border */
     background: radial-gradient(

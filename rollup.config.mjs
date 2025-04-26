@@ -72,7 +72,7 @@ export default [
 
   // *** NEW CONFIGURATION FOR TROPHY PAGE ***
   {
-    input: "src/trophy_main.js", // <--- Input for trophy page
+    input: "src/trophyMain.js", // <--- Input for trophy page
     output: {
       sourcemap: true,
       format: "iife", // Use 'iife' for direct browser execution

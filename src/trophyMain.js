@@ -1,4 +1,4 @@
-// src/trophy_main.js
+// src/trophyMain.js
 import TrophyPage from "./TrophyPage.svelte";
 
 // Hide the page initially to prevent FOUC
