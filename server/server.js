@@ -18,7 +18,7 @@ import { ServerActivityManager } from "./serverActivityManager.js";
 const { Pool } = pg;
 
 class TaskQueue {
-  constructor(concurrency = 5) {
+  constructor(concurrency = 50) {
     this.concurrency = concurrency;
     this.running = 0;
     this.queue = [];
@@ -68,7 +68,7 @@ class TaskQueue {
 const MAX_SHIP_CACHE_SIZE = 2000;
 const shipTypeCache = new Map();
 
-const killmailProcessingQueue = new TaskQueue(5);
+const killmailProcessingQueue = new TaskQueue(50); // simultaneous processing tasks for kms
 
 const app = express();
 const server = createServer(app);
@@ -179,7 +179,8 @@ app.get("/", (req, res) => {
   res.send(rendered);
 });
 
-const REDISQ_URL = "https://redisq.zkillboard.com/listen.php?queueID=zcamp";
+const REDISQ_URL =
+  "https://redisq.zkillboard.com/listen.php?queueID=zcamp&ttw=1";
 let killmails = [];
 let isDatabaseInitialized = false;
 
@@ -188,6 +189,101 @@ let systemConnectivity = new Map(); // Key: systemId (string), Value: Set<string
 let stargateDestinationMap = new Map(); // Key: stargateItemId (string), Value: destinationSystemId (string) - RESTORED
 let regionNameCache = new Map(); // Key: regionId (string), Value: regionName (string)
 let systemIdToNameMap = new Map();
+let marketGroupInfo = new Map();
+
+/**
+ * Downloads market group data from the SDE URL during startup and builds
+ * an in-memory map for quick parent lookups and name retrieval.
+ */
+async function buildMarketGroupHierarchyCache() {
+  console.log(
+    "[Market Group Cache] Building hierarchy by downloading from SDE URL..."
+  );
+  const tempMarketInfo = new Map();
+  const marketGroupsUrl = "https://sde.zzeve.com/invMarketGroups.json"; // URL for the data
+
+  try {
+    console.log(
+      `[Market Group Cache] Fetching data from ${marketGroupsUrl}...`
+    );
+
+    // Use axios to download the file content
+    const response = await axios.get(marketGroupsUrl, {
+      timeout: 30000, // Add a reasonable timeout (e.g., 30 seconds)
+      // Optional: Add headers if needed, e.g., User-Agent
+      // headers: { 'User-Agent': 'YourAppName/Version (Contact Info)' }
+    });
+
+    // Check if the request was successful and data exists
+    if (response.status !== 200 || !response.data) {
+      throw new Error(
+        `Failed to download market groups. Status: ${response.status}`
+      );
+    }
+
+    // Axios automatically parses JSON response by default
+    const marketGroupsData = response.data;
+
+    if (!Array.isArray(marketGroupsData)) {
+      throw new Error(
+        "Invalid format: Downloaded market group data should be an array."
+      );
+    }
+
+    console.log(
+      `[Market Group Cache] Download successful. Processing ${marketGroupsData.length} entries...`
+    );
+    let count = 0;
+    marketGroupsData.forEach((group) => {
+      // Ensure marketGroupID exists and is a number before adding
+      if (
+        group.marketGroupID != null &&
+        typeof group.marketGroupID === "number"
+      ) {
+        tempMarketInfo.set(group.marketGroupID, {
+          parentId: group.parentGroupID ?? null, // Use nullish coalescing for null parent
+          name: group.marketGroupName || "Unknown Group",
+        });
+        count++;
+      } else {
+        console.warn(
+          "[Market Group Cache] Skipping group with missing or invalid marketGroupID:",
+          group
+        );
+      }
+    });
+
+    marketGroupInfo = tempMarketInfo; // Assign to global map *after* successful loading
+    console.log(
+      `[Market Group Cache] Successfully loaded ${marketGroupInfo.size} market groups into cache.`
+    );
+  } catch (error) {
+    console.error(
+      "[Market Group Cache] CRITICAL: Failed to download or parse market groups from URL:",
+      {
+        url: marketGroupsUrl,
+        message: error.message,
+        // Log Axios specific details if available
+        axiosError: error.isAxiosError
+          ? {
+              status: error.response?.status,
+              data: error.response?.data
+                ? String(error.response.data).substring(0, 200) + "..."
+                : undefined, // Log snippet of data
+            }
+          : undefined,
+        stack: error.stack, // Include stack trace for debugging
+      }
+    );
+    // Keep the map empty to indicate failure
+    marketGroupInfo = tempMarketInfo; // Assign empty map on error
+
+    // Decide if server startup should fail if this critical data cannot be loaded.
+    // It's often better to fail fast if essential data is missing.
+    // throw new Error("Failed to build market group hierarchy cache. Server cannot start.");
+    // Or allow startup with degraded functionality (unknown categories) - current behaviour.
+  }
+}
 
 /**
  * Builds the system connectivity map using direct jump data from an external JSON source,
@@ -1732,99 +1828,146 @@ async function storeShipCategory(shipTypeId, shipData) {
 
 async function determineShipCategory(typeId, killmail) {
   try {
-    // Get ship type information from ESI first
-    const response = await axios.get(
-      `https://esi.evetech.net/latest/universe/types/${typeId}/`
-    );
-
-    // Get ship name and default tier
-    const shipName = response.data.name;
-    let tier = "T1";
-    let category = "unknown";
-
-    // Check for CONCORD group specifically
-    if (response.data.group_id === 1180) {
-      return {
-        category: "concord",
-        name: shipName,
-        tier: tier,
-      };
-    }
-
-    if (response.data.group_id === 29) {
-      return {
-        category: "capsule",
-        name: shipName,
-        tier: tier,
-      };
-    }
-
-    // Check if it's an NPC based on killmail data
-    if (killmail && isNPC(typeId, killmail)) {
-      return {
-        category: "npc",
-        name: shipName,
-        tier: tier,
-      };
-    }
-
-    let marketGroupId = response.data.market_group_id;
-    if (!marketGroupId) {
-      return {
-        category: "unknown",
-        name: shipName,
-        tier: tier,
-      };
-    }
-
-    // Check market groups for both category and tier
-    while (marketGroupId) {
-      const marketResponse = await axios.get(
-        `https://esi.evetech.net/latest/markets/groups/${marketGroupId}/`
+    // --- Step 1: Get Type Info (Still needs ESI or better caching) ---
+    // Check your existing cache first (e.g., shipTypeCache or a dedicated type cache)
+    // For simplicity, we'll assume an ESI call here, but OPTIMIZE THIS SEPARATELY!
+    // Ideally, cache this response aggressively (in memory/Redis).
+    let typeResponseData;
+    try {
+      // TODO: Implement robust caching for this ESI call
+      const response = await axios.get(
+        `https://esi.evetech.net/latest/universe/types/${typeId}/?datasource=tranquility`
       );
+      typeResponseData = response.data;
+    } catch (esiError) {
+      console.error(
+        `[determineShipCategory] ESI Error fetching type ${typeId}:`,
+        esiError.response?.data || esiError.message
+      );
+      // Return a default/unknown if type info fails
+      return { category: "unknown", name: `TypeID ${typeId}`, tier: "T1" };
+    }
 
-      const marketGroupName = marketResponse.data.name;
+    const shipName = typeResponseData.name || `TypeID ${typeId}`;
+    const initialMarketGroupId = typeResponseData.market_group_id;
+    const groupId = typeResponseData.group_id; // Get group_id for specific checks
 
-      // Check market group name for tier - only look for "Advanced"
-      if (marketGroupName.includes("Advanced")) {
+    let tier = "T1"; // Default tier
+    let category = "unknown"; // Default category
+
+    // --- Step 2: Handle Special Cases (No Market Group Traversal Needed) ---
+    if (groupId === 1180) {
+      // CONCORD group
+      return { category: "concord", name: shipName, tier: tier };
+    }
+    if (groupId === 29) {
+      // Capsule group
+      return { category: "capsule", name: shipName, tier: tier };
+    }
+    // Check NPC *after* special groups but *before* market group traversal
+    if (killmail && isNPC(typeId, killmail)) {
+      return { category: "npc", name: shipName, tier: tier };
+    }
+
+    // --- Step 3: Traverse Market Group Hierarchy using the Cache ---
+    if (!initialMarketGroupId || marketGroupInfo.size === 0) {
+      console.warn(
+        `[determineShipCategory] No initial market group ID for type ${typeId} or market group cache is empty. Category unknown.`
+      );
+      // Return unknown if no market group or cache failed to load
+      return { category: "unknown", name: shipName, tier: tier };
+    }
+
+    let currentMarketGroupId = initialMarketGroupId;
+    const visitedGroups = new Set(); // Prevent infinite loops in case of bad SDE data
+
+    while (currentMarketGroupId && !visitedGroups.has(currentMarketGroupId)) {
+      visitedGroups.add(currentMarketGroupId); // Mark as visited
+
+      const groupInfo = marketGroupInfo.get(currentMarketGroupId);
+      if (!groupInfo) {
+        // This group ID wasn't found in our cache - indicates incomplete SDE or new group
+        console.warn(
+          `[determineShipCategory] Market group ${currentMarketGroupId} not found in cache for type ${typeId}.`
+        );
+        break; // Stop traversal
+      }
+
+      const marketGroupName = groupInfo.name;
+
+      // Check market group name for tier - only look for "Advanced" or T2 variations
+      // Be careful with naming variations (e.g., "Tech II")
+      if (
+        marketGroupName.includes("Advanced") ||
+        marketGroupName.startsWith("Tech II")
+      ) {
+        // Adjusted check
         tier = "T2";
       }
+      // Could add T3 checks here if needed based on group names or specific IDs
 
-      // Category checks - set category once
+      // Category checks - set category once (using the CONSTANT IDs)
       if (category === "unknown") {
-        if (PARENT_MARKET_GROUPS.CAPITALS.includes(marketGroupId)) {
+        if (PARENT_MARKET_GROUPS.CAPITALS.includes(currentMarketGroupId)) {
           category = "capital";
-        } else if (PARENT_MARKET_GROUPS.STRUCTURES.includes(marketGroupId)) {
+        } else if (
+          PARENT_MARKET_GROUPS.STRUCTURES.includes(currentMarketGroupId)
+        ) {
           category = "structure";
-        } else if (PARENT_MARKET_GROUPS.SHUTTLES.includes(marketGroupId)) {
+        } else if (
+          PARENT_MARKET_GROUPS.SHUTTLES.includes(currentMarketGroupId)
+        ) {
           category = "shuttle";
-        } else if (PARENT_MARKET_GROUPS.FIGHTERS.includes(marketGroupId)) {
+        } else if (
+          PARENT_MARKET_GROUPS.FIGHTERS.includes(currentMarketGroupId)
+        ) {
           category = "fighter";
-        } else if (marketGroupId === PARENT_MARKET_GROUPS.CORVETTES) {
+        } else if (currentMarketGroupId === PARENT_MARKET_GROUPS.CORVETTES) {
           category = "corvette";
-        } else if (PARENT_MARKET_GROUPS.FRIGATES.includes(marketGroupId)) {
+        } else if (
+          PARENT_MARKET_GROUPS.FRIGATES.includes(currentMarketGroupId)
+        ) {
           category = "frigate";
-        } else if (PARENT_MARKET_GROUPS.DESTROYERS.includes(marketGroupId)) {
+        } else if (
+          PARENT_MARKET_GROUPS.DESTROYERS.includes(currentMarketGroupId)
+        ) {
           category = "destroyer";
-        } else if (PARENT_MARKET_GROUPS.CRUISERS.includes(marketGroupId)) {
+        } else if (
+          PARENT_MARKET_GROUPS.CRUISERS.includes(currentMarketGroupId)
+        ) {
           category = "cruiser";
         } else if (
-          PARENT_MARKET_GROUPS.BATTLECRUISERS.includes(marketGroupId)
+          PARENT_MARKET_GROUPS.BATTLECRUISERS.includes(currentMarketGroupId)
         ) {
           category = "battlecruiser";
-        } else if (PARENT_MARKET_GROUPS.BATTLESHIPS.includes(marketGroupId)) {
+        } else if (
+          PARENT_MARKET_GROUPS.BATTLESHIPS.includes(currentMarketGroupId)
+        ) {
           category = "battleship";
-        } else if (marketGroupId === PARENT_MARKET_GROUPS.INDUSTRIAL) {
+        } else if (currentMarketGroupId === PARENT_MARKET_GROUPS.INDUSTRIAL) {
           category = "industrial";
-        } else if (marketGroupId === PARENT_MARKET_GROUPS.MINING) {
+        } else if (currentMarketGroupId === PARENT_MARKET_GROUPS.MINING) {
           category = "mining";
         }
+        // Add more categories here if needed
       }
 
-      // Stop if we've reached the top level "Ships" market group
-      if (marketGroupId === 4) break;
+      // Stop if we've determined category and tier? Maybe not, hierarchy might define tier higher up.
+      // Stop if we've reached a known top-level group or a null parent
+      if (currentMarketGroupId === 4 || groupInfo.parentId === null) {
+        break; // Reached top ship group or actual root
+      }
 
-      marketGroupId = marketResponse.data.parent_group_id;
+      // Move to the parent using the cache
+      currentMarketGroupId = groupInfo.parentId;
+    } // End while loop
+
+    // --- Step 4: Return Result ---
+    // If category is still unknown after traversal, keep it as unknown
+    if (category === "unknown") {
+      console.log(
+        `[determineShipCategory] Category remained unknown for Type ID: ${typeId}, Initial Market Group: ${initialMarketGroupId}, Name: ${shipName}`
+      );
     }
 
     return {
@@ -1833,12 +1976,12 @@ async function determineShipCategory(typeId, killmail) {
       tier: tier,
     };
   } catch (error) {
-    console.error(`Error determining category for ship type ${typeId}:`, error);
-    return {
-      category: "unknown",
-      name: "Unknown Ship",
-      tier: "T1",
-    };
+    // Catch any unexpected errors during the process
+    console.error(
+      `[determineShipCategory] Unexpected error processing type ${typeId}:`,
+      error
+    );
+    return { category: "unknown", name: `TypeID ${typeId}`, tier: "T1" }; // Safe default
   }
 }
 
@@ -4838,7 +4981,7 @@ async function pollRedisQ() {
       console.error("Error polling RedisQ:", error.message);
     }
   } finally {
-    setTimeout(pollRedisQ, 50); // Schedule next poll
+    pollRedisQ(); // Schedule next poll
   }
 }
 
@@ -4855,6 +4998,7 @@ async function startServer() {
   try {
     await initializeDatabase();
     await initializeMapData();
+    await buildMarketGroupHierarchyCache();
     await buildSystemConnectivityMap(); // for routes tracking during player movement without using fuzzworks
     isDatabaseInitialized = true;
 

@@ -141,21 +141,16 @@
     .filter(
       (activity) =>
         activity && // Ensure the activity object itself is valid
-        // Include only classifications relevant for this component view
-        ["camp", "smartbomb", "roaming_camp", "battle"].includes(
+        // 1. Include only camp-like classifications (exclude 'battle' and 'roam')
+        ["camp", "smartbomb", "roaming_camp"].includes(
           activity.classification
         ) &&
-        // Require a specific stargate name OR classify as a battle to be shown.
-        // This ensures battles without specific gate info but meeting other criteria might still show.
-        (activity.stargateName || activity.classification === "battle") &&
-        // Require probability > 0 OR be a battle. This prevents filtering out activities
-        // before probability calculation and ensures battles are always considered (if they meet other criteria).
-        (activity.probability === undefined ||
-          activity.probability > 0 ||
-          activity.classification === "battle")
+        // 2. Strictly require a stargate name (ensures it's on a gate)
+        activity.stargateName &&
+        // 3. Strictly require probability to be greater than 0
+        activity.probability > 0
     )
     // Sort activities: Primarily by probability (descending), then potentially by last activity time as a tie-breaker.
-    // Note: Sorting logic might need refinement based on desired priority.
     .sort((a, b) => {
       const probDiff = (b.probability || 0) - (a.probability || 0);
       if (probDiff !== 0) return probDiff;
@@ -186,6 +181,8 @@
     // Validation 2: Requires essential targeting data (ID, SystemID, StargateName).
     // Backend relies on stargateName for defining the target area.
     if (!activity?.id || !activity?.systemId || !activity?.stargateName) {
+      // Note: Battles are already filtered out, so specific battle message isn't strictly needed here anymore,
+      // but kept for robustness in case filter changes again.
       if (activity.classification === "battle" && !activity.stargateName) {
         alert(
           "Cannot target this battle: No specific stargate location identified for targeting."
@@ -313,9 +310,9 @@
       null; // Fallback if no name is found
 
     // Require stargateName for pinning consistency, as this defines the specific location of interest
+    // Note: Battles are filtered out upstream, but validation kept for robustness
     if (!activity.systemId || !activity.stargateName) {
       if (activity.classification === "battle" && !activity.stargateName) {
-        // Provide specific feedback for battles lacking a gate name
         alert(
           "Cannot pin this battle: No specific stargate location identified for pinning."
         );
@@ -573,11 +570,11 @@
 
     // Add "Pin System" option conditionally:
     // - User must be logged in.
-    // - Activity must be a type suitable for pinning (camp, smartbomb, battle).
+    // - Activity must be a type suitable for pinning (camp, smartbomb, roaming_camp). Note: 'battle' excluded by upstream filter now.
     // - Activity *must* have a stargateName (required for backend pinning logic).
     if (
       isLoggedIn &&
-      ["camp", "smartbomb", "battle"].includes(activity.classification) &&
+      ["camp", "smartbomb", "roaming_camp"].includes(activity.classification) && // Adjusted list
       activity.stargateName && // Check if stargateName is present
       activity.systemId // Also ensure systemId exists for pinning
     ) {
@@ -625,6 +622,7 @@
     if (probNum >= 80) return "#ff4444"; // Very High / Confirmed (Red)
     if (probNum >= 60) return "#ff8c00"; // High (Orange)
     if (probNum >= 40) return "#ffd700"; // Medium (Yellow)
+    // Note: Since the filter requires prob > 0, the lowest value displayed will have *some* green.
     return "#90ee90"; // Low / Initial (Light Green)
   }
 
@@ -703,7 +701,7 @@
 
     if (latestKill && latestKill.killmail?.killmail_time && latestKill.killID) {
       const killTime = new Date(latestKill.killmail.killmail_time);
-      // Format time asPQAryMMDDHHMM for zKillboard URL structure
+      // Format time as YYYYMMDDHHMM for zKillboard URL structure
       const formattedTime = `${killTime.getUTCFullYear()}${String(killTime.getUTCMonth() + 1).padStart(2, "0")}${String(killTime.getUTCDate()).padStart(2, "0")}${String(killTime.getUTCHours()).padStart(2, "0")}${String(killTime.getUTCMinutes()).padStart(2, "0")}`;
 
       // Determine the system ID to use for the link. Prefer system from the latest kill's pinpoint data if available.
@@ -787,7 +785,7 @@
     {/if}
 
     <div class="flex justify-between items-center mb-4">
-      <h2 class="text-white text-2xl font-bold">Active Camps & Battles</h2>
+      <h2 class="text-white text-2xl font-bold">Active Camps</h2>
       <div class="flex gap-2">
         <button
           class="px-4 py-2 bg-eve-secondary rounded {viewMode === 'cards'
@@ -806,7 +804,7 @@
 
     {#if activitiesToShow.length === 0}
       <p class="text-center py-8 text-gray-400 italic">
-        No active camps or battles found matching filters.
+        No active camps found matching filters.
       </p>
     {:else if viewMode === "cards"}
       <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -815,12 +813,12 @@
             <!-- svelte-ignore a11y-no-static-element-interactions -->
             <div
               class="eve-card overflow-hidden rounded-lg relative
-                     {activity.state === 'CRASHED'
+                           {activity.state === 'CRASHED'
                 ? 'opacity-70 grayscale-[0.7]'
                 : ''}
-                     {selectionActive &&
+                           {selectionActive &&
               !currentTargetId &&
-              activity.stargateName &&
+              activity.stargateName && // Still check stargateName for target eligibility
               activity.state !== 'CRASHED'
                 ? 'retro-card-active'
                 : ''}"
@@ -830,7 +828,7 @@
               <div
                 class="relative bg-eve-dark/90 bg-gradient-to-r from-eve-secondary/90 to-eve-secondary/40 p-3 border-t-2"
                 style="border-color: {getProbabilityColor(
-                  activity.probability || 0
+                  activity.probability // Probability is guaranteed > 0 by filter
                 )}"
               >
                 {#if isLoggedIn}
@@ -860,7 +858,9 @@
                       type="button"
                       title="Set as Target"
                       class="absolute top-2 right-2 w-8 h-8 rounded-full flex items-center justify-center transition-all duration-200 ease-in-out z-10 bg-gray-600 hover:bg-green-500
-                             {selectionActive ? 'target-button-active' : ''}"
+                                   {selectionActive
+                        ? 'target-button-active'
+                        : ''}"
                       on:click|stopPropagation={() => handleSetTarget(activity)}
                       aria-pressed={false}
                       aria-label={`Set ${activity.stargateName} as target`}
@@ -905,7 +905,7 @@
                     <span
                       class="px-2 py-1 rounded text-black font-bold text-sm"
                       style="background-color: {getProbabilityColor(
-                        activity.probability || 0
+                        activity.probability // Probability is guaranteed > 0
                       )}"
                       title={`Confidence: ${Math.round(activity.probability || 0)}%`}
                     >
@@ -942,12 +942,9 @@
                     class="flex justify-between py-0.5 border-b border-white/10"
                   >
                     <span class="text-gray-400">Location:</span>
-                    <span class="text-white truncate">
-                      {activity.stargateName ||
-                        (activity.classification === "battle"
-                          ? "Battle Zone (No Specific Gate)"
-                          : "Unknown Location")}
-                    </span>
+                    <span class="text-white truncate"
+                      >{activity.stargateName}</span
+                    >
                   </div>
                   <div
                     class="flex justify-between py-0.5 border-b border-white/10"
@@ -1157,9 +1154,9 @@
             {#each activitiesToShow as activity (activity.id)}
               <tr
                 class="border-b border-eve-secondary/30 hover:bg-eve-secondary/20 cursor-pointer
-                        {selectionActive &&
+                             {selectionActive &&
                 !currentTargetId &&
-                activity.stargateName &&
+                activity.stargateName && // Still check for target eligibility
                 activity.state !== 'CRASHED'
                   ? 'retro-row-active'
                   : ''}"
@@ -1172,10 +1169,7 @@
                 class:opacity-50={activity.state === "CRASHED"}
               >
                 <td class="px-4 py-2 text-white whitespace-nowrap">
-                  {activity.stargateName ||
-                    (activity.classification === "battle"
-                      ? "Battle Zone (No Specific Gate)"
-                      : "Unknown Location")}
+                  {activity.stargateName}
                   <span class="text-gray-400 text-xs block"
                     >{activity.systemName || `(${activity.systemId})`}</span
                   >
@@ -1193,7 +1187,7 @@
                   <span
                     class="px-2 py-1 rounded text-black text-xs font-bold"
                     style="background-color: {getProbabilityColor(
-                      activity.probability || 0
+                      activity.probability // Guaranteed > 0
                     )}"
                     title={`Confidence: ${Math.round(activity.probability || 0)}%`}
                   >
@@ -1344,12 +1338,10 @@
   }
 
   .eve-card {
-    /* Added position: relative in the <style> block */
-    position: relative; /* Establish positioning context for potential absolute children like tooltips or buttons inside */
+    position: relative;
   }
 
   .eve-card.retro-card-active {
-    /* Style for cards when selection is active */
     border: 3px solid #0f0;
     background: radial-gradient(
       ellipse at top,
@@ -1360,16 +1352,14 @@
       0 0 10px #0f0,
       0 0 5px #0f0 inset;
     animation: pulse-border 1.5s infinite;
-    cursor: pointer; /* Indicate clickable for selection */
-    /* position: relative; Already added above */
+    cursor: pointer;
   }
   .retro-row-active {
-    /* Style for table rows when selection is active */
     background-color: rgba(0, 80, 0, 0.4) !important;
     outline: 2px solid #0f0;
     outline-offset: -2px;
     animation: pulse-row 1.5s infinite;
-    cursor: pointer; /* Indicate clickable for selection */
+    cursor: pointer;
   }
   .retro-row-active:hover {
     background-color: rgba(0, 120, 0, 0.5) !important;
@@ -1409,47 +1399,29 @@
 
   /* --- General/Existing Styles --- */
   :global(.killmail-section) {
-    /* Example for potential global style */
     height: calc(100vh - 150px);
     overflow-y: auto;
   }
-
-  /* Ensure table header is sticky */
   thead th {
     position: sticky;
     top: 0;
-    background-color: inherit; /* Inherit from thead */
-    z-index: 10; /* Keep above table content */
+    background-color: inherit;
+    z-index: 10;
   }
-
-  /* Improve readability */
   td,
   th {
-    padding: 0.5rem 1rem; /* More consistent padding */
+    padding: 0.5rem 1rem;
   }
   tbody tr:hover {
-    background-color: rgba(
-      255,
-      255,
-      255,
-      0.05
-    ); /* Subtle hover for non-active rows */
+    background-color: rgba(255, 255, 255, 0.05);
   }
-
-  /* --- POSITIONING FIX --- */
-  /* Add position: relative to the main container that holds the ContextMenu instance */
-  /* This ensures the absolutely positioned menu uses this div as its reference */
-  /* Applied via class="relative" in the template div */
   .p-4 {
     position: relative;
   }
-  /* Ensure the eve-card also has position relative if menu needs to be relative to the card itself */
-  /* (Though the JS calculates relative to card/table already, this covers potential component implementations) */
   .eve-card {
     position: relative;
   }
-  /* If using table view, the table or its container might need position:relative depending on ContextMenu implementation */
   table {
-    position: relative; /* Or wrap table in a div with position: relative */
+    position: relative;
   }
 </style>
