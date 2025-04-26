@@ -152,3 +152,4 @@ devils hill should not have counted in the total.
 - There should be two ML models, one does clustering for a cluster score, and the other is a manual random forest classifier.
 - Make it so that the settings are correctly remembered when switching between tabs (Default profile that updates automatically and saves automatically)
 - The knows there's a rare npc kill because the status bar is generated, but it does not appear.
+- Add a limit to connected roam stargates to 10

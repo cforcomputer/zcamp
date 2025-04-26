@@ -165,89 +165,141 @@ async function pollLocation() {
     isPolling = false; // Assigns to the declared variable
   }
 }
-
-async function processLocationData(locationData) {
+async function processLocationData(locationDataFromESI) {
   console.log(
-    "[LocationStore] processLocationData started with:",
-    locationData
+    "[DEBUG processLocationData] Start processing ESI locationData:",
+    JSON.stringify(locationDataFromESI)
   );
-  if (!locationData || typeof locationData.solar_system_id === "undefined") {
+
+  if (
+    !locationDataFromESI ||
+    typeof locationDataFromESI.solar_system_id === "undefined"
+  ) {
     console.warn(
-      "[LocationStore] Invalid locationData received in processLocationData",
-      locationData
+      "[DEBUG processLocationData] Invalid ESI locationData received..."
     );
     currentLocation.set(null);
     lastSystemId = null;
     return;
   }
+
+  const currentSystemId = locationDataFromESI.solar_system_id;
+
+  // Only fetch full data if system changed
+  if (currentSystemId === lastSystemId) {
+    currentLocation.update((loc) =>
+      loc ? { ...loc, timestamp: new Date().toISOString() } : null
+    );
+    return;
+  }
+
+  console.log(
+    `[DEBUG processLocationData] System changed to ${currentSystemId}. Fetching enriched data + connections...`
+  );
+
   try {
-    if (locationData.solar_system_id !== lastSystemId) {
-      console.log(
-        `[LocationStore] System changed: ${lastSystemId} -> ${locationData.solar_system_id}. Fetching celestial data...`
-      );
-      const systemResponse = await fetch(
-        `/api/celestials/system/${locationData.solar_system_id}`
-      );
-      console.log(
-        `[LocationStore] /api/celestials response status: ${systemResponse.status}`
-      );
-      if (!systemResponse.ok) {
-        throw new Error(
-          `[LocationStore] Failed to fetch system data for ${locationData.solar_system_id}: ${systemResponse.status}`
-        );
-      }
-      const celestialData = await systemResponse.json();
-      if (!Array.isArray(celestialData) || celestialData.length === 0) {
-        console.warn(
-          `[LocationStore] Empty or invalid celestial data for ${locationData.solar_system_id}`
-        );
-        currentLocation.set({
-          solar_system_id: locationData.solar_system_id,
-          systemName: `System ${locationData.solar_system_id}`,
-          connected_systems: [],
-          regionName: "Unknown Region",
-          regionId: null,
-          celestialData: [],
-          timestamp: new Date().toISOString(),
-        });
-      } else {
-        const systemName =
-          celestialData[0]?.solarsystemname ||
-          `System ${locationData.solar_system_id}`;
-        const connectedSystems = celestialData
-          .filter(
-            (cel) =>
-              cel.typename?.toLowerCase().includes("stargate") &&
-              cel.destinationid
-          )
-          .map((gate) => ({
-            id: gate.destinationid,
-            name: gate.itemname?.match(/\(([^)]+)\)/)?.[1] || "Unknown",
-            gateName: gate.itemname,
-          }));
-        console.log(
-          `[LocationStore] Updating location: ${systemName}, ${connectedSystems.length} connections`
-        );
-        currentLocation.set({
-          solar_system_id: locationData.solar_system_id,
-          systemName,
-          connected_systems: connectedSystems,
-          regionName: celestialData[0]?.regionname || "Unknown Region",
-          regionId: celestialData[0]?.regionid,
-          celestialData: celestialData,
-          timestamp: new Date().toISOString(),
-        });
-      }
-      lastSystemId = locationData.solar_system_id;
-    } else {
-      // console.log(`[LocationStore] System ${locationData.solar_system_id} unchanged.`);
-      currentLocation.update((loc) =>
-        loc ? { ...loc, timestamp: new Date().toISOString() } : null
-      );
+    // Fetch the NEW combined data structure from the backend API
+    const systemResponse = await fetch(
+      `/api/celestials/system/${currentSystemId}`
+    );
+    console.log(
+      `[DEBUG processLocationData] /api/celestials response status: ${systemResponse.status}`
+    );
+    if (!systemResponse.ok) {
+      throw new Error(`API fetch failed: ${systemResponse.status}`);
     }
+
+    // Parse the combined data { celestials: [...], connectedSystems: [...] }
+    const apiData = await systemResponse.json();
+
+    const celestialData = apiData.celestials || []; // Array of celestial objects
+    const connectedSystemsFromApi = apiData.connectedSystems || []; // Array of {id, name}
+
+    console.log(
+      `[DEBUG processLocationData] Fetched ${celestialData.length} celestials and ${connectedSystemsFromApi.length} connected system entries.`
+    );
+
+    if (!Array.isArray(celestialData) || celestialData.length === 0) {
+      console.warn(
+        `[DEBUG processLocationData] Celestial data missing for ${currentSystemId}. Setting minimal location.`
+      );
+      currentLocation.set({
+        solar_system_id: currentSystemId,
+        systemName: `System ${currentSystemId} (No Details)`,
+        connected_systems: [],
+        regionName: "Unknown Region",
+        regionId: null,
+        celestialData: [],
+        timestamp: new Date().toISOString(),
+      });
+      lastSystemId = currentSystemId; // Update lastSystemId even on partial failure
+      return;
+    }
+
+    // Extract common info from celestial data
+    const firstEntry = celestialData[0];
+    const systemName =
+      firstEntry.solarsystemname || `System ${currentSystemId}`;
+    const regionName = firstEntry.regionname || "Unknown Region"; // Region name should be correct now
+    const regionId = firstEntry.regionid;
+
+    console.log(
+      `[DEBUG processLocationData] System: ${systemName}, Region: ${regionName}. Building final connected list...`
+    );
+
+    // --- Build connected_systems with gate names ---
+    const final_connected_systems = [];
+    const stargatesInSystem = celestialData.filter(
+      (cel) => cel && (cel.typeid === "29624" || cel.groupid === "10") // Adjust type/group IDs if needed
+    );
+    const stargateNamePattern = /\(([^)]+)\)/; // Regex to find text in parentheses
+
+    // Match connected systems from API with stargates in the current system
+    connectedSystemsFromApi.forEach((connSys) => {
+      const targetSystemName = connSys.name;
+      const targetSystemId = connSys.id; // Already a string from backend
+
+      // Find the stargate in *this* system that likely leads to the target system name
+      const matchingGate = stargatesInSystem.find((gate) => {
+        if (!gate.itemname) return false;
+        const match = gate.itemname.match(stargateNamePattern);
+        const parsedDestName = match && match[1] ? match[1].trim() : null;
+        // Compare parsed name with the name from the connected systems list
+        return parsedDestName === targetSystemName;
+      });
+
+      final_connected_systems.push({
+        id: targetSystemId,
+        name: targetSystemName,
+        // Use the specific gate name if found, otherwise fallback
+        gateName: matchingGate?.itemname || `Gate to ${targetSystemName}`,
+      });
+    });
+    // --- End build ---
+
+    console.log(
+      `[DEBUG processLocationData] Built ${final_connected_systems.length} final connected systems entries. Updating store.`
+    );
+
+    // Update the Svelte store with the complete data
+    currentLocation.set({
+      solar_system_id: currentSystemId,
+      systemName: systemName,
+      connected_systems: final_connected_systems, // Use the newly built list
+      regionName: regionName,
+      regionId: regionId,
+      celestialData: celestialData, // Store the raw celestial objects
+      timestamp: new Date().toISOString(),
+    });
+
+    // Update lastSystemId AFTER successful processing
+    lastSystemId = currentSystemId;
   } catch (err) {
-    console.error("[LocationStore] Error processing location data:", err);
+    console.error("[DEBUG processLocationData] Error during processing:", err);
     locationError.set(`Error processing system data: ${err.message}`);
+    // Decide how to handle errors - clear location or leave stale?
+    // currentLocation.set(null);
+    // lastSystemId = null;
   }
 }
 

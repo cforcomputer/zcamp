@@ -345,38 +345,60 @@
     sprite.scale.set(scale, scale, 1);
   }
 
-  async function fetchCelestials(killmailId, retryCount = 3) {
+  // Change function signature and URL
+  async function fetchSystemCelestials(systemId, retryCount = 3) {
+    // Renamed for clarity
     for (let i = 0; i < retryCount; i++) {
       try {
-        // console.log(
-        //   `Fetching celestials for killmail: ${killmailId} (attempt ${i + 1})`
-        // );
-        const response = await fetch(`/api/celestials/${killmailId}`);
+        console.log(
+          // Log system ID fetch
+          `Workspaceing celestials for system: ${systemId} (attempt ${i + 1})`
+        );
+        // Fetch using the system endpoint
+        const response = await fetch(`/api/celestials/system/${systemId}`); // <<< CHANGED URL
 
         if (!response.ok) {
+          // Keep error handling, but log system ID
+          console.error(
+            `HTTP error fetching system ${systemId}! status: ${response.status}`
+          );
           throw new Error(`HTTP error! status: ${response.status}`);
         }
 
         const data = await response.json();
-        if (!data || !data.length) {
+        // Verify the structure: data exists, data.celestials is a non-empty array
+        if (
+          !data ||
+          !Array.isArray(data.celestials) ||
+          data.celestials.length === 0
+        ) {
           console.warn(
-            `Empty celestial data received for killmail ${killmailId}`
+            `Empty or invalid celestial array in API response for system ${systemId}`
           );
           if (i < retryCount - 1) {
+            // Still retry if data is genuinely bad/empty on early attempts
             await new Promise((resolve) => setTimeout(resolve, 1000 * (i + 1)));
-            continue;
+            continue; // Try fetching again
+          } else {
+            // All retries failed to get valid celestial data
+            throw new Error(
+              `Failed to get valid celestial data after ${retryCount} attempts for system ${systemId}`
+            );
           }
         }
-
-        console.log("Received celestial data:", data);
-        return data;
+        console.log(
+          `Received celestial data for system ${systemId}:`,
+          data.length
+        );
+        return data; // Return fetched system data
       } catch (error) {
-        console.error(`Error fetching celestials (attempt ${i + 1}):`, error);
-        if (i === retryCount - 1) throw error;
-        await new Promise((resolve) => setTimeout(resolve, 1000 * (i + 1)));
+        console.error(
+          `Error fetching celestials for system ${systemId} (attempt ${i + 1}):`,
+          error
+        );
       }
     }
-    return null;
+    return null; // Should not be reached if throw works
   }
 
   function initRaycaster() {
@@ -526,41 +548,6 @@
 
     animate();
   }
-
-  function updateInfoPanel(objectData = null) {
-    const infoPanel = document.querySelector(".info-panel");
-    if (!infoPanel) return;
-
-    let pinpointHtml = "";
-    if (kill?.pinpoints) {
-      if (kill.pinpoints.atCelestial) {
-        pinpointHtml = `<p>At celestial: ${kill.pinpoints.nearestCelestial.name}</p>`;
-      } else if (
-        kill.pinpoints.hasTetrahedron &&
-        kill.pinpoints.points.length >= 4
-      ) {
-        pinpointHtml = kill.pinpoints.points
-          .map((point, i) => `<p>Pinpoint ${i + 1}: ${point.name}</p>`)
-          .join("");
-      } else if (kill.pinpoints.nearestCelestial) {
-        pinpointHtml = `<p>Near celestial: ${kill.pinpoints.nearestCelestial.name}</p>`;
-      } else {
-        pinpointHtml = "<p>Wreck triangulation not possible</p>";
-      }
-    }
-
-    infoPanel.innerHTML = `
-    <p>System name: ${systemName}</p>
-    <p>Closest Celestial: ${closestCelestial}</p>
-    ${pinpointHtml}
-    ${objectData ? `<p>Selected: ${objectData.name} (${objectData.type})</p>` : ""}
-  `;
-  }
-
-  // function getRomanNumeralGroup(name) {
-  //   const match = name?.match(/ ([IVX]+)( -|$)/);
-  //   return match ? match[1] : null;
-  // }
 
   function focusOnSun() {
     const sunObject = Array.from(objectsWithLabels.entries()).find(
@@ -997,10 +984,12 @@
     return group;
   }
 
-  async function initVisualization(celestialData) {
-    if (!kill?.killmail?.victim?.position) {
-      console.error("Missing kill position data:", kill);
-      error = "Invalid kill data";
+  // Modify function signature to accept the kill prop
+  async function initVisualization(celestialData, killDataProp) {
+    // Use killDataProp instead of the global 'kill' variable inside this function
+    if (!killDataProp?.killmail?.victim?.position) {
+      console.error("Missing kill position data in prop:", killDataProp);
+      error = "Invalid kill data for visualization";
       loading = false;
       return;
     }
@@ -1025,17 +1014,17 @@
     renderer.setSize(container.clientWidth, container.clientHeight);
     container.appendChild(renderer.domElement);
 
-    // Create camera target
     cameraTarget = new THREE.Object3D();
     scene.add(cameraTarget);
 
+    // Get kill position from the passed prop
     const killPosition = new THREE.Vector3(
-      kill.killmail.victim.position.x * SCALE_FACTOR,
-      kill.killmail.victim.position.y * SCALE_FACTOR,
-      kill.killmail.victim.position.z * SCALE_FACTOR
+      killDataProp.killmail.victim.position.x * SCALE_FACTOR,
+      killDataProp.killmail.victim.position.y * SCALE_FACTOR,
+      killDataProp.killmail.victim.position.z * SCALE_FACTOR
     );
 
-    // Create kill location sprite
+    // Create kill location visuals (Sprite and Mesh)
     const killSprite = createKillpointSprite(killPosition);
     scene.add(killSprite);
     objectsWithLabels.set(killSprite, {
@@ -1043,25 +1032,21 @@
       type: "killmail",
       position: killSprite.position.clone(),
     });
-
-    // 2. Create the Mesh visual (using the new function)
-    // This is purely visual enhancement
     const killMeshVisual = createKillpointMeshVisual(killPosition);
     scene.add(killMeshVisual);
-    // DO NOT add killMeshVisual to objectsWithLabels if sprite handles interaction
 
-    // Add celestials
+    // Add celestial objects from the fetched data
     celestialData.forEach((celestial) => {
-      if (celestial.id !== "killmail") {
-        const mesh = createCelestialObject(celestial, allCelestialData);
-        if (mesh) scene.add(mesh);
-      }
+      // The API /api/celestials/system/:systemId doesn't return the "killmail" entry,
+      // so no need to check celestial.id === 'killmail' here.
+      const mesh = createCelestialObject(celestial, allCelestialData); // Pass allData for context if needed (e.g., moon orbits)
+      if (mesh) scene.add(mesh);
     });
 
-    // Add pinpoint box if it exists
-    if (kill.pinpoints?.hasTetrahedron) {
-      console.log("Adding pinpoint box for:", kill.pinpoints);
-      const pinpointBox = createPinpointLines(kill.pinpoints);
+    // Add pinpoint box using data from the prop
+    if (killDataProp.pinpoints?.hasTetrahedron) {
+      console.log("Adding pinpoint box for:", killDataProp.pinpoints);
+      const pinpointBox = createPinpointLines(killDataProp.pinpoints);
       if (pinpointBox) {
         scene.add(pinpointBox);
         console.log("Added pinpoint box to scene");
@@ -1069,27 +1054,35 @@
     }
 
     camera.position.set(
-      killPosition.x + 50,
-      killPosition.y + 50,
-      killPosition.z + 50
+      // Position camera relative to kill position
+      killPosition.x + 0.01, // Adjusted initial offset
+      killPosition.y + 0.01,
+      killPosition.z + 0.01
     );
     camera.lookAt(killPosition);
 
     controls = new OrbitControls(camera, renderer.domElement);
+    controls.target.copy(killPosition); // Set initial target to kill position
     controls.enableDamping = true;
     controls.dampingFactor = 0.05;
+    controls.minDistance = 0.000005; // Allow very close zoom
+    controls.maxDistance = 1000; // Set a reasonable max distance
 
     initRaycaster();
-    initDirectionalGUI();
+    initDirectionalGUI(); // Ensure this uses the correct container
 
     const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
     scene.add(ambientLight);
 
-    // Update system information
-    systemName = celestialData[1]?.solarsystemname || "Unknown System";
+    // Update system information using data from the kill prop and fetched celestial data
+    systemName =
+      killDataProp.pinpoints?.celestialData?.solarsystemname || // Get name from pinpoints if available
+      celestialData[0]?.solarsystemname || // Fallback to first celestial
+      "Unknown System";
     closestCelestial = findClosestCelestial(
+      // Use the prop for pinpoint data
       celestialData,
-      kill.killmail.victim.position
+      killDataProp.killmail.victim.position
     );
 
     animate();
@@ -1121,20 +1114,43 @@
   }
 
   onMount(async () => {
+    // Make sure kill prop and necessary nested data exist
+    if (!kill?.killmail?.solar_system_id || !killmailId) {
+      error = "Invalid or missing kill data provided to component.";
+      loading = false;
+      console.error("MapVisualization onMount: Invalid kill prop", kill);
+      return;
+    }
+
+    const systemId = kill.killmail.solar_system_id; // Get system ID from the prop
+
     try {
-      const celestialData = await fetchCelestials(killmailId);
-      if (celestialData) {
-        await initVisualization(celestialData);
+      // Call the fetch function
+      const apiResponse = await fetchSystemCelestials(systemId); // <<< Get the OBJECT response
+
+      // Check if the response has the expected structure and the 'celestials' array
+      if (apiResponse && Array.isArray(apiResponse.celestials)) {
+        // Extract the array
+        const celestialDataArray = apiResponse.celestials;
+
+        // Pass the CORRECT ARRAY and the kill prop to initVisualization
+        await initVisualization(celestialDataArray, kill); // <<< PASS THE ARRAY
+
         container.addEventListener("mousemove", onMouseMove);
         container.addEventListener("click", onClick);
         window.addEventListener("resize", handleResize);
       } else {
-        error = "Failed to fetch celestial data";
+        // Handle cases where the API response is missing or malformed
+        console.error(
+          "Invalid or missing celestial data in API response:",
+          apiResponse
+        );
+        error = "Failed to fetch or parse celestial data for the system";
         loading = false;
       }
     } catch (err) {
       error = "Error initializing map visualization";
-      console.error(err);
+      console.error("MapVisualization onMount Error:", err);
       loading = false;
     }
   });
@@ -1193,7 +1209,6 @@
         console.log("Selected object:", objectData);
         selectedObject = sprite;
         focusOnObject(sprite);
-        updateInfoPanel(objectData);
       }
     }
   }
@@ -1226,15 +1241,16 @@
   <div class="info-panel">
     <p>System name: {systemName}</p>
     <p>Closest Celestial: {closestCelestial}</p>
+
     {#if kill.pinpoints?.atCelestial}
       <p>At celestial: {kill.pinpoints.nearestCelestial.name}</p>
     {:else if kill.pinpoints?.triangulationType === "near_celestial"}
       <p>
-        Near celestial: {kill.pinpoints.nearestCelestial.name} ({(
-          kill.pinpoints.nearestCelestial.distance / 1000
-        ).toFixed(2)} km)
+        Near celestial: {kill.pinpoints.nearestCelestial.name} ({formatDistance(
+          kill.pinpoints.nearestCelestial.distance
+        )})
       </p>
-    {:else if kill.pinpoints?.triangulationType === "via_bookspam" || kill.pinpoints?.triangulationType === "direct"}
+    {:else if kill.pinpoints?.hasTetrahedron && (kill.pinpoints?.triangulationType === "via_bookspam" || kill.pinpoints?.triangulationType === "direct")}
       {#if kill.pinpoints.points?.length > 0}
         <p>
           {kill.pinpoints.triangulationType === "via_bookspam"
@@ -1243,27 +1259,34 @@
         </p>
         {#each kill.pinpoints.points as point, i}
           <p>
-            Pinpoint {i + 1}: {point.name} ({(point.distance / 1000).toFixed(2)}
-            km)
+            Pinpoint {i + 1}: {point.name} ({formatDistance(point.distance)})
           </p>
         {/each}
       {:else if kill.pinpoints?.nearestCelestial}
         <p>
-          Near celestial: {kill.pinpoints.nearestCelestial.name} ({(
-            kill.pinpoints.nearestCelestial.distance / 1000
-          ).toFixed(2)} km)
+          Nearest celestial: {kill.pinpoints.nearestCelestial.name} ({formatDistance(
+            kill.pinpoints.nearestCelestial.distance
+          )})
         </p>
       {:else}
         <p>Wreck triangulation not possible</p>
       {/if}
     {:else if kill.pinpoints?.nearestCelestial}
       <p>
-        Near celestial: {kill.pinpoints.nearestCelestial.name} ({(
-          kill.pinpoints.nearestCelestial.distance / 1000
-        ).toFixed(2)} km)
+        Nearest celestial: {kill.pinpoints.nearestCelestial.name} ({formatDistance(
+          kill.pinpoints.nearestCelestial.distance
+        )})
       </p>
     {:else}
-      <p>Wreck triangulation not possible</p>
+      <p>Wreck triangulation info unavailable</p>
+    {/if}
+
+    {#if selectedObject}
+      <p>
+        Selected: {objectsWithLabels.get(selectedObject)?.name} ({objectsWithLabels.get(
+          selectedObject
+        )?.type})
+      </p>
     {/if}
   </div>
 </div>

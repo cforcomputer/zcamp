@@ -36,6 +36,25 @@
 
   // --- Reactive Logic ---
 
+  /**
+   * Converts a timestamp into a human-readable relative time string (e.g., "just now", "5 minutes ago").
+   * @param {string | number | Date | null | undefined} timestamp - The timestamp to format. Can be ISO string, epoch ms, or Date object.
+   * @returns {string} Relative time string (e.g., "5 minutes ago", "unknown", "invalid date").
+   */
+  function getTimeAgo(timestamp) {
+    if (timestamp === null || timestamp === undefined) return "unknown";
+
+    const then = new Date(timestamp).getTime();
+    if (isNaN(then)) return "invalid date";
+
+    const now = Date.now();
+    const minutes = Math.floor((now - then) / (1000 * 60));
+
+    if (minutes < 1) return "just now";
+    if (minutes === 1) return "1 min ago";
+    return `${minutes} mins ago`;
+  }
+
   // Diagnostic Logs for UI state changes
   $: console.log(
     "[LocationTracker UI] isTracking prop reactive check:",
@@ -340,112 +359,154 @@
 
   /**
    * Generates a summary string of nearby threats (current system, adjacent systems, further out).
+   * MODIFIED: Threshold 10%, all types, last seen time added, DEBUG logging added.
    * @param {Array} activities - The list of currently active threat activities.
    * @returns {string} A formatted summary string, potentially multi-line.
    */
   function getCampSummary(activities) {
+    // --- START DEBUG LOGGING ---
+    console.log(
+      "[DEBUG getCampSummary] Function Start. Received activities:",
+      activities
+    );
+    console.log(
+      "[DEBUG getCampSummary] Current Location Store ($currentLocation):",
+      $currentLocation
+    );
+    // --- END DEBUG LOGGING ---
     try {
       const warnings = []; // Array to hold all warning strings
-      // Need current location data to generate summary
       if (!$currentLocation) {
         console.warn(
-          "[LocationTracker getCampSummary] Called when $currentLocation was null/undefined."
+          "[DEBUG getCampSummary] $currentLocation is null/undefined. Returning placeholder."
         );
-        return "Calculating summary..."; // Return placeholder if location not ready
+        return "Calculating summary...";
       }
       const currentSystemId = $currentLocation.solar_system_id;
-      // Ensure activities is an array, filter for relevant high-confidence threats
-      const safeActivities = Array.isArray(activities) ? activities : [];
-      const relevantActivities = safeActivities.filter(
-        (activity) =>
-          activity && // Check activity object exists
-          // Include specific classifications
-          ["camp", "smartbomb", "roaming_camp", "battle"].includes(
-            activity.classification
-          ) &&
-          // Include if high probability OR if it's a confirmed battle
-          (activity.probability >= 50 || activity.classification === "battle")
+      console.log(
+        `[DEBUG getCampSummary] Current System ID: ${currentSystemId}`
       );
 
-      // --- Step 1: Check for Threats in the CURRENT System ---
+      const safeActivities = Array.isArray(activities) ? activities : [];
+      console.log(
+        "[DEBUG getCampSummary] Input 'safeActivities' count:",
+        safeActivities.length,
+        safeActivities
+      );
+
+      // --- Filter for relevant activities ---
+      const relevantActivities = safeActivities.filter(
+        (activity) =>
+          activity &&
+          (activity.probability >= 10 || activity.classification === "battle")
+      );
+      console.log(
+        "[DEBUG getCampSummary] 'relevantActivities' count after filter (prob>=10 or battle):",
+        relevantActivities.length,
+        relevantActivities
+      );
+      // --- End Filter ---
+
+      // --- Step 1: Check CURRENT System ---
       const currentSystemDangers = relevantActivities.filter(
         (activity) => activity.systemId === currentSystemId
       );
+      console.log(
+        `[DEBUG getCampSummary] Dangers found in CURRENT system (${currentSystemId}):`,
+        currentSystemDangers.length,
+        currentSystemDangers
+      );
       if (currentSystemDangers.length > 0) {
-        // Format each danger and join them with semicolons
         warnings.push(
           `⚠️ Active threats HERE: ${currentSystemDangers.map(formatThreatDetails).join("; ")}`
         );
       }
 
-      // --- Step 2: Check for Threats related to ADJACENT Systems ---
-      const connectedSystemWarnings = []; // Warnings specific to connected systems
-      // Ensure connected_systems data is available and is an array
+      // --- Step 2: Check ADJACENT Systems ---
+      const connectedSystemWarnings = [];
       if (Array.isArray($currentLocation.connected_systems)) {
-        // Iterate through each connected system (potential jump destination)
+        console.log(
+          `[DEBUG getCampSummary] Checking ${$currentLocation.connected_systems.length} connected systems...`
+        );
         $currentLocation.connected_systems.forEach((connectedSystem) => {
-          // Basic validation of the connected system data
           if (!connectedSystem || typeof connectedSystem.id === "undefined") {
             console.warn(
-              "[LocationTracker getCampSummary] Skipping invalid connectedSystem:",
+              "[DEBUG getCampSummary] Skipping invalid connectedSystem entry:",
               connectedSystem
             );
-            return; // Skip this connection if data is invalid
+            return;
           }
-
           const connectedSystemId = connectedSystem.id;
           const connectedSystemName = connectedSystem.name || "Unknown System";
-          // Find the name of the stargate in the current system leading to this connected system
+          console.log(
+            `[DEBUG getCampSummary] --- Checking Connected System: ${connectedSystemName} (ID: ${connectedSystemId}) ---`
+          );
+
           const celestialData = Array.isArray($currentLocation.celestialData)
             ? $currentLocation.celestialData
             : [];
           const gateToSystem = celestialData.find(
             (cel) => cel && cel.destinationid === connectedSystemId
           );
-          let gateName = `Gate to ${connectedSystemName}`; // Default gate name
+          let gateName = `Gate to ${connectedSystemName}`;
           if (gateToSystem && gateToSystem.itemname) {
-            // If specific name found, use it
             gateName =
               gateToSystem.itemname
-                .replace(`Stargate (${connectedSystemName})`, "") // Clean up common naming pattern
-                .trim() || gateToSystem.itemname; // Use original if cleanup results in empty string
+                .replace(`Stargate (${connectedSystemName})`, "")
+                .trim() || gateToSystem.itemname;
           }
+          console.log(
+            `[DEBUG getCampSummary] Gate Name in Current System: ${gateName}`
+          );
 
-          let gateSpecificWarnings = []; // Collect warnings specific to this gate/route
+          let gateSpecificWarnings = [];
 
-          // --- 2a. Immediate Warning: Threats located IN the adjacent system ---
-          const directDangers = relevantActivities.filter(
-            (activity) => activity.systemId === connectedSystemId
+          // --- 2a. Direct Dangers IN Adjacent System ---
+          const directDangers = relevantActivities.filter((activity) => {
+            const activitySystemId = activity?.systemId;
+            // Log comparison
+            console.log(
+              `[DEBUG getCampSummary] Comparing direct: activitySystemId=${activitySystemId} (type: ${typeof activitySystemId}) vs connectedSystemId=${connectedSystemId} (type: ${typeof connectedSystemId})`
+            );
+            // Ensure types match for comparison if necessary, though === should handle this if both are numbers or both strings
+            return String(activitySystemId) === String(connectedSystemId);
+          });
+          console.log(
+            `[DEBUG getCampSummary] Found ${directDangers.length} direct dangers in ${connectedSystemName}:`,
+            directDangers
           );
           if (directDangers.length > 0) {
             const dangerSummary = directDangers
-              .map(formatThreatDetails)
-              .join("; "); // Format details
-            // Add warning about threats *inside* the destination system
+              .map((activity) => {
+                const lastSeen = getTimeAgo(
+                  activity.lastActivity || activity.lastKill
+                );
+                return `${formatThreatDetails(activity)}, last seen ${lastSeen}`;
+              })
+              .join("; ");
             gateSpecificWarnings.push(
               `Threat${directDangers.length > 1 ? "s" : ""} IN ${connectedSystemName}: ${dangerSummary}`
             );
           }
 
-          // --- 2b. Early Warning Proxy: Threats detected further out on gates associated with this route ---
-          // This finds threats NOT in the current or adjacent system, but on a gate whose name mentions the adjacent system.
-          // It acts as an indicator of potential danger further along this path.
+          // --- 2b. Neighboring Dangers (Proxy Check) ---
           const neighboringDangers = relevantActivities.filter(
             (activity) =>
               activity &&
-              activity.systemId !== currentSystemId && // Not here
-              activity.systemId !== connectedSystemId && // Not in the immediate next system
-              activity.stargateName && // Must have a gate name associated
-              // Check if the gate name includes the name of the system we're considering jumping to
+              activity.systemId !== currentSystemId &&
+              activity.systemId !== connectedSystemId &&
+              activity.stargateName &&
               activity.stargateName
                 .toLowerCase()
                 .includes(connectedSystemName.toLowerCase())
           );
+          console.log(
+            `[DEBUG getCampSummary] Found ${neighboringDangers.length} neighboring dangers related to ${connectedSystemName}:`,
+            neighboringDangers
+          );
           if (neighboringDangers.length > 0) {
-            // Format details for these 'further out' threats
             const dangerSummary = neighboringDangers
               .map((activity) => {
-                // Try to determine the actual system the 'neighboring' danger is in
                 const dangerSystemName =
                   (activity.kills &&
                     activity.kills[0] &&
@@ -454,51 +515,58 @@
                     activity.kills[0].pinpoints.celestialData
                       .solarsystemname) ||
                   `System ${activity.systemId}`;
-                return `${formatThreatDetails(activity)} in ${dangerSystemName}`; // Include location if possible
+                const lastSeen = getTimeAgo(
+                  activity.lastActivity || activity.lastKill
+                );
+                return `${formatThreatDetails(activity)} in ${dangerSystemName}, last seen ${lastSeen}`;
               })
               .join("; ");
-
-            // Add a warning indicating potential future threats along this route
             gateSpecificWarnings.push(
               `Further threat${neighboringDangers.length > 1 ? "s" : ""} detected on gate towards ${connectedSystemName}: ${dangerSummary}`
             );
           }
 
-          // --- Combine warnings for this specific gate ---
-          // If any warnings (direct or neighboring) were found for this route, add them to the main list, prefixed by the gate name.
+          // --- Combine warnings for this gate ---
           if (gateSpecificWarnings.length > 0) {
-            // Join the different types of warnings with a separator for clarity
+            console.log(
+              `[DEBUG getCampSummary] Adding warnings for gate '${gateName}':`,
+              gateSpecificWarnings
+            );
             connectedSystemWarnings.push(
               `⚠️ ${gateName}: ${gateSpecificWarnings.join(" | ")}`
+            );
+          } else {
+            console.log(
+              `[DEBUG getCampSummary] No specific warnings found for gate '${gateName}'.`
             );
           }
         });
       } else if ($currentLocation) {
-        // Only warn if location exists but connected_systems is missing/invalid
         console.warn(
-          "[LocationTracker getCampSummary] $currentLocation.connected_systems is missing or not an array."
+          "[DEBUG getCampSummary] $currentLocation.connected_systems is missing or not an array."
         );
       }
 
       // --- Final Assembly ---
-      // Add all connected system warnings to the main warnings list
       if (connectedSystemWarnings.length > 0) {
         warnings.push(...connectedSystemWarnings);
       }
 
-      // Return the final summary string
       const summary =
         warnings.length > 0
-          ? warnings.join("\n") // Join multiple warnings (current system, different gates) with newlines
-          : "✓ No active threats detected nearby"; // Default message if no threats found
+          ? warnings.join("\n")
+          : "✓ No active threats detected nearby";
+
+      // --- START DEBUG LOGGING ---
+      console.log("[DEBUG getCampSummary] Final Summary Generated:", summary);
+      // --- END DEBUG LOGGING ---
+
       return summary;
     } catch (error) {
-      // Catch unexpected errors during summary generation
       console.error(
-        "[LocationTracker getCampSummary] CRITICAL Error during summary generation:",
+        "[DEBUG getCampSummary] CRITICAL Error during summary generation:",
         error
       );
-      // Return a user-friendly error message
       return `Error generating threat summary. Please check console logs.`;
     }
   }

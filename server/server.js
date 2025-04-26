@@ -183,6 +183,272 @@ const REDISQ_URL = "https://redisq.zkillboard.com/listen.php?queueID=zcamp";
 let killmails = [];
 let isDatabaseInitialized = false;
 
+// --- Globals ---
+let systemConnectivity = new Map(); // Key: systemId (string), Value: Set<string> (neighbor systemIds)
+let stargateDestinationMap = new Map(); // Key: stargateItemId (string), Value: destinationSystemId (string) - RESTORED
+let regionNameCache = new Map(); // Key: regionId (string), Value: regionName (string)
+let systemIdToNameMap = new Map();
+
+/**
+ * Builds the system connectivity map using direct jump data from an external JSON source,
+ * and also populates caches for region names and system ID-to-name mappings.
+ */
+async function buildSystemConnectivityMap() {
+  console.log(
+    "[Map Build] Building System Connectivity, Region Cache, and ID->Name Map using JSON Jumps..."
+  );
+  const tempConnectivity = new Map(); // Key: string systemId, Value: Set<string> neighbor IDs
+  const tempRegionCache = new Map(); // Key: string regionId (itemID for type=3), Value: string name
+  const tempSystemIdToNameMap = new Map(); // Key: string systemId (itemID for type=5), Value: string name
+  let client = null;
+
+  try {
+    // --- Database Connection ---
+    console.log("[Map Build] Attempting to connect to DB...");
+    client = await pool.connect();
+    console.log("[Map Build] DB client connected successfully.");
+
+    // --- Step 1: Get Valid Systems (ID and Name) ---
+    console.log(
+      "[Map Build] Fetching valid system IDs and Names (typeID=5 using itemID)..."
+    );
+    const systemsQuery = `SELECT itemID, itemName FROM map_denormalize WHERE typeID = 5 AND itemID IS NOT NULL AND itemName IS NOT NULL`;
+    let systemRows = [];
+    try {
+      const { rows } = await client.query(systemsQuery);
+      systemRows = rows;
+      console.log(
+        `[Map Build] Query for typeID=5 systems returned ${
+          systemRows?.length ?? "undefined"
+        } rows.`
+      );
+    } catch (systemsQueryError) {
+      console.error(
+        "[Map Build] CRITICAL: Error executing system ID/Name query:",
+        systemsQueryError
+      );
+      if (client) {
+        try {
+          await client.release();
+        } catch (e) {}
+      }
+      return; // Cannot proceed without system list
+    }
+
+    if (!systemRows || systemRows.length === 0) {
+      console.error(
+        "[Map Build] CRITICAL: No valid system entries (typeID=5) found in database. Cannot build maps."
+      );
+      if (client) {
+        try {
+          await client.release();
+        } catch (e) {}
+      }
+      return; // Cannot proceed
+    }
+
+    // Initialize connectivity map AND build ID->Name map
+    systemRows.forEach((row) => {
+      const systemIdStr = String(row.itemid);
+      const systemName = row.itemname;
+      // Initialize connectivity
+      if (!tempConnectivity.has(systemIdStr)) {
+        tempConnectivity.set(systemIdStr, new Set());
+      }
+      // Add to ID->Name map
+      tempSystemIdToNameMap.set(systemIdStr, systemName);
+    });
+    console.log(
+      `[Map Build] Initialized connectivity map for ${tempConnectivity.size} systems.`
+    );
+    console.log(
+      `[Map Build] Built System ID->Name map with ${tempSystemIdToNameMap.size} entries.`
+    );
+
+    // --- Step 2: Build Region Name Cache ---
+    try {
+      console.log(
+        "[Map Build] Building Region Name Cache (typeID=3 using itemID)..."
+      );
+      // Use the corrected query selecting itemID for regions
+      const regionsQuery = `SELECT itemID, itemName FROM map_denormalize WHERE typeID = 3 AND itemID IS NOT NULL AND itemName IS NOT NULL`;
+      const { rows: regionRows } = await client.query(regionsQuery);
+
+      regionRows.forEach((row) => {
+        // Use itemID (as string) as key, itemName as value
+        tempRegionCache.set(String(row.itemid), row.itemname);
+      });
+      console.log(
+        `[Map Build] Built region cache with ${tempRegionCache.size} entries.`
+      );
+      if (tempRegionCache.size === 0) {
+        console.warn(
+          "[Map Build] WARNING: Region cache is empty. Region name lookups will fail."
+        );
+      }
+    } catch (regionCacheError) {
+      console.error(
+        "[Map Build] Error building region cache:",
+        regionCacheError
+      );
+      // Continue without region cache, but log the error
+      tempRegionCache.clear(); // Ensure cache is empty on error
+    }
+
+    // --- Step 3: Fetch the Jumps JSON data ---
+    const jumpsUrl = "https://sde.zzeve.com/mapSolarSystemJumps.json";
+    let jumpsData = [];
+    try {
+      console.log(`[Map Build] Fetching jump data from ${jumpsUrl}...`);
+      const response = await fetch(jumpsUrl);
+      if (!response.ok) {
+        // Log specific status for easier debugging
+        throw new Error(
+          `HTTP error ${response.status} fetching ${jumpsUrl}: ${response.statusText}`
+        );
+      }
+      jumpsData = await response.json();
+      console.log(`[Map Build] Fetched ${jumpsData.length} jump entries.`);
+    } catch (fetchError) {
+      console.error(
+        "[Map Build] CRITICAL: Failed to fetch or parse jump data:",
+        fetchError
+      );
+      if (client) {
+        try {
+          await client.release();
+        } catch (e) {}
+      }
+      return; // Cannot build connectivity without jump data
+    }
+
+    // --- Step 4: Process the Jumps Data ---
+    let linksAddedCount = 0;
+    let invalidJumps = 0;
+    const processedLinkPairs = new Set();
+
+    jumpsData.forEach((jump) => {
+      const fromId = String(jump.fromSolarSystemID);
+      const toId = String(jump.toSolarSystemID);
+
+      // Validate that BOTH systems exist in our connectivity map (initialized from DB systems)
+      if (tempConnectivity.has(fromId) && tempConnectivity.has(toId)) {
+        // Add the bidirectional link
+        tempConnectivity.get(fromId).add(toId);
+        tempConnectivity.get(toId).add(fromId);
+
+        // Count unique links added
+        const linkId = [fromId, toId].sort().join("-");
+        if (!processedLinkPairs.has(linkId)) {
+          linksAddedCount++;
+          processedLinkPairs.add(linkId);
+        }
+      } else {
+        invalidJumps++;
+        // Optional: More detailed logging for skipped jumps
+        // if (!tempConnectivity.has(fromId)) console.warn(`[Map Build] Skipping jump: Source system ${fromId} not found in DB systems.`);
+        // if (!tempConnectivity.has(toId)) console.warn(`[Map Build] Skipping jump: Target system ${toId} not found in DB systems.`);
+      }
+    }); // End forEach jump
+
+    console.log(
+      `[Map Build] Processed jump data. Added ${linksAddedCount} unique links.`
+    );
+    if (invalidJumps > 0) {
+      console.warn(
+        `[Map Build] Skipped ${invalidJumps} jumps involving systems not found in initial DB query.`
+      );
+    }
+
+    // --- Step 5: Assign Globals ---
+    systemConnectivity = tempConnectivity;
+    regionNameCache = tempRegionCache;
+    systemIdToNameMap = tempSystemIdToNameMap;
+    stargateDestinationMap.clear(); // Ensure this is cleared as it's unused
+
+    console.log(
+      `[Map Build] Finished building maps. Connectivity: ${systemConnectivity.size} systems, Regions: ${regionNameCache.size}, SysNames: ${systemIdToNameMap.size}.`
+    );
+  } catch (error) {
+    // Catch any unexpected errors during the process
+    console.error(
+      "[Map Build] FATAL: Unexpected error during map building:",
+      error
+    );
+    // Clear maps to indicate failure state
+    systemConnectivity.clear();
+    regionNameCache.clear();
+    systemIdToNameMap.clear();
+    stargateDestinationMap.clear();
+  } finally {
+    // Ensure the client is always released
+    if (client) {
+      try {
+        await client.release();
+        console.log("[Map Build] DB Client released.");
+      } catch (releaseError) {
+        console.error("[Map Build] Error releasing DB client:", releaseError);
+      }
+    } else {
+      console.log(
+        "[Map Build] No DB client to release (connection likely failed)."
+      );
+    }
+  }
+}
+
+/**
+ * Finds systems within a specified number of jumps from a starting system.
+ * @param {string | number} startSystemId - The ID of the starting system.
+ * @param {number} [maxJumps=2] - The maximum number of jumps to explore (0, 1, or 2).
+ * @returns {{0: string[], 1: string[], 2: string[]}} - Object containing arrays of system IDs at each jump distance.
+ */
+function getNearbySystems(startSystemId, maxJumps = 2) {
+  const startIdStr = String(startSystemId);
+  const nearby = {
+    0: [startIdStr], // Systems 0 jumps away (itself)
+    1: [], // Systems 1 jump away
+    2: [], // Systems 2 jumps away
+  };
+  const visited = new Set([startIdStr]); // Keep track of visited systems
+  const queue = [{ systemId: startIdStr, jumps: 0 }]; // Queue for Breadth-First Search
+
+  if (!systemConnectivity.has(startIdStr)) {
+    console.warn(
+      `[getNearbySystems] Start system ${startIdStr} not found in connectivity map.`
+    );
+    return nearby; // Return just the start system
+  }
+
+  while (queue.length > 0) {
+    const { systemId: currentId, jumps } = queue.shift();
+
+    if (jumps >= maxJumps) {
+      continue; // Don't explore further than maxJumps
+    }
+
+    const neighbors = systemConnectivity.get(currentId) || new Set();
+
+    neighbors.forEach((neighborId) => {
+      if (!visited.has(neighborId)) {
+        visited.add(neighborId);
+        const nextJumps = jumps + 1;
+        if (nextJumps <= maxJumps) {
+          // Add to the correct jump list if within maxJumps
+          if (nearby[nextJumps]) {
+            // Check if the jump level exists
+            nearby[nextJumps].push(neighborId);
+          }
+          // Add to queue to explore its neighbors
+          queue.push({ systemId: neighborId, jumps: nextJumps });
+        }
+      }
+    });
+  }
+
+  return nearby;
+}
+
 // const db = createSqlClient({
 //   url: process.env.LIBSQL_URL || "file:zcamp.db",
 //   authToken: process.env.LIBSQL_AUTH_TOKEN,
@@ -643,6 +909,35 @@ async function initializeMapData() {
     throw error;
   }
 }
+
+app.get("/api/nearby-systems/:systemId", (req, res) => {
+  const systemId = req.params.systemId;
+  const maxJumpsParam = req.query.jumps ? parseInt(req.query.jumps) : 2; // Allow specifying jumps via query param, default 2
+
+  if (!systemId) {
+    return res.status(400).json({ error: "System ID parameter is required." });
+  }
+  // Validate maxJumps to be reasonable (e.g., 0, 1, or 2 as per requirement)
+  const maxJumps = Math.max(0, Math.min(2, maxJumpsParam));
+
+  try {
+    // Use the globally populated systemConnectivity map
+    if (systemConnectivity.size === 0) {
+      console.warn(
+        "/api/nearby-systems: systemConnectivity map is empty. Was buildSystemConnectivityMap run?"
+      );
+      return res
+        .status(503)
+        .json({ error: "Connectivity data not available yet." });
+    }
+
+    const nearbyData = getNearbySystems(systemId, maxJumps);
+    res.json(nearbyData);
+  } catch (error) {
+    console.error(`Error getting nearby systems for ${systemId}:`, error);
+    res.status(500).json({ error: "Failed to calculate nearby systems." });
+  }
+});
 
 // CLOUDFLARE
 app.get("/api/turnstile-config", (req, res) => {
@@ -1715,81 +2010,177 @@ async function cleanupShipTypes() {
 // Run cleanup weekly
 setInterval(cleanupShipTypes, 7 * 24 * 60 * 60 * 1000);
 
-async function fetchCelestialData(systemId) {
-  console.log(`Fetching celestial data for system ${systemId}`);
+function inferCelestialType(row) {
+  if (!row) return "Unknown";
 
-  const DB_TIMEOUT = 5000; // 5 seconds
+  const name = row.itemname || "";
+  const typeId = row.typeid;
+  const groupId = row.groupid;
+
+  // Prioritize groupID/typeID checks for more accuracy
+  if (groupId === 6) return "Sun"; // GroupID for Suns
+  if (groupId === 7) return "Planet"; // GroupID for Planets
+  if (groupId === 8) return "Moon"; // GroupID for Moons
+  if (typeId === 14) return "Moon"; // TypeID for Moons is also reliable
+  if (groupId === 10) return "Stargate"; // GroupID for Stargates
+  if (groupId === 9) return "Asteroid Belt"; // GroupID for Asteroid Belts
+  if (groupId === 15) return "Station"; // GroupID for NPC Stations
+  if (typeId === 57) return "Station"; // TypeID for Conquerable Stations
+
+  // Fallback to name checking (less reliable but necessary without full SDE)
+  if (name.includes("Sun") || name.includes("Star")) return "Sun";
+  if (name.includes("Planet")) return "Planet"; // Covers Barren, Gas etc.
+  if (name.includes("Moon")) return "Moon";
+  if (name.includes("Stargate")) return "Stargate";
+  if (name.includes("Asteroid Belt")) return "Asteroid Belt";
+  if (name.includes("Station")) return "Station";
+  if (name.includes("Customs Office")) return "Customs Office"; // Example of another type
+
+  // If none of the above match, return a generic or unknown type
+  return "Unknown";
+}
+
+async function fetchCelestialData(systemId) {
+  const numericSystemId = parseInt(systemId);
+  if (isNaN(numericSystemId)) {
+    console.error(
+      `[fetchCelestialData] Invalid non-numeric systemId provided: ${systemId}`
+    );
+    return []; // Return empty array for invalid input
+  }
+
+  console.log(
+    `[fetchCelestialData] Fetching data for system ${numericSystemId} from map_denormalize (Using Region Cache, No Stargate Dest Map)`
+  );
+
+  const DB_TIMEOUT = 5000; // 5 seconds timeout for the DB query
 
   try {
-    // Check database first with increased timeout
-    try {
-      const dbPromise = pool.query(
-        "SELECT celestial_data FROM celestial_data WHERE system_id = $1",
-        [systemId]
-      );
+    // Query includes the system row itself (itemID = $1) and objects within the system (solarSystemID = $1)
+    // Ensure all needed columns are selected.
+    const queryText = `
+    SELECT
+        itemid, itemname, typeid, groupid, solarsystemid,
+        constellationid, regionid, orbitid, x, y, z, security
+    FROM map_denormalize
+    WHERE solarSystemID = $1 OR itemID = $1
+    `;
 
-      const { rows } = await Promise.race([
-        dbPromise,
-        new Promise((_, reject) =>
-          setTimeout(() => reject(new Error("Database timeout")), DB_TIMEOUT)
-        ),
-      ]);
-
-      if (rows[0]?.celestial_data) {
-        return JSON.parse(rows[0].celestial_data);
-      }
-    } catch (dbError) {
-      console.error(`Database error for system ${systemId}:`, dbError);
-    }
-
-    // If not in database, fetch from API with a longer timeout
-    const API_TIMEOUT = 8000; // 8 seconds
-    const apiPromise = axios.get(
-      `https://www.fuzzwork.co.uk/api/mapdata.php?solarsystemid=${systemId}&format=json`
-    );
-
-    const response = await Promise.race([
-      apiPromise,
+    // Execute query with timeout race condition
+    const dbPromise = pool.query(queryText, [numericSystemId]);
+    const { rows } = await Promise.race([
+      dbPromise,
       new Promise((_, reject) =>
-        setTimeout(() => reject(new Error("API timeout")), API_TIMEOUT)
+        setTimeout(
+          () =>
+            reject(
+              new Error(
+                `DB query timeout (map_denormalize) for system ${numericSystemId}`
+              )
+            ),
+          DB_TIMEOUT
+        )
       ),
     ]);
 
-    if (!Array.isArray(response.data)) {
-      throw new Error(`Invalid API response for system ${systemId}`);
+    // Handle case where no data is found
+    if (!rows || rows.length === 0) {
+      console.warn(
+        `[fetchCelestialData] No items found for system ${numericSystemId}.`
+      );
+      return [];
     }
 
-    // Store in database non-blocking
-    pool
-      .query(
-        `INSERT INTO celestial_data 
-         (system_id, system_name, celestial_data, last_updated) 
-       VALUES ($1, $2, $3, NOW())
-       ON CONFLICT (system_id) 
-       DO UPDATE SET 
-         system_name = $2, 
-         celestial_data = $3, 
-         last_updated = NOW()`,
-        [
-          systemId,
-          response.data[0]?.solarsystemname || String(systemId),
-          JSON.stringify(response.data),
-        ]
-      )
-      .catch((err) => {
-        console.error(
-          `Failed to store celestial data for system ${systemId}:`,
-          err
-        );
-      });
+    // --- Derive System Name AND Region Name ---
 
-    return response.data;
+    // 1. Find the row representing the System itself (typeid=5 and itemid matches the input systemId)
+    const systemObject = rows.find(
+      (r) => r.typeid === 5 && r.itemid === numericSystemId
+    );
+
+    // Determine the canonical system name
+    const commonSystemName =
+      systemObject?.itemname || `System ${numericSystemId}`;
+
+    // Get the region ID from the system object (this is likely a number from the DB)
+    const regionIdFromSystem = systemObject?.regionid;
+
+    // 2. Look up Region Name using the globally populated regionNameCache
+    let commonRegionName = "Unknown Region"; // Default value
+    if (regionIdFromSystem != null && regionNameCache.size > 0) {
+      // Ensure regionId exists and cache was built
+      const regionIdStr = String(regionIdFromSystem); // Convert to STRING for cache lookup
+      commonRegionName =
+        regionNameCache.get(regionIdStr) || `Unknown Region [${regionIdStr}]`; // Use String key
+
+      // Log if lookup failed (indicates region missing from cache)
+      if (commonRegionName.startsWith("Unknown Region")) {
+        console.warn(
+          `[fetchCelestialData] Region name lookup failed in cache for region ID: ${regionIdStr} (System: ${commonSystemName})`
+        );
+      }
+    } else if (systemObject && regionIdFromSystem == null) {
+      // Log if system object found but has no region ID
+      console.warn(
+        `[fetchCelestialData] System object found for ${commonSystemName}, but it has no regionid.`
+      );
+    } else if (!systemObject) {
+      // Log if the system object itself wasn't found in the results
+      console.warn(
+        `[fetchCelestialData] Could not find system object (typeid=5) for ID ${numericSystemId} in results.`
+      );
+      // Attempt fallback using regionid from the *first* row if it exists (less reliable)
+      const firstRegionId = rows[0]?.regionid;
+      if (firstRegionId != null && regionNameCache.size > 0) {
+        const firstRegionIdStr = String(firstRegionId);
+        commonRegionName =
+          regionNameCache.get(firstRegionIdStr) ||
+          `Unknown Region [${firstRegionIdStr}]`;
+      }
+    }
+    // --- End Name Derivation ---
+
+    // Step 3: Map all fetched rows to the final output format
+    const finalResults = rows.map((row) => {
+      // Infer the type name (e.g., "Planet", "Stargate", "Sun")
+      const inferredTypeName = inferCelestialType(row);
+
+      // *** Stargate destination lookup removed ***
+      // Since buildSystemConnectivityMap_FromJson doesn't build stargateDestinationMap,
+      // we set destinationID to null.
+      const destinationId = null;
+
+      // Construct the final object, ensuring IDs are strings
+      const finalObject = {
+        itemid: String(row.itemid),
+        itemname: row.itemname,
+        typename: inferredTypeName,
+        typeid: String(row.typeid),
+        solarsystemname: commonSystemName, // Use the derived System Name
+        solarsystemid: String(row.solarsystemid ?? numericSystemId), // Use system's ID, fallback to input ID
+        constellationid: String(row.constellationid), // Ensure string
+        regionid: String(row.regionid), // Ensure string
+        regionname: commonRegionName, // Use the derived Region Name
+        orbitid: row.orbitid ? String(row.orbitid) : null, // String if exists, else null
+        x: String(row.x), // Ensure string
+        y: String(row.y), // Ensure string
+        z: String(row.z), // Ensure string
+        destinationID: destinationId, // Now always null
+      };
+      return finalObject;
+    });
+
+    console.log(
+      `[fetchCelestialData] Successfully processed ${finalResults.length} objects for system ${numericSystemId}. System: ${commonSystemName}, Region: ${commonRegionName}`
+    );
+    return finalResults; // Return the array of processed objects
   } catch (error) {
+    // Log errors, including potential timeouts
     console.error(
-      `Error fetching celestial data for system ${systemId}:`,
+      `[fetchCelestialData] Error processing system ${numericSystemId}:`,
       error
     );
-    throw error;
+    return []; // Return empty array on any error
   }
 }
 
@@ -2074,119 +2465,6 @@ app.post("/api/filter-list", async (req, res) => {
       success: false,
       message: "Server error while creating filter list.",
     });
-  }
-});
-
-// This route is less critical if using sockets for updates, but good to keep consistent
-app.put("/api/filter-list/:id", async (req, res) => {
-  console.log(`[API PUT /api/filter-list/${req.params.id}] Request received.`);
-  const listId = req.params.id;
-
-  if (!req.session?.user?.id) {
-    console.log(`[API PUT /api/filter-list/${listId}] User not authenticated.`);
-    return res
-      .status(401)
-      .json({ success: false, message: "Not authenticated" });
-  }
-
-  const userId = req.session.user.id;
-  console.log(
-    `[API PUT /api/filter-list/${listId}] Authenticated User ID: ${userId}`
-  );
-
-  try {
-    const { name, ids, enabled, isExclude, filterType } = req.body;
-
-    // 1. Verify ownership
-    const { rows: verifyRows } = await pool.query(
-      "SELECT user_id FROM filter_lists WHERE id = $1 AND user_id = $2",
-      [listId, userId]
-    );
-
-    if (verifyRows.length === 0) {
-      console.log(
-        `[API PUT /api/filter-list/${listId}] Filter list not found or user ${userId} does not own it.`
-      );
-      return res.status(404).json({
-        success: false,
-        message: "Filter list not found or unauthorized",
-      });
-    }
-
-    // 2. Update Database (optional but good practice)
-    // Note: We primarily rely on the session for the 'enabled' state, but updating DB is okay too.
-    console.log(
-      `[API PUT /api/filter-list/${listId}] Updating database entry.`
-    );
-    await pool.query(
-      `UPDATE filter_lists SET name = $1, ids = $2, enabled = $3, is_exclude = $4, filter_type = $5
-           WHERE id = $6 AND user_id = $7`,
-      [
-        name,
-        JSON.stringify(ids || []), // Ensure ids is an array string
-        typeof enabled === "boolean" ? (enabled ? 1 : 0) : null, // Handle enabled state
-        typeof isExclude === "boolean" ? (isExclude ? 1 : 0) : null,
-        filterType || null,
-        listId,
-        userId,
-      ]
-    );
-
-    // 3. Update Session State (Critically, update the 'enabled' state here)
-    if (typeof enabled === "boolean") {
-      req.session.currentFilterStates = req.session.currentFilterStates || {};
-      req.session.currentFilterStates[listId] = enabled;
-      console.log(
-        `[API PUT /api/filter-list/${listId}] Updating session state: enabled=${enabled}`
-      );
-
-      // Save session
-      await new Promise((resolve, reject) => {
-        req.session.save((err) => {
-          if (err) {
-            console.error(
-              `[API PUT /api/filter-list/${listId}] Error saving session after update:`,
-              err
-            );
-            reject(err); // Or handle differently
-          } else {
-            console.log(
-              `[API PUT /api/filter-list/${listId}] Session saved successfully.`
-            );
-            resolve();
-          }
-        });
-      });
-    } else {
-      console.log(
-        `[API PUT /api/filter-list/${listId}] No 'enabled' state provided in PUT request, session not updated for enabled status.`
-      );
-    }
-
-    // 4. Prepare and send response/emit (optional if handled by socket)
-    const updatedList = {
-      id: listId.toString(),
-      user_id: userId.toString(),
-      name,
-      ids: ids || [], // Ensure it's an array
-      enabled: typeof enabled === "boolean" ? enabled : verifyRows[0].enabled, // Reflect the change or keep original if not provided
-      is_exclude:
-        typeof isExclude === "boolean" ? isExclude : verifyRows[0].is_exclude,
-      filter_type: filterType || verifyRows[0].filter_type,
-    };
-
-    // Emit update via socket (redundant if client already sent update via socket, but good for consistency)
-    console.log(
-      `[API PUT /api/filter-list/${listId}] Emitting filterListUpdated to room ${userId.toString()}`
-    );
-    io.to(userId.toString()).emit("filterListUpdated", updatedList);
-
-    res.json({ success: true, filterList: updatedList });
-  } catch (error) {
-    console.error(`[API PUT /api/filter-list/${listId}] Error:`, error);
-    res
-      .status(500)
-      .json({ success: false, message: "Server error updating filter list" });
   }
 });
 
@@ -2878,14 +3156,39 @@ app.get("/api/check-session", async (req, res) => {
 app.get("/api/celestials/system/:systemId", async (req, res) => {
   try {
     const systemId = req.params.systemId;
-    const celestialData = await fetchCelestialData(systemId);
-    res.json(celestialData);
+    const numericSystemId = parseInt(systemId);
+
+    if (isNaN(numericSystemId)) {
+      return res.status(400).json({ error: "Invalid system ID format" });
+    }
+
+    // 1. Fetch celestial objects using the existing function
+    const celestialData = await fetchCelestialData(systemId); // Assuming this still just returns the array of celestials
+
+    // 2. Get connected system IDs from the global map
+    const neighborIdsSet =
+      systemConnectivity.get(String(numericSystemId)) || new Set();
+    const neighborIdsArray = Array.from(neighborIdsSet);
+
+    // 3. Look up names for connected systems
+    const connectedSystems = neighborIdsArray.map((id) => {
+      return {
+        id: id, // Keep ID as string
+        name: systemIdToNameMap.get(id) || `System ${id}`, // Lookup name, fallback if not found
+      };
+    });
+
+    // 4. Return combined data structure
+    res.json({
+      celestials: celestialData,
+      connectedSystems: connectedSystems, // Array of {id: string, name: string}
+    });
   } catch (error) {
     console.error(
-      `Error getting celestial data for system ${req.params.systemId}:`,
+      `Error getting celestial/connectivity data for system ${req.params.systemId}:`,
       error
     );
-    res.status(500).json({ error: "Failed to get celestial data" });
+    res.status(500).json({ error: "Failed to get system data" });
   }
 });
 
@@ -4552,6 +4855,7 @@ async function startServer() {
   try {
     await initializeDatabase();
     await initializeMapData();
+    await buildSystemConnectivityMap(); // for routes tracking during player movement without using fuzzworks
     isDatabaseInitialized = true;
 
     console.log("Starting server...");
