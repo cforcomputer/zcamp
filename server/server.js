@@ -3902,21 +3902,8 @@ function isDuplicateKillmail(killmail, existingKillmails) {
   );
 }
 
-// processKillmailData with added timing logs
 async function processKillmailData(killmail) {
-  // Expects killmail object
-  const killID = killmail?.killID;
-  if (!killID) {
-    console.warn("[ProcessKM] Received killmail without killID.");
-    return null; // Cannot process without ID
-  }
-
-  const processingStartTime = performance.now();
-  console.log(
-    `[ProcessKM ${killID}] START processing. Current queue: ${killmailProcessingQueue.queue.length}, Running: ${killmailProcessingQueue.running}`
-  );
-
-  // Basic validation (keep existing)
+  // Basic validation of killmail structure
   if (
     !killmail ||
     !killmail.killmail ||
@@ -3926,248 +3913,412 @@ async function processKillmailData(killmail) {
     !killmail.killmail.victim
   ) {
     console.warn(
-      `[ProcessKM ${killID}] Skipping invalid killmail data (missing core fields).`
+      `[ProcessKM ${killmail?.killID}] Skipping invalid killmail data (missing core fields).`
     );
     return null;
   }
   const killTime = new Date(killmail.killmail.killmail_time);
+  // Validate time
   if (isNaN(killTime.getTime())) {
     console.warn(
-      `[ProcessKM ${killID}] Skipping killmail due to invalid kill time.`
+      `[ProcessKM ${killmail.killID}] Skipping killmail due to invalid kill time.`
     );
     return null;
   }
 
+  console.log(
+    `[ProcessKM ${killmail.killID}] Starting processing for System: ${killmail.killmail.solar_system_id}`
+  );
+
   try {
-    // 1. Add ship categories
-    const shipCatStartTime = performance.now();
+    // 1. Add ship categories first
     const killmailWithShips = await addShipCategoriesToKillmail(killmail);
-    const shipCatEndTime = performance.now();
-    console.log(
-      `[ProcessKM ${killID}] Ship categories added. Duration: ${(
-        shipCatEndTime - shipCatStartTime
-      ).toFixed(2)}ms`
-    );
     if (!killmailWithShips) {
       console.warn(
-        `[ProcessKM ${killID}] Skipping: Failed to add ship categories.`
+        `[ProcessKM ${killmail.killID}] Skipping: Failed to add ship categories.`
       );
       return null;
     }
 
     // 2. Calculate Pinpoints and Celestial Data
-    let systemInfo = {}; // Define outside block
     if (!killmailWithShips.killmail?.victim?.position) {
       console.warn(
-        `[ProcessKM ${killID}] Missing victim position data needed for pinpoints. Adding default.`
+        `[ProcessKM ${killmail.killID}] Missing victim position data needed for pinpoints. Adding default.`
       );
-      // Assign default structure (keep existing)
       killmailWithShips.pinpoints = {
-        /* ... default structure ... */
+        hasTetrahedron: false,
+        points: [],
+        atCelestial: false,
+        nearestCelestial: null,
+        triangulationPossible: false,
+        triangulationType: null,
+        celestialData: {
+          regionid: null,
+          regionname: null,
+          solarsystemid: killmailWithShips.killmail.solar_system_id,
+          solarsystemname: null,
+        },
       };
     } else {
-      const celestialStartTime = performance.now();
       const systemId = killmailWithShips.killmail.solar_system_id;
       const celestialData = await fetchCelestialData(systemId);
-      const celestialEndTime = performance.now();
-      console.log(
-        `[ProcessKM ${killID}] Celestial data fetched. Duration: ${(
-          celestialEndTime - celestialStartTime
-        ).toFixed(2)}ms`
-      );
-
-      const pinpointStartTime = performance.now();
       const pinpointData = calculatePinpoints(
         celestialData,
         killmailWithShips.killmail.victim.position
       );
-      const pinpointEndTime = performance.now();
-      console.log(
-        `[ProcessKM ${killID}] Pinpoints calculated. Duration: ${(
-          pinpointEndTime - pinpointStartTime
-        ).toFixed(2)}ms`
-      );
-
       killmailWithShips.pinpoints = pinpointData;
-      systemInfo = celestialData?.[0]; // Use the previously fetched data
-      // Assign celestialData to pinpoints (keep existing)
+      const systemInfo = celestialData?.[0];
       killmailWithShips.pinpoints.celestialData = systemInfo
         ? {
-            /* ... */
+            regionid: systemInfo.regionid,
+            regionname: systemInfo.regionname,
+            solarsystemid: systemInfo.solarsystemid,
+            solarsystemname: systemInfo.solarsystemname,
           }
         : {
-            /* ... default ... */
+            regionid: null,
+            regionname: null,
+            solarsystemid: systemId,
+            solarsystemname: null,
           };
     }
+    console.log(`[ProcessKM ${killmail.killID}] Pinpoints calculated.`);
 
-    // 3. Process KM with Activity Manager (synchronous call, timing less critical unless it blocks)
-    const activityMgrStartTime = performance.now();
+    // 3. Process KM with Activity Manager FIRST
+    // This updates camp compositions, classifications etc. *before* we check them.
     serverActivityManager.processKillmailActivity(killmailWithShips);
-    const activityMgrEndTime = performance.now();
-    console.log(
-      `[ProcessKM ${killID}] Activity Manager processed. Duration: ${(
-        activityMgrEndTime - activityMgrStartTime
-      ).toFixed(2)}ms`
-    );
+    console.log(`[ProcessKM ${killmail.killID}] Activity Manager processed.`);
 
-    // --- Define commonly used variables --- (keep existing)
+    // --- Define commonly used variables ---
     const systemId = killmailWithShips.killmail.solar_system_id;
-    // ... other variables ...
+    const victimCharacterId = killmailWithShips.killmail.victim.character_id;
+    const attackerCharacterIds = killmailWithShips.killmail.attackers
+      .map((a) => a.character_id)
+      .filter(Boolean); // Get IDs of all attackers
+
     const killLocation = {
-      /* ... */
+      // Helper structure for location checks
+      systemId: systemId,
+      isNearTargetGate: (targetStargateName) => {
+        if (
+          !killmailWithShips.pinpoints?.nearestCelestial?.name ||
+          !targetStargateName
+        )
+          return false;
+        const killNearestGate =
+          killmailWithShips.pinpoints.nearestCelestial.name;
+        // Check if the kill's nearest gate name (from pinpoints) CONTAINS the target gate name
+        return (
+          killNearestGate
+            .toLowerCase()
+            .includes(targetStargateName.toLowerCase()) &&
+          (killmailWithShips.pinpoints.atCelestial ||
+            killmailWithShips.pinpoints.triangulationType === "direct_warp" ||
+            killmailWithShips.pinpoints.triangulationType === "near_celestial")
+        );
+      },
     };
 
     // --- 4. Camp Crush Detection Logic ---
-    const crushDetectStartTime = performance.now();
+    const processedTargetIdsForCrush = new Set(); // Prevent multiple crush rewards per KM
     try {
-      const relevantTargetsQuery = `...`; // Your query
+      console.log(
+        `[Crush Detect KM ${killmail.killID}] Checking for relevant targets...`
+      );
+      // Find active, non-completed targets matching the kill location system and time window
+      const relevantTargetsQuery = `
+              SELECT id, character_id, camp_id, system_id, stargate_name
+              FROM camp_crusher_targets
+              WHERE completed = FALSE         -- Target is still open
+                AND end_time >= $1            -- Kill happened before target expired
+                AND system_id = $2            -- Kill in the right system
+                AND start_time <= $1          -- Kill happened after target started
+          `;
       const { rows: relevantTargets } = await pool.query(relevantTargetsQuery, [
         killTime,
         systemId,
       ]);
       console.log(
-        `[ProcessKM ${killID}] Crush Detect: Found ${relevantTargets.length} potential targets.`
+        `[Crush Detect KM ${killmail.killID}] Found ${relevantTargets.length} potential targets matching system/time.`
       );
-      // ... rest of crush detection logic ...
-      if (currentCampersOnKm < lossThreshold) {
-        // Inside the successful crush detection
-        const client = await pool.connect();
-        const dbCrushStartTime = performance.now();
-        try {
-          await client.query("BEGIN");
-          // ... UPDATE users ...
-          // ... UPDATE camp_crusher_targets ...
-          await client.query("COMMIT");
-          const dbCrushEndTime = performance.now();
+
+      if (relevantTargets.length > 0) {
+        for (const target of relevantTargets) {
+          // Check if KM location matches this specific target's gate
+          if (!killLocation.isNearTargetGate(target.stargate_name)) {
+            // console.log(`[Crush Detect KM ${killmail.killID}] Target ${target.id} skipped: KM not near gate ${target.stargate_name}`);
+            continue;
+          }
+
           console.log(
-            `[ProcessKM ${killID}] Crush DB updates committed. Duration: ${(
-              dbCrushEndTime - dbCrushStartTime
-            ).toFixed(2)}ms`
+            `[Crush Detect KM ${killmail.killID}] Target ${target.id} (Player ${target.character_id}) matches location.`
           );
-          // ... emit etc ...
-        } catch (dbError) {
-          // ... rollback ...
-        } finally {
-          client.release();
-        }
+
+          // Get Camp Activity from Manager using target.camp_id
+          const campActivity = serverActivityManager._activities.get(
+            target.camp_id
+          );
+
+          if (!campActivity) {
+            console.log(
+              `[Crush Detect KM ${killmail.killID}] Target ${target.id}: No active camp activity found in manager for camp_id ${target.camp_id}. Skipping crush check.`
+            );
+            continue; // Can't check crush if camp activity isn't active/found
+          }
+
+          // Get Original Campers from the retrieved activity
+          const originalCamperIds =
+            campActivity.composition?.originalAttackers || new Set();
+          const totalOriginalCampers = originalCamperIds.size;
+
+          if (totalOriginalCampers < 3) {
+            // Need at least 3 campers
+            console.log(
+              `[Crush Detect KM ${killmail.killID}] Target ${target.id}: Camp ${target.camp_id} has too few original campers (${totalOriginalCampers}) to calculate 1/3 loss.`
+            );
+            continue;
+          }
+
+          // Check if victim was an original camper
+          const victimCharIdStr = victimCharacterId
+            ? String(victimCharacterId)
+            : null;
+          if (victimCharIdStr && originalCamperIds.has(victimCharIdStr)) {
+            console.log(
+              `[Crush Detect KM ${killmail.killID}] Target ${target.id}: Victim ${victimCharIdStr} is an original camper. No crush.`
+            );
+            continue; // Campers got a kill, doesn't count as a crush
+          }
+
+          // Victim was not an original camper, calculate loss based on attackers
+          const attackersOnKm = new Set(
+            killmailWithShips.killmail.attackers
+              .map((a) => a.character_id?.toString()) // String IDs
+              .filter(Boolean)
+          );
+          let currentCampersOnKm = 0;
+          attackersOnKm.forEach((attackerId) => {
+            if (originalCamperIds.has(attackerId)) {
+              // Check if attacker was original camper
+              currentCampersOnKm++;
+            }
+          });
+
+          // Loss condition: Fewer than 2/3 of original campers are present as attackers on this KM
+          const lossThreshold = totalOriginalCampers * (2 / 3);
+          console.log(
+            `[Crush Detect KM ${killmail.killID}] Target ${target.id}: Camp ${
+              target.camp_id
+            } - Total Original: ${totalOriginalCampers}, Present on KM: ${currentCampersOnKm}, Threshold (<${lossThreshold.toFixed(
+              2
+            )})`
+          );
+
+          if (currentCampersOnKm < lossThreshold) {
+            console.log(
+              `[Crush Detect KM ${killmail.killID}] CRUSH ACHIEVED for Target ${target.id} (Player ${target.character_id})!`
+            );
+
+            // Use a transaction for DB updates
+            const client = await pool.connect();
+            try {
+              await client.query("BEGIN");
+
+              // 1. Award Crush Credit (Increment user's count)
+              const updateResult = await client.query(
+                `UPDATE users
+                               SET camps_crushed_count = camps_crushed_count + 1
+                               WHERE character_id = $1
+                               RETURNING camps_crushed_count`,
+                [target.character_id]
+              );
+
+              // 2. Mark Target as Completed
+              await client.query(
+                `UPDATE camp_crusher_targets SET completed = TRUE WHERE id = $1`,
+                [target.id]
+              );
+
+              await client.query("COMMIT");
+
+              processedTargetIdsForCrush.add(target.id); // Mark as processed for this KM
+
+              // Emit update to the player
+              const newTotalCrushes = updateResult.rows[0]?.camps_crushed_count;
+              io.to(target.character_id.toString()).emit("campCrushAchieved", {
+                targetId: target.id,
+                newTotalCrushes: newTotalCrushes,
+              });
+              console.log(
+                `[Crush Detect KM ${killmail.killID}] Player ${target.character_id} crush count updated to ${newTotalCrushes}. Target ${target.id} completed.`
+              );
+            } catch (dbError) {
+              await client.query("ROLLBACK");
+              console.error(
+                `[Crush Detect KM ${killmail.killID}] DB transaction error for crush target ${target.id}:`,
+                dbError
+              );
+            } finally {
+              client.release();
+            }
+          } else {
+            console.log(
+              `[Crush Detect KM ${killmail.killID}] Target ${target.id}: Loss condition not met.`
+            );
+          }
+        } // end loop through relevant targets
+      } else {
+        console.log(
+          `[Crush Detect KM ${killmail.killID}] No active targets found matching system/time window.`
+        );
       }
     } catch (crushError) {
       console.error(
-        `[ProcessKM ${killID}] Error during crush detection phase:`,
+        `[Crush Detect KM ${killmail.killID}] Error during crush detection phase:`,
         crushError
       );
     }
-    const crushDetectEndTime = performance.now();
-    console.log(
-      `[ProcessKM ${killID}] Crush detection finished. Duration: ${(
-        crushDetectEndTime - crushDetectStartTime
-      ).toFixed(2)}ms`
-    );
     // --- END: Camp Crush Detection Logic ---
 
     // --- 5. Bashbucks Reward/Penalty Logic ---
-    const bashbucksStartTime = performance.now();
+    const BASHBUCKS_DEATH_PENALTY = 5;
+    const BASHBUCKS_KILL_REWARD = 20;
+    const awardedBashbucksCrushers = new Set(); // Separate tracking for bashbucks this KM
+
     try {
-      // ... logic for victim penalty ...
+      // Victim Check (Penalty)
       if (victimCharacterId) {
-        // ... query victimTargets ...
-        // ... loop targets ...
-        if (killLocation.isNearTargetGate(target.stargate_name)) {
-          if (!awardedBashbucksCrushers.has(victimCharacterId)) {
-            const dbPenaltyStartTime = performance.now();
-            await pool.query(
-              `UPDATE users SET bashbucks = GREATEST(0, bashbucks - $1) WHERE character_id = $2`,
-              [BASHBUCKS_DEATH_PENALTY, victimCharacterId]
-            );
-            const dbPenaltyEndTime = performance.now();
-            console.log(
-              `[ProcessKM ${killID}] Bashbucks victim penalty DB update duration: ${(
-                dbPenaltyEndTime - dbPenaltyStartTime
-              ).toFixed(2)}ms`
-            );
-            // ... rest of penalty logic ...
+        const victimTargetsQuery = `
+                  SELECT id, system_id, stargate_name FROM camp_crusher_targets
+                  WHERE character_id = $1 AND completed = FALSE AND end_time >= $2 AND start_time <= $2
+              `;
+        const { rows: victimTargets } = await pool.query(victimTargetsQuery, [
+          victimCharacterId,
+          killTime,
+        ]);
+
+        for (const target of victimTargets) {
+          if (killLocation.isNearTargetGate(target.stargate_name)) {
+            if (!awardedBashbucksCrushers.has(victimCharacterId)) {
+              console.log(
+                `[Bashbucks KM ${killmail.killID}] Player ${victimCharacterId} died at target ${target.id}. Penalizing ${BASHBUCKS_DEATH_PENALTY} BB.`
+              );
+              await pool.query(
+                `UPDATE users SET bashbucks = GREATEST(0, bashbucks - $1) WHERE character_id = $2`, // Use GREATEST to prevent going below 0
+                [BASHBUCKS_DEATH_PENALTY, victimCharacterId]
+              );
+              awardedBashbucksCrushers.add(victimCharacterId);
+              io.to(victimCharacterId.toString()).emit("bashbucksUpdate", {
+                change: -BASHBUCKS_DEATH_PENALTY,
+              });
+              // Don't mark target complete on death
+              break; // Penalize only once per KM
+            }
           }
         }
       }
 
-      // ... logic for attacker reward ...
+      // Attacker Check (Reward & Mark Completed)
       for (const attackerId of attackerCharacterIds) {
-        // ... query attackerTargets ...
-        if (killLocation.isNearTargetGate(target.stargate_name)) {
-          // ... skip if already completed by crush ...
-          const client = await pool.connect();
-          const dbRewardStartTime = performance.now();
-          try {
-            await client.query("BEGIN");
-            // ... UPDATE users ...
-            // ... UPDATE camp_crusher_targets ...
-            await client.query("COMMIT");
-            const dbRewardEndTime = performance.now();
+        if (awardedBashbucksCrushers.has(attackerId)) continue; // Already processed (e.g., died)
+
+        // Find targets for this attacker that are NOT YET COMPLETED
+        const attackerTargetsQuery = `
+                    SELECT id, system_id, stargate_name FROM camp_crusher_targets
+                    WHERE character_id = $1 AND completed = FALSE AND end_time >= $2 AND start_time <= $2
+               `;
+        const { rows: attackerTargets } = await pool.query(
+          attackerTargetsQuery,
+          [attackerId, killTime]
+        );
+
+        for (const target of attackerTargets) {
+          if (killLocation.isNearTargetGate(target.stargate_name)) {
+            // Check if this target was *just* completed by the crush logic above
+            if (processedTargetIdsForCrush.has(target.id)) {
+              console.log(
+                `[Bashbucks KM ${killmail.killID}] Target ${target.id} already completed by crush logic. Skipping Bashbucks kill reward for attacker ${attackerId}.`
+              );
+              continue; // Skip bashbucks if crush already completed it
+            }
+
             console.log(
-              `[ProcessKM ${killID}] Bashbucks attacker reward DB updates committed. Duration: ${(
-                dbRewardEndTime - dbRewardStartTime
-              ).toFixed(2)}ms`
+              `[Bashbucks KM ${killmail.killID}] Attacker ${attackerId} got kill for Target ${target.id}. Awarding ${BASHBUCKS_KILL_REWARD} BB & completing.`
             );
-            // ... emit etc ...
-          } catch (dbError) {
-            // ... rollback ...
-          } finally {
-            client.release();
+
+            // Use Transaction for kill reward
+            const client = await pool.connect();
+            try {
+              await client.query("BEGIN");
+              // 1. Award Bashbucks
+              await client.query(
+                `UPDATE users SET bashbucks = bashbucks + $1 WHERE character_id = $2`,
+                [BASHBUCKS_KILL_REWARD, attackerId]
+              );
+              // 2. Mark target as completed
+              await client.query(
+                `UPDATE camp_crusher_targets SET completed = TRUE WHERE id = $1`,
+                [target.id]
+              );
+              await client.query("COMMIT");
+
+              awardedBashbucksCrushers.add(attackerId); // Track bashbucks awarded
+
+              // Emit updates
+              io.to(attackerId.toString()).emit("bashbucksUpdate", {
+                change: BASHBUCKS_KILL_REWARD,
+              });
+              io.to(attackerId.toString()).emit("targetCompleted", {
+                targetId: target.id,
+              }); // Use existing event
+              break; // Award bashbucks only once per KM for this attacker
+            } catch (dbError) {
+              await client.query("ROLLBACK");
+              console.error(
+                `[Bashbucks KM ${killmail.killID}] DB transaction error for kill reward target ${target.id}:`,
+                dbError
+              );
+            } finally {
+              client.release();
+            }
           }
-        }
-      }
+        } // end loop targets for attacker
+      } // end loop attackers
     } catch (bashbucksError) {
       console.error(
-        `[ProcessKM ${killID}] Error processing Bashbucks rewards:`,
+        `[ProcessKM ${killmail.killID}] Error processing Bashbucks rewards:`,
         bashbucksError
       );
     }
-    const bashbucksEndTime = performance.now();
-    console.log(
-      `[ProcessKM ${killID}] Bashbucks logic finished. Duration: ${(
-        bashbucksEndTime - bashbucksStartTime
-      ).toFixed(2)}ms`
-    );
     // --- END: Bashbucks Logic ---
 
     // --- 6. Final Steps ---
-    // Add killmail to in-memory cache only if it's genuinely new
-    const duplicateCheckStartTime = performance.now();
-    const isDuplicate = isDuplicateKillmail(killmailWithShips, killmails); // Assuming killmails is accessible here
-    const duplicateCheckEndTime = performance.now();
-    // console.log(`[ProcessKM ${killID}] In-memory duplicate check duration: ${(duplicateCheckEndTime - duplicateCheckStartTime).toFixed(2)}ms`); // Can be noisy
-
-    if (!isDuplicate) {
+    // Add killmail to in-memory cache only if it's genuinely new (DB check already done in pollRedisQ)
+    if (!isDuplicateKillmail(killmailWithShips, killmails)) {
       killmails.push(killmailWithShips);
-      // Broadcast the new, fully processed killmail
+      // Broadcast the new, fully processed killmail to clients subscribed to live updates
       io.to("live-updates").emit("newKillmail", killmailWithShips);
-      console.log(`[ProcessKM ${killID}] Added to cache and broadcasted.`);
+      console.log(
+        `[ProcessKM ${killmail.killID}] Added to cache and broadcasted.`
+      );
     } else {
       console.log(
-        `[ProcessKM ${killID}] Skipped adding to cache/broadcast (in-memory duplicate).`
+        `[ProcessKM ${killmail.killID}] Skipped adding to cache/broadcast (duplicate).`
       );
     }
 
-    const processingEndTime = performance.now();
-    console.log(
-      `[ProcessKM ${killID}] END processing. Total Duration: ${(
-        processingEndTime - processingStartTime
-      ).toFixed(2)}ms. Final queue: ${
-        killmailProcessingQueue.queue.length
-      }, Running: ${killmailProcessingQueue.running}`
-    );
     return killmailWithShips; // Return the processed killmail
   } catch (error) {
-    const processingEndTime = performance.now();
+    // Log the error with the original killID for reference
     console.error(
-      `[ProcessKM ${killID}] FATAL error during processing. Duration: ${(
-        processingEndTime - processingStartTime
-      ).toFixed(2)}ms`,
+      `[ProcessKM ${
+        killmail?.killID || "UNKNOWN"
+      }] FATAL error in processKillmailData:`,
       error
     );
     return null; // Return null on failure
   }
-} // End of processKillmailData // End of processKillmailData
+} // End of processKillmailData
 // --- Socket.IO Connection Handler ---
 io.on("connection", (socket) => {
   console.log(`Socket connected: ${socket.id}`);
