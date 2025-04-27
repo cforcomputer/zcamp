@@ -1342,6 +1342,7 @@ app.get("/api/trophy/:characterId", async (req, res) => {
 });
 
 // This endpoint fetches map data from the database and returns it to the client
+// This endpoint fetches map data from the cache and returns it to the client
 app.get("/api/map-data", async (req, res) => {
   // Check if the cache is ready
   if (!isMapDenormalizeCacheBuilt || mapDenormalizeCacheByItemId.size === 0) {
@@ -1355,9 +1356,9 @@ app.get("/api/map-data", async (req, res) => {
     // Filter data directly from the cache values
     const cachedItems = Array.from(mapDenormalizeCacheByItemId.values());
 
-    const filteredRows = cachedItems.filter(
+    const filteredRawRows = cachedItems.filter(
       (item) =>
-        item.typeid === 3 || // All Regions
+        item.typeid === 3 || // All Regions (typeid is number in cache)
         (item.typeid === 5 &&
           item.regionid &&
           parseInt(item.regionid) < 11000000) || // K-Space Systems
@@ -1366,38 +1367,69 @@ app.get("/api/map-data", async (req, res) => {
           parseInt(item.regionid) < 11000000) // K-Space Stargates
     );
 
+    // --- CONVERT IDs TO INT AND USE LOWERCASE KEYS ---
+    const finalRows = filteredRawRows.map((item) => {
+      const safeParseInt = (value) => {
+        if (value === null || value === undefined) return null;
+        const num = parseInt(value, 10);
+        return isNaN(num) ? null : num;
+      };
+
+      // <<< Use lowercase keys matching client expectations >>>
+      return {
+        itemid: safeParseInt(item.itemid), // lowercase, INT
+        typeid: item.typeid, // lowercase, INT (already)
+        groupid: item.groupid, // lowercase, INT (already)
+        solarsystemid: safeParseInt(item.solarsystemid), // lowercase, INT
+        constellationid: safeParseInt(item.constellationid), // lowercase, INT
+        regionid: safeParseInt(item.regionid), // lowercase, INT
+        orbitid: safeParseInt(item.orbitid), // lowercase, INT
+        x: item.x,
+        y: item.y,
+        z: item.z,
+        radius: item.radius,
+        itemname: item.itemname, // lowercase
+        security: item.security,
+        celestialindex: item.celestialindex, // lowercase, INT (already)
+        orbitindex: item.orbitindex, // lowercase, INT (already)
+      };
+    });
+    // --- END CONVERSION ---
+
     console.log(
-      `[API /api/map-data] Found ${filteredRows.length} filtered map entries in cache.`
+      `[API /api/map-data] Found ${finalRows.length} filtered map entries in cache.`
     );
+    // ... (rest of the logging remains the same, using lowercase keys now e.g., item.typeid) ...
     console.log(
       `[API /api/map-data] Regions: ${
-        filteredRows.filter((item) => item.typeid === 3).length
+        finalRows.filter((item) => item.typeid === 3).length
       }`
     );
     console.log(
       `[API /api/map-data] Solar Systems: ${
-        filteredRows.filter((item) => item.typeid === 5).length
+        finalRows.filter((item) => item.typeid === 5).length
       }`
     );
     console.log(
       `[API /api/map-data] Stargates: ${
-        filteredRows.filter((item) => item.groupid === 10).length
+        finalRows.filter((item) => item.groupid === 10).length
       }`
     );
 
-    // Find a sample that ISN'T a region if possible
     const sampleEntry =
-      filteredRows.find((item) => item.typeid === 5) || filteredRows[0];
+      finalRows.find((item) => item.typeid === 5) || finalRows[0];
     if (sampleEntry) {
-      console.log("[API /api/map-data] Sample entry from cache:", sampleEntry);
+      console.log(
+        "[API /api/map-data] Sample entry with correct keys/types:",
+        sampleEntry
+      );
     }
 
-    // Convert back to lowercase keys if client expects that, otherwise send as is.
-    // Assuming client can handle camelCase or keys as they are in the cache object.
-    res.json(filteredRows);
+    // Send the data with lowercase keys and integer IDs
+    res.json(finalRows); // <<< Send the correctly keyed data
   } catch (error) {
     console.error(
-      "[API /api/map-data] Error fetching map data from cache:",
+      "[API /api/map-data] Error fetching/converting map data from cache:",
       error
     );
     res.status(500).json({ error: "Failed to fetch map data from cache" });
@@ -5267,9 +5299,19 @@ async function pollRedisQ() {
           `[Poll ${killID}] Skipping enqueue. New: ${isNewKill}, Recent: ${isRecent}`
         );
       }
-    } else if (response.status === 200 && !response.data.package) {
-      // No new killmail from RedisQ, this is normal
-      // console.log("[Poll] No new killmail package received.");
+    }
+    if (response.status === 200 && response.data.package) {
+      const killmail = response.data.package;
+      const killID = killmail.killID;
+      const fetchEndTime = performance.now();
+      const killTimeUTC = killmail.killmail.killmail_time; // This is the crucial timestamp
+      const fetchedAtUTC = new Date().toISOString();
+
+      console.log(
+        `[Poll ${killID}] Fetched killmail. Fetch duration: ${(
+          fetchEndTime - pollStartTime
+        ).toFixed(2)}ms. Kill Time: ${killTimeUTC}, Fetched At: ${fetchedAtUTC}`
+      ); // ADDED LOG
     }
   } catch (error) {
     if (error.code !== "ECONNABORTED" && error.code !== "ETIMEDOUT") {
