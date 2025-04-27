@@ -9,7 +9,7 @@
     startLocationPolling,
     stopLocationPolling,
   } from "./locationStore.js"; // Functions to control location updates
-
+  import audioManager from "./audioUtils.js";
   // --- Component Props ---
   // `isTracking` is controlled by the parent component (e.g., App.svelte)
   // Determines if location polling and TTS announcements should be active.
@@ -21,7 +21,7 @@
   let lastCampWarning = {}; // Stores info about previously announced dangers in the current system (to avoid repeats)
   let speechQueue = []; // Queue for pending TTS announcements
   let isSpeaking = false; // Flag to prevent multiple TTS utterances from overlapping
-
+  const NO_THREAT_MESSAGE = "✓ No active threats detected nearby";
   // --- Store Subscriptions ---
   let currentActivities = []; // Local copy of active threats/activities
   // Subscribe to the activeActivities store and update local state
@@ -79,6 +79,9 @@
       `[LocationTracker isTracking Effect] Detected isTracking=${isTracking}, starting polling...`
     );
     startLocationPolling(); // Start polling when tracking is enabled
+    if (typeof window !== "undefined") {
+      audioManager.init(); // Ensure sounds are ready
+    }
   } else {
     console.log(
       `[LocationTracker isTracking Effect] Detected isTracking=${isTracking}, stopping polling...`
@@ -609,50 +612,61 @@
       );
 
       // --- Logic for System Change ---
-      // Check if the system ID has changed since the last evaluation
       if (lastSystemId !== currentSystemId) {
         console.log(
           "[LocationTracker Reactive Speech Block] System change detected (or first update). Processing..."
         );
-        // Generate the full threat summary for the new situation
+        // Generate the threat summary
         const summaryResult = getCampSummary(currentActivities);
         console.log(
           `[LocationTracker Reactive Speech Block] getCampSummary result for system change: "${summaryResult.substring(0, 100)}..."`
         );
-        // Get system/region names for the announcement
-        const systemName = $currentLocation.systemName || "Unknown";
-        const regionName = $currentLocation.regionName || "Unknown Region";
-        let announcement;
-        // Create the announcement text, handling potential errors from getCampSummary
-        if (!summaryResult.startsWith("Error generating summary")) {
-          // Normal announcement: System info + stripped summary
-          announcement = `System change. Current system ${systemName} in ${regionName}. ${stripSymbols(summaryResult)}`;
+
+        // *** MODIFICATION START: Check if the summary indicates a threat before announcing ***
+        if (
+          summaryResult !== NO_THREAT_MESSAGE &&
+          !summaryResult.startsWith("Error generating summary")
+        ) {
+          // Only announce if there IS a threat
+          console.log(
+            "[LocationTracker Reactive Speech Block] Threat detected on system change. Proceeding with announcement."
+          );
+          const systemName = $currentLocation.systemName || "Unknown";
+          const regionName = $currentLocation.regionName || "Unknown Region";
+          // Format the announcement ONLY IF there's a threat
+          const announcement = `System change. Current system ${systemName} in ${regionName}. ${stripSymbols(summaryResult)}`;
+
+          // Queue the announcement for TTS
+          console.log(
+            `[LocationTracker Reactive Speech Block] Queuing announcement for system change WITH THREAT: "${announcement.substring(0, 100)}..."`
+          );
+          queueSpeech(announcement);
+        } else if (summaryResult === NO_THREAT_MESSAGE) {
+          // Log that announcement is skipped because system is clear
+          console.log(
+            "[LocationTracker Reactive Speech Block] System change detected, but NO threats found. Skipping TTS announcement."
+          );
+          audioManager.playAlert("sonar");
         } else {
-          // Error announcement
-          announcement = `System change. Current system ${systemName} in ${regionName}. Error getting threat summary.`;
+          // Log if there was an error generating the summary, but don't announce
           console.error(
-            "[LocationTracker Reactive Speech Block] Summary generation failed on system change:",
+            "[LocationTracker Reactive Speech Block] Summary generation failed on system change. Skipping TTS announcement. Error:",
             summaryResult
           );
         }
-        // Queue the announcement for TTS
-        console.log(
-          `[LocationTracker Reactive Speech Block] Queuing announcement for system change: "${announcement.substring(0, 100)}..."`
-        );
-        queueSpeech(announcement);
+        // *** MODIFICATION END ***
 
-        // Update the last known system ID *after* processing the change
+        // Update the last known system ID *after* processing the change (regardless of announcement)
         console.log(
           `[LocationTracker Reactive Speech Block] Updating lastSystemId from ${lastSystemId} to: ${currentSystemId}`
         );
         lastSystemId = currentSystemId;
 
-        // Reset the record of announced dangers since we are in a new system
+        // Reset the record of announced dangers since we are in a new system (regardless of announcement)
         console.log(
           "[LocationTracker Reactive Speech Block] Resetting lastCampWarning for new system."
         );
         try {
-          // Find dangers present *right now* in the new system
           const currentSystemDangers = (
             Array.isArray(currentActivities) ? currentActivities : []
           ).filter(
@@ -664,23 +678,19 @@
               ) &&
               (a.probability >= 50 || a.classification === "battle")
           );
-          // Store the IDs of these initial dangers
           const dangerIds = Array.isArray(currentSystemDangers)
-            ? currentSystemDangers
-                .map((a) => a && a.id)
-                .filter((id) => id != null)
+            ? currentSystemDangers.map((a) => a?.id).filter((id) => id != null)
             : [];
           lastCampWarning = {
             systemId: currentSystemId,
             timestamp: Date.now(),
-            activityIds: new Set(dangerIds), // Initialize with current dangers
+            activityIds: new Set(dangerIds),
           };
           console.log(
             "[LocationTracker Reactive Speech Block] lastCampWarning updated for new system:",
             lastCampWarning
           );
         } catch (error) {
-          // Handle errors during the reset process
           console.error(
             "[LocationTracker Reactive Speech Block] Error updating lastCampWarning on system change:",
             error
@@ -694,11 +704,12 @@
 
         // --- Logic for New Dangers in Same System ---
       } else {
+        // This 'else' corresponds to 'if (lastSystemId !== currentSystemId)'
         console.log(
           "[LocationTracker Reactive Speech Block] System ID unchanged. Checking for new dangers."
         );
         try {
-          // Get all current high-confidence dangers in the current system
+          // (This logic remains unchanged - it only announces *new* threats)
           const currentSystemDangers = (
             Array.isArray(currentActivities) ? currentActivities : []
           ).filter(
@@ -710,15 +721,11 @@
               ) &&
               (a.probability >= 50 || a.classification === "battle")
           );
-          // Get the IDs of all current dangers
           const currentDangerIdsArray = Array.isArray(currentSystemDangers)
-            ? currentSystemDangers
-                .map((a) => a && a.id)
-                .filter((id) => id != null)
+            ? currentSystemDangers.map((a) => a?.id).filter((id) => id != null)
             : [];
           const currentDangerIds = new Set(currentDangerIdsArray);
 
-          // Get the IDs of dangers that were *previously* announced in this system
           const previousDangerIds =
             lastCampWarning &&
             lastCampWarning.systemId === currentSystemId &&
@@ -726,25 +733,22 @@
               ? lastCampWarning.activityIds
               : new Set();
 
-          // Find dangers that are present now but were NOT announced previously
           const newDangers = Array.isArray(currentSystemDangers)
             ? currentSystemDangers.filter(
-                (a) => a && a.id != null && !previousDangerIds.has(a.id)
+                (a) => a?.id != null && !previousDangerIds.has(a.id)
               )
             : [];
 
-          // If there are new, unannounced dangers...
           if (newDangers.length > 0) {
             console.log(
               `[LocationTracker Reactive Speech Block] ${newDangers.length} New threat(s) detected in current system.`
             );
-            // Generate a summary focusing *only* on these new dangers for the alert
+            // Generate summary *only* for new dangers
             const newDangerSummaryResult = getCampSummary(newDangers);
             console.log(
               `[LocationTracker Reactive Speech Block] getCampSummary result for new threats: "${newDangerSummaryResult.substring(0, 100)}..."`
             );
             let newThreatAnnouncement;
-            // Create the alert text
             if (
               !newDangerSummaryResult.startsWith("Error generating summary")
             ) {
@@ -756,34 +760,30 @@
                 newDangerSummaryResult
               );
             }
-            // Queue the alert for TTS
             console.log(
               `[LocationTracker Reactive Speech Block] Queuing announcement for new threats: "${newThreatAnnouncement.substring(0, 100)}..."`
             );
             queueSpeech(newThreatAnnouncement);
 
-            // IMPORTANT: Update lastCampWarning to include the IDs of *all* current dangers,
-            // so these newly announced ones aren't announced again immediately.
+            // Update lastCampWarning to include *all* current dangers
             console.log(
               "[LocationTracker Reactive Speech Block] Updating lastCampWarning with current threat IDs."
             );
             lastCampWarning = {
               systemId: currentSystemId,
               timestamp: Date.now(),
-              activityIds: currentDangerIds, // Store the full set of current danger IDs
+              activityIds: currentDangerIds,
             };
             console.log(
               "[LocationTracker Reactive Speech Block] lastCampWarning updated:",
               lastCampWarning
             );
           } else {
-            // No new dangers found since the last check
             console.log(
               "[LocationTracker Reactive Speech Block] No new dangers detected since last check."
             );
           }
         } catch (error) {
-          // Handle errors during the new danger check
           console.error(
             "[LocationTracker Reactive Speech Block] Error checking for new dangers:",
             error
@@ -791,7 +791,7 @@
         }
       }
     } else {
-      // Log why the main speech logic was skipped
+      // This 'else' corresponds to 'if ($currentLocation && ... && isTracking)'
       if (!isTracking) {
         console.log(
           "[LocationTracker Reactive Speech Block] Evaluation skipped: isTracking is false."
@@ -800,7 +800,6 @@
         !$currentLocation ||
         typeof $currentLocation.solar_system_id === "undefined"
       ) {
-        // Location data might not be ready yet
         console.log(
           "[LocationTracker Reactive Speech Block] Evaluation skipped: $currentLocation is not yet valid."
         );

@@ -222,6 +222,8 @@ export const DEFAULT_SETTINGS = {
   solar_system_filter_enabled: false,
   item_type_filter_enabled: false,
 
+  announceSystemChangeMode: "always", // Possible values: 'always', 'threatOnly'
+
   // Triangulation settings
   triangulation_filter_enabled: false,
   triangulation_filter_exclude: false,

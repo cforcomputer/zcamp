@@ -14,6 +14,7 @@ class AudioManager {
       default: "/audio_files/alert.wav",
       blue: "/audio_files/blue_alert.wav",
       orange: "/audio_files/orange_alert.wav",
+      sonar: "/audio_files/sonarping.mp3",
     };
 
     Object.entries(alerts).forEach(([key, path]) => {
