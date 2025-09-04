@@ -18,7 +18,7 @@ import { ServerActivityManager } from "./serverActivityManager.js";
 const { Pool } = pg;
 
 class TaskQueue {
-  constructor(concurrency = 50, name = "DefaultQueue") {
+  constructor(concurrency = 20, name = "DefaultQueue") {
     // Added name for logging
     this.concurrency = concurrency;
     this.running = 0;
@@ -1264,6 +1264,67 @@ app.get("/api/route/:origin/:destination", async (req, res) => {
   }
 });
 
+let typeInfoCache = new Map(); // Key: typeId (number), Value: { name, marketGroupID, groupID }
+
+/**
+ * Downloads invTypes.json from the SDE URL during startup and builds an
+ * in-memory map for quick lookups of ship names, market group IDs, and group IDs.
+ */
+async function buildTypeInfoCache() {
+  console.log(
+    "[Type Info Cache] Building type info cache by downloading from SDE URL..."
+  );
+  const tempTypeInfo = new Map();
+  const invTypesUrl = "https://sde.zzeve.com/invTypes.json";
+
+  try {
+    console.log(`[Type Info Cache] Fetching data from ${invTypesUrl}...`);
+    const response = await axios.get(invTypesUrl, { timeout: 60000 }); // Longer timeout for large file
+
+    if (response.status !== 200 || !response.data) {
+      throw new Error(
+        `Failed to download invTypes. Status: ${response.status}`
+      );
+    }
+
+    const invTypesData = response.data;
+    if (!Array.isArray(invTypesData)) {
+      throw new Error(
+        "Invalid format: Downloaded invTypes data should be an array."
+      );
+    }
+
+    console.log(
+      `[Type Info Cache] Download successful. Processing ${invTypesData.length} entries...`
+    );
+
+    invTypesData.forEach((type) => {
+      if (type.typeID != null && typeof type.typeID === "number") {
+        tempTypeInfo.set(type.typeID, {
+          name: type.typeName || "Unknown Type",
+          marketGroupID: type.marketGroupID ?? null,
+          groupID: type.groupID ?? null,
+        });
+      }
+    });
+
+    typeInfoCache = tempTypeInfo;
+    console.log(
+      `[Type Info Cache] Successfully loaded ${typeInfoCache.size} types into cache.`
+    );
+  } catch (error) {
+    console.error(
+      "[Type Info Cache] CRITICAL: Failed to download or parse invTypes from URL:",
+      {
+        url: invTypesUrl,
+        message: error.message,
+        stack: error.stack,
+      }
+    );
+    // Allow server to start with degraded functionality, but log it as critical.
+  }
+}
+
 // Fetch trophy page data
 app.get("/api/trophy/:characterId", async (req, res) => {
   const characterId = req.params.characterId;
@@ -1998,32 +2059,22 @@ async function storeShipCategory(shipTypeId, shipData) {
 
 async function determineShipCategory(typeId, killmail) {
   try {
-    // --- Step 1: Get Type Info (Still needs ESI or better caching) ---
-    // Check your existing cache first (e.g., shipTypeCache or a dedicated type cache)
-    // For simplicity, we'll assume an ESI call here, but OPTIMIZE THIS SEPARATELY!
-    // Ideally, cache this response aggressively (in memory/Redis).
-    let typeResponseData;
-    try {
-      // TODO: Implement robust caching for this ESI call
-      const response = await axios.get(
-        `https://esi.evetech.net/latest/universe/types/${typeId}/?datasource=tranquility`
-      );
-      typeResponseData = response.data;
-    } catch (esiError) {
+    // --- Step 1: Get Type Info from the SDE Cache ---
+    const typeInfo = typeInfoCache.get(typeId);
+
+    if (!typeInfo) {
       console.error(
-        `[determineShipCategory] ESI Error fetching type ${typeId}:`,
-        esiError.response?.data || esiError.message
+        `[determineShipCategory] Type ID ${typeId} not found in typeInfoCache.`
       );
-      // Return a default/unknown if type info fails
       return { category: "unknown", name: `TypeID ${typeId}`, tier: "T1" };
     }
 
-    const shipName = typeResponseData.name || `TypeID ${typeId}`;
-    const initialMarketGroupId = typeResponseData.market_group_id;
-    const groupId = typeResponseData.group_id; // Get group_id for specific checks
+    const shipName = typeInfo.name;
+    const initialMarketGroupId = typeInfo.marketGroupID;
+    const groupId = typeInfo.groupID;
 
-    let tier = "T1"; // Default tier
-    let category = "unknown"; // Default category
+    let tier = "T1";
+    let category = "unknown";
 
     // --- Step 2: Handle Special Cases (No Market Group Traversal Needed) ---
     if (groupId === 1180) {
@@ -2034,119 +2085,77 @@ async function determineShipCategory(typeId, killmail) {
       // Capsule group
       return { category: "capsule", name: shipName, tier: tier };
     }
-    // Check NPC *after* special groups but *before* market group traversal
     if (killmail && isNPC(typeId, killmail)) {
       return { category: "npc", name: shipName, tier: tier };
     }
 
     // --- Step 3: Traverse Market Group Hierarchy using the Cache ---
     if (!initialMarketGroupId || marketGroupInfo.size === 0) {
-      console.warn(
-        `[determineShipCategory] No initial market group ID for type ${typeId} or market group cache is empty. Category unknown.`
-      );
-      // Return unknown if no market group or cache failed to load
       return { category: "unknown", name: shipName, tier: tier };
     }
 
     let currentMarketGroupId = initialMarketGroupId;
-    const visitedGroups = new Set(); // Prevent infinite loops in case of bad SDE data
+    const visitedGroups = new Set();
 
     while (currentMarketGroupId && !visitedGroups.has(currentMarketGroupId)) {
-      visitedGroups.add(currentMarketGroupId); // Mark as visited
+      visitedGroups.add(currentMarketGroupId);
 
       const groupInfo = marketGroupInfo.get(currentMarketGroupId);
       if (!groupInfo) {
-        // This group ID wasn't found in our cache - indicates incomplete SDE or new group
-        console.warn(
-          `[determineShipCategory] Market group ${currentMarketGroupId} not found in cache for type ${typeId}.`
-        );
-        break; // Stop traversal
+        break; // Stop traversal if group not found
       }
 
       const marketGroupName = groupInfo.name;
 
-      // Check market group name for tier - only look for "Advanced" or T2 variations
-      // Be careful with naming variations (e.g., "Tech II")
+      // Tier check
       if (
         marketGroupName.includes("Advanced") ||
         marketGroupName.startsWith("Tech II")
       ) {
-        // Adjusted check
         tier = "T2";
       }
-      // Could add T3 checks here if needed based on group names or specific IDs
 
-      // Category checks - set category once (using the CONSTANT IDs)
+      // Category check (only set it once)
       if (category === "unknown") {
-        if (PARENT_MARKET_GROUPS.CAPITALS.includes(currentMarketGroupId)) {
+        if (PARENT_MARKET_GROUPS.CAPITALS.includes(currentMarketGroupId))
           category = "capital";
-        } else if (
-          PARENT_MARKET_GROUPS.STRUCTURES.includes(currentMarketGroupId)
-        ) {
+        else if (PARENT_MARKET_GROUPS.STRUCTURES.includes(currentMarketGroupId))
           category = "structure";
-        } else if (
-          PARENT_MARKET_GROUPS.SHUTTLES.includes(currentMarketGroupId)
-        ) {
+        else if (PARENT_MARKET_GROUPS.SHUTTLES.includes(currentMarketGroupId))
           category = "shuttle";
-        } else if (
-          PARENT_MARKET_GROUPS.FIGHTERS.includes(currentMarketGroupId)
-        ) {
+        else if (PARENT_MARKET_GROUPS.FIGHTERS.includes(currentMarketGroupId))
           category = "fighter";
-        } else if (currentMarketGroupId === PARENT_MARKET_GROUPS.CORVETTES) {
+        else if (currentMarketGroupId === PARENT_MARKET_GROUPS.CORVETTES)
           category = "corvette";
-        } else if (
-          PARENT_MARKET_GROUPS.FRIGATES.includes(currentMarketGroupId)
-        ) {
+        else if (PARENT_MARKET_GROUPS.FRIGATES.includes(currentMarketGroupId))
           category = "frigate";
-        } else if (
-          PARENT_MARKET_GROUPS.DESTROYERS.includes(currentMarketGroupId)
-        ) {
+        else if (PARENT_MARKET_GROUPS.DESTROYERS.includes(currentMarketGroupId))
           category = "destroyer";
-        } else if (
-          PARENT_MARKET_GROUPS.CRUISERS.includes(currentMarketGroupId)
-        ) {
+        else if (PARENT_MARKET_GROUPS.CRUISERS.includes(currentMarketGroupId))
           category = "cruiser";
-        } else if (
+        else if (
           PARENT_MARKET_GROUPS.BATTLECRUISERS.includes(currentMarketGroupId)
-        ) {
+        )
           category = "battlecruiser";
-        } else if (
+        else if (
           PARENT_MARKET_GROUPS.BATTLESHIPS.includes(currentMarketGroupId)
-        ) {
+        )
           category = "battleship";
-        } else if (currentMarketGroupId === PARENT_MARKET_GROUPS.INDUSTRIAL) {
+        else if (currentMarketGroupId === PARENT_MARKET_GROUPS.INDUSTRIAL)
           category = "industrial";
-        } else if (currentMarketGroupId === PARENT_MARKET_GROUPS.MINING) {
+        else if (currentMarketGroupId === PARENT_MARKET_GROUPS.MINING)
           category = "mining";
-        }
-        // Add more categories here if needed
       }
 
-      // Stop if we've determined category and tier? Maybe not, hierarchy might define tier higher up.
-      // Stop if we've reached a known top-level group or a null parent
       if (currentMarketGroupId === 4 || groupInfo.parentId === null) {
         break; // Reached top ship group or actual root
       }
 
-      // Move to the parent using the cache
       currentMarketGroupId = groupInfo.parentId;
-    } // End while loop
-
-    // --- Step 4: Return Result ---
-    // If category is still unknown after traversal, keep it as unknown
-    if (category === "unknown") {
-      console.log(
-        `[determineShipCategory] Category remained unknown for Type ID: ${typeId}, Initial Market Group: ${initialMarketGroupId}, Name: ${shipName}`
-      );
     }
 
-    return {
-      category: category,
-      name: shipName,
-      tier: tier,
-    };
+    return { category, name: shipName, tier };
   } catch (error) {
-    // Catch any unexpected errors during the process
     console.error(
       `[determineShipCategory] Unexpected error processing type ${typeId}:`,
       error
@@ -5319,19 +5328,25 @@ async function pollRedisQ() {
       // console.log("[Poll] Poll timed out or aborted."); // Can be noisy
     }
   } finally {
-    const pollEndTime = performance.now();
-    // console.log(`[Poll] Finished poll cycle. Duration: ${(pollEndTime - pollStartTime).toFixed(2)}ms. Scheduling next.`); // Can be noisy
-    // Check queue status before scheduling next poll
-    if (
-      killmailProcessingQueue.queue.length >
-      killmailProcessingQueue.concurrency * 2
-    ) {
+    const queueLength = killmailProcessingQueue.queue.length;
+    let nextPollDelay = 0; // Default to immediate next poll
+
+    // If the queue is getting very long, slow down polling
+    if (queueLength > 200) {
+      nextPollDelay = 2000; // 2 second delay
       console.warn(
-        `[Poll] Killmail queue is large (${killmailProcessingQueue.queue.length}). Adding 1s delay before next poll.`
+        `[Poll] Killmail queue is very large (${queueLength}). Delaying next poll by 2s.`
       );
-      setTimeout(pollRedisQ, 1000); // Add a small delay if queue is very large
+    } else if (queueLength > 50) {
+      nextPollDelay = 500; // 0.5 second delay
+    }
+
+    if (nextPollDelay > 0) {
+      setTimeout(pollRedisQ, nextPollDelay);
     } else {
-      pollRedisQ(); // Schedule next poll immediately
+      // Using setImmediate is better for high-throughput loops than direct recursion
+      // to avoid overflowing the call stack over long periods.
+      setImmediate(pollRedisQ);
     }
   }
 }
@@ -5351,6 +5366,7 @@ async function startServer() {
     await initializeMapData();
     await buildMapDenormalizeCache();
     await buildMarketGroupHierarchyCache();
+    await buildTypeInfoCache();
     await buildSystemConnectivityMap(); // for routes tracking during player movement without using fuzzworks
 
     isDatabaseInitialized = true;

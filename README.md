@@ -28,6 +28,11 @@ REDIS_URL="redis://your-redis-url:6379"
 - Is Multiline: No
 - Is Literal: No
 
+REDISQ_URL="https://zkillredisq.stream/listen.php?queueID=Voltron9000"
+- Build Variable: No
+- Is Multiline: No
+- Is Literal: No
+
 SESSION_SECRET="your-secure-session-secret"
 - Build Variable: No
 - Is Multiline: No
