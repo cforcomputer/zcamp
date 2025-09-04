@@ -150,6 +150,6 @@ devils hill should not have counted in the total.
 - 50% of the pre-time decay probability prediction should be ML 
 - Add an additional score that is recalculated once per day at downtime. This score should check for the frequency + probability > 50% (combined max score) for different systems and groups to identify most camped systems. This score should be used in ML.
 - There should be two ML models, one does clustering for a cluster score, and the other is a manual random forest classifier.
-- Make it so that the settings are correctly remembered when switching between tabs (Default profile that updates automatically and saves automatically)
+
 - The knows there's a rare npc kill because the status bar is generated, but it does not appear.
 - Add a limit to connected roam stargates to 10

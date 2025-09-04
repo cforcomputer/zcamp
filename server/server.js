@@ -148,6 +148,7 @@ const PORT = process.env.PORT || 3000;
 const PUBLIC_URL = process.env.PUBLIC_URL || "http://localhost:3000";
 const TURNSTILE_SECRET_KEY = process.env.TURNSTILE_SECRET_KEY;
 const TURNSTILE_SITE_KEY = process.env.TURNSTILE_SITE_KEY;
+const REDISQ_URL = process.env.REDISQ_URL;
 axios.defaults.baseURL = "http://localhost:" + process.env.PORT;
 
 const MIME_TYPES = {
@@ -229,8 +230,6 @@ app.get("/", (req, res) => {
   res.send(rendered);
 });
 
-const REDISQ_URL =
-  "https://redisq.zkillboard.com/listen.php?queueID=zcamptest&ttw=1";
 let killmails = [];
 let isDatabaseInitialized = false;
 
@@ -4301,17 +4300,18 @@ async function processKillmailData(killmail) {
     // --- END: Camp Crush Detection Logic ---
 
     // --- 5. Bashbucks Reward/Penalty Logic ---
-    const BASHBUCKS_DEATH_PENALTY = 5;
+    // const BASHBUCKS_DEATH_PENALTY = 5; // Original constant, name is now potentially misleading
+    const BASHBUCKS_ATTEMPT_REWARD = 5; // <<< ADDED/CHANGED: Define reward value
     const BASHBUCKS_KILL_REWARD = 20;
     const awardedBashbucksCrushers = new Set(); // Separate tracking for bashbucks this KM
 
     try {
-      // Victim Check (Penalty)
+      // Victim Check (Now a Reward Check) // <<< COMMENT CHANGED
       if (victimCharacterId) {
         const victimTargetsQuery = `
-                  SELECT id, system_id, stargate_name FROM camp_crusher_targets
-                  WHERE character_id = $1 AND completed = FALSE AND end_time >= $2 AND start_time <= $2
-              `;
+                SELECT id, system_id, stargate_name FROM camp_crusher_targets
+                WHERE character_id = $1 AND completed = FALSE AND end_time >= $2 AND start_time <= $2
+            `;
         const { rows: victimTargets } = await pool.query(victimTargetsQuery, [
           victimCharacterId,
           killTime,
@@ -4320,33 +4320,36 @@ async function processKillmailData(killmail) {
         for (const target of victimTargets) {
           if (killLocation.isNearTargetGate(target.stargate_name)) {
             if (!awardedBashbucksCrushers.has(victimCharacterId)) {
+              // <<< CHANGED LOGIC BLOCK BELOW >>>
+
               console.log(
-                `[Bashbucks KM ${killmail.killID}] Player ${victimCharacterId} died at target ${target.id}. Penalizing ${BASHBUCKS_DEATH_PENALTY} BB.`
+                `[Bashbucks KM ${killmail.killID}] Player ${victimCharacterId} died attempting target ${target.id}. Awarding ${BASHBUCKS_ATTEMPT_REWARD} BB.`
               );
               await pool.query(
-                `UPDATE users SET bashbucks = GREATEST(0, bashbucks - $1) WHERE character_id = $2`, // Use GREATEST to prevent going below 0
-                [BASHBUCKS_DEATH_PENALTY, victimCharacterId]
+                // Change from subtracting penalty to adding reward
+                `UPDATE users SET bashbucks = bashbucks + $1 WHERE character_id = $2`,
+                [BASHBUCKS_ATTEMPT_REWARD, victimCharacterId] // Use the reward value
               );
               awardedBashbucksCrushers.add(victimCharacterId);
               io.to(victimCharacterId.toString()).emit("bashbucksUpdate", {
-                change: -BASHBUCKS_DEATH_PENALTY,
+                // Send a positive change
+                change: BASHBUCKS_ATTEMPT_REWARD,
               });
-              // Don't mark target complete on death
-              break; // Penalize only once per KM
+              // Still don't mark target complete on death
+              break; // Award only once per KM for this victim
             }
           }
         }
       }
 
-      // Attacker Check (Reward & Mark Completed)
+      // Attacker Check (Reward & Mark Completed) - Remains unchanged
       for (const attackerId of attackerCharacterIds) {
-        if (awardedBashbucksCrushers.has(attackerId)) continue; // Already processed (e.g., died)
+        if (awardedBashbucksCrushers.has(attackerId)) continue; // Already processed
 
-        // Find targets for this attacker that are NOT YET COMPLETED
         const attackerTargetsQuery = `
-                    SELECT id, system_id, stargate_name FROM camp_crusher_targets
-                    WHERE character_id = $1 AND completed = FALSE AND end_time >= $2 AND start_time <= $2
-               `;
+                SELECT id, system_id, stargate_name FROM camp_crusher_targets
+                WHERE character_id = $1 AND completed = FALSE AND end_time >= $2 AND start_time <= $2
+            `;
         const { rows: attackerTargets } = await pool.query(
           attackerTargetsQuery,
           [attackerId, killTime]
@@ -4354,44 +4357,39 @@ async function processKillmailData(killmail) {
 
         for (const target of attackerTargets) {
           if (killLocation.isNearTargetGate(target.stargate_name)) {
-            // Check if this target was *just* completed by the crush logic above
             if (processedTargetIdsForCrush.has(target.id)) {
               console.log(
                 `[Bashbucks KM ${killmail.killID}] Target ${target.id} already completed by crush logic. Skipping Bashbucks kill reward for attacker ${attackerId}.`
               );
-              continue; // Skip bashbucks if crush already completed it
+              continue;
             }
 
             console.log(
               `[Bashbucks KM ${killmail.killID}] Attacker ${attackerId} got kill for Target ${target.id}. Awarding ${BASHBUCKS_KILL_REWARD} BB & completing.`
             );
 
-            // Use Transaction for kill reward
             const client = await pool.connect();
             try {
               await client.query("BEGIN");
-              // 1. Award Bashbucks
               await client.query(
                 `UPDATE users SET bashbucks = bashbucks + $1 WHERE character_id = $2`,
                 [BASHBUCKS_KILL_REWARD, attackerId]
               );
-              // 2. Mark target as completed
               await client.query(
                 `UPDATE camp_crusher_targets SET completed = TRUE WHERE id = $1`,
                 [target.id]
               );
               await client.query("COMMIT");
 
-              awardedBashbucksCrushers.add(attackerId); // Track bashbucks awarded
+              awardedBashbucksCrushers.add(attackerId);
 
-              // Emit updates
               io.to(attackerId.toString()).emit("bashbucksUpdate", {
                 change: BASHBUCKS_KILL_REWARD,
               });
               io.to(attackerId.toString()).emit("targetCompleted", {
                 targetId: target.id,
-              }); // Use existing event
-              break; // Award bashbucks only once per KM for this attacker
+              });
+              break;
             } catch (dbError) {
               await client.query("ROLLBACK");
               console.error(

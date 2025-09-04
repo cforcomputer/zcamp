@@ -77,11 +77,6 @@
   const USER_COLOR = 0x00ffff; // Cyan
   const ROUTE_COLOR = 0x00ff00; // Green
   const DANGER_ROUTE_COLOR = 0xff6600; // Orange
-  const FLASH_COLOR_CAMP = new THREE.Color(0xffdddd); // Original, light red/pink flash
-  const FLASH_COLOR_SMARTBOMB = new THREE.Color(0xffccaa); // Original, light orange flash
-  const FLASH_COLOR_ROAM = new THREE.Color(0xddddff); // Original, light blue flash
-  const FLASH_COLOR_ROAMING_CAMP = new THREE.Color(0xffddaa); // Original, light orange flash
-  const FLASH_COLOR_BATTLE = new THREE.Color(0xffaaff); // Original, light purple/pink flash
   const SECONDARY_GLOW_COLOR_CAMP = 0xffaaaa;
   const SECONDARY_GLOW_COLOR_SMARTBOMB = 0xffbb88;
   const SECONDARY_GLOW_COLOR_ROAM = 0xaaaaff;
@@ -1219,56 +1214,69 @@
   } //
 
   // --- NEW: Helper to create or update a marker based on classification ---
+  // --- Helper to create or update a marker based on classification ---
   function createOrUpdateActivityMarker(activity, now, latestKillId) {
-    //
     console.log(
       `[UniverseMap] Creating/Updating marker for activity ${activity.id}, classification: ${activity.classification}`
-    ); // <<< DEBUG
-    let markerObj; //
-    switch (
-      activity.classification //
-    ) {
-      case "camp": //
-      case "smartbomb": //
-        markerObj = createOrUpdateCampStyleMarker(activity, now, latestKillId); //
-        break; //
-      case "roam": //
-      case "roaming_camp": // ADDED - Will draw route
-      case "battle": // ADDED - Will draw route
+    );
+    let markerObj; // This will hold the result from the creation functions
+
+    // This switch directs the code to the correct function based on classification
+    switch (activity.classification) {
+      case "camp":
+      case "smartbomb":
+        // For single-system camps/smartbombs, call the camp-style creator
+        markerObj = createOrUpdateCampStyleMarker(activity, now, latestKillId);
+        break;
+
+      // **** THIS IS THE IMPORTANT PART FOR ROUTE LINES ****
+      case "roam":
+      case "roaming_camp":
+      case "battle":
+        // For multi-system activities, call the multi-system route creator
         markerObj = createOrUpdateMultiSystemRouteMarker(
           activity,
           now,
           latestKillId
-        ); // Renamed function call
-        break; //
-      case "activity": // Decide how to represent 'activity' - maybe a smaller grey glow?
-        // markerObj = createOrUpdateActivityStyleMarker(activity, now, latestKillId); //
+        );
+        // NOTE: createOrUpdateRoamStyleMarker is NOT called here.
+        break;
+      // **** END OF IMPORTANT PART ****
+
+      case "activity": // Unclassified - currently skipped
         console.log(
-          // <<< DEBUG
-          `[UniverseMap] Skipping visualization for unclassified activity: ${activity.id}` //
+          `[UniverseMap] Skipping visualization for unclassified activity: ${activity.id}`
         );
-        return; // Don't visualize 'activity' for now
-      default: //
+        return; // Exit function early, no marker created
+
+      default: // Unknown classification
         console.warn(
-          // <<< DEBUG
-          `[UniverseMap] Unknown activity classification: ${activity.classification}` //
+          `[UniverseMap] Unknown activity classification: ${activity.classification}`
         );
-        return; //
+        return; // Exit function early, no marker created
     }
 
+    // If a marker object was successfully created by one of the functions above...
     if (markerObj) {
-      //
-      activityMarkers.set(activity.id, markerObj); //
-      scene.add(markerObj.group); //
-      console.log(
-        `[UniverseMap] Added/Updated marker group to scene for activity ${activity.id}`
-      ); // <<< DEBUG
+      activityMarkers.set(activity.id, markerObj); // Store it
+      // Ensure the visual group exists and add it to the scene
+      if (markerObj.group) {
+        scene.add(markerObj.group);
+        console.log(
+          `[UniverseMap] Added/Updated marker group to scene for activity ${activity.id}`
+        );
+      } else {
+        console.warn(
+          `[UniverseMap] Marker object created for ${activity.id} but group was null/undefined.`
+        );
+      }
     } else {
+      // Log if the creation function failed (returned null)
       console.warn(
         `[UniverseMap] Failed to create marker object for activity ${activity.id}`
-      ); // <<< DEBUG
+      );
     }
-  } //
+  } // End of createOrUpdateActivityMarker
 
   // --- NEW: Helper to update existing marker properties (if classification hasn't changed) ---
   function updateMarkerProperties(markerObj, activity, now, latestKillId) {
@@ -1734,183 +1742,6 @@
       type: activity.classification,
     };
   } // End of createOrUpdateCampStyleMarker
-
-  // --- NEW: Function to create/update Roam markers ---
-  // --- NEW: Function to create/update Roam markers ---
-  function createOrUpdateRoamStyleMarker(activity, now, latestKillId) {
-    //
-    if (!activity.systems || activity.systems.length < 1) {
-      //
-      console.warn(
-        `[UniverseMap] Skipping roam marker ${activity.id}: No system data.`
-      ); // <<< DEBUG
-      return null; //
-    }
-
-    // Sort systems by time to ensure correct path order
-    const sortedSystems = [...activity.systems].sort(
-      //
-      (a, b) => new Date(a.time) - new Date(b.time) //
-    );
-
-    const points = []; // Stores Vector3 positions for the path line
-    const systemOrder = []; // Stores the original system data in order
-
-    // Loop through the sorted systems from the activity data
-    for (const system of sortedSystems) {
-      //
-      // Ensure system ID is a valid number
-      const systemIdInt = parseInt(system.id); //
-      if (isNaN(systemIdInt)) {
-        // <<< DEBUG Check ID
-        console.warn(
-          `[UniverseMap] Skipping system in roam ${activity.id}: Invalid system ID ${system.id}`
-        ); //
-        continue; // Skip this system if ID is invalid
-      }
-
-      // Try to find this system in the currently rendered map data
-      const systemObj = solarSystems.get(systemIdInt); //
-
-      if (systemObj) {
-        // System found on map - add its position for the line and store its data
-        points.push(systemObj.position.clone()); //
-        systemOrder.push(system); //
-      } else {
-        // --- ADDED: Detailed Logging for Missing Systems ---
-        console.warn(
-          `[UniverseMap Path Draw] System ${systemIdInt} (Name: ${system.name || "N/A"}) NOT FOUND in rendered solarSystems map for roam ${activity.id}. System excluded from path line.`
-        );
-        // --- END Logging ---
-      }
-    } // End of loop through systems
-
-    // Check if we found enough valid points on the map for visualization
-    if (points.length < 1) {
-      //
-      console.warn(
-        `[UniverseMap] Skipping roam marker ${activity.id}: No valid points found on rendered map.`
-      ); // <<< DEBUG - Adjusted message
-      return null; // Need at least one valid point to place secondary glow
-    }
-
-    const roamGroup = new THREE.Group(); // Group to hold line, glows, etc.
-    let lineObject = null; // Reference to the Line object
-    let secondaryGlowSprite = null; // Reference to the secondary glow sprite
-
-    // Create path line ONLY if we have 2 or more valid points on the map
-    if (points.length >= 2) {
-      //
-      try {
-        // Create a smooth curve through the valid points
-        const curve = new THREE.CatmullRomCurve3(points); //
-        const geometry = new THREE.BufferGeometry().setFromPoints(
-          //
-          curve.getPoints(Math.max(64, points.length * 8)) // Generate points along the curve
-        );
-        // Material for the line (matches the 'old' style from previous steps)
-        const material = new THREE.LineBasicMaterial({
-          color: new THREE.Color(ROAM_COLOR), // Base color
-          linewidth: 2, // Thickness
-          transparent: true,
-          opacity: 0.7, // Initial opacity for pulsing
-        });
-        material.userData = { baseColor: new THREE.Color(ROAM_COLOR) }; // Store base color for animation
-        lineObject = new THREE.Line(geometry, material); // Create the line mesh
-        roamGroup.add(lineObject); // Add line to the group
-      } catch (e) {
-        console.error("Error creating roam path line:", e); // Log error if curve fails
-        // Continue without the line if curve creation fails
-      }
-    } else {
-      // Log if line isn't drawn due to insufficient points
-      console.log(
-        `[UniverseMap Path Draw] Only ${points.length} valid system point(s) found for roam ${activity.id}. Path line will not be drawn (requires >= 2).`
-      );
-    }
-
-    // Secondary Glow at the last known system's position *on the map*
-    const lastSystemPos = points[points.length - 1]; // Position of the last valid point
-    if (lastSystemPos) {
-      //
-      const secondaryGlowMaterial = new THREE.SpriteMaterial({
-        //
-        map: glowTexture, //
-        color: new THREE.Color(SECONDARY_GLOW_COLOR_ROAM), //
-        transparent: true, //
-        opacity: 0.1, // Base opacity
-        depthWrite: false, //
-        sizeAttenuation: true, //
-      });
-      secondaryGlowSprite = new THREE.Sprite(secondaryGlowMaterial); //
-      secondaryGlowSprite.scale.set(60, 60, 1); // Size of the glow
-      secondaryGlowSprite.position.copy(lastSystemPos); // Position it at the last valid point
-      secondaryGlowSprite.renderOrder = -1; // Draw behind other elements
-      roamGroup.add(secondaryGlowSprite); // Add glow to the group
-    }
-
-    // Add small system glow markers for visited systems (if found on map and no camp there)
-    systemOrder.forEach((system) => {
-      //
-      const systemIdInt = parseInt(system.id); //
-      if (isNaN(systemIdInt)) return; // Skip if invalid ID
-      const systemObj = solarSystems.get(systemIdInt); // Get the rendered system object again
-
-      // Check if this system also hosts a camp-like activity marker
-      const hasCampMarker = Array.from(activityMarkers.values()).some(
-        //
-        (
-          m //
-        ) =>
-          m.activityData.systemId === systemIdInt && // Check system ID
-          ["camp", "smartbomb", "roaming_camp", "battle"].includes(
-            // Check if it's a camp-like type
-            //
-            m.activityData.classification //
-          )
-      );
-
-      if (systemObj && !hasCampMarker) {
-        // Only add roam glow if system exists on map AND no camp marker exists there
-        const glowMaterial = new THREE.SpriteMaterial({
-          //
-          map: glowTexture, //
-          color: new THREE.Color(ROAM_COLOR), //
-          transparent: true, //
-          opacity: 0.6, //
-          depthWrite: false, //
-        });
-        const glowSprite = new THREE.Sprite(glowMaterial); //
-        glowSprite.position.copy(systemObj.position); // Place at system position
-        glowSprite.scale.set(8, 8, 1); // Roam system marker size
-        roamGroup.add(glowSprite); // Add to the main roam group
-      }
-    });
-
-    // Store relevant data in the group's userData
-    roamGroup.userData = {
-      //
-      type: "roam", // Mark the type
-      activityData: activity, // Store the full activity data
-      systems: systemOrder, // Store the ordered systems actually used/found
-      flashColor: FLASH_COLOR_ROAM, // Store flash color for animation
-      baseColor: ROAM_COLOR, // Store base color
-    };
-
-    // Return the object needed by updateActivityVisualizations
-    return {
-      //
-      group: roamGroup, // The THREE.Group containing all visuals
-      activityData: activity, // The activity data
-      mixer: null, // Roams don't use mixer currently
-      lineMaterial: lineObject?.material, // The material of the line (if created) for animation
-      lastKillId: latestKillId, // Store the latest kill ID for flash detection
-      flashEndTime: 0, // Initialize flash timer
-      secondaryGlow: secondaryGlowSprite, // Reference to the secondary glow sprite
-      secondaryGlowFlashEndTime: 0, // Initialize secondary flash timer
-      type: "roam", // Store type again for easier access in update logic
-    }; //
-  } // End of createOrUpdateRoamStyleMarker
 
   // --- User Location Marker (remains mostly same) ---
   function updateUserLocationMarker(newUserLocation) {
@@ -2769,7 +2600,7 @@
   }
 
   // --- Animation Loop ---
-  // --- Animation Loop ---
+  // --- REVISED Animation Loop ---
   function animate(time) {
     if (!mounted) return;
     frameId = requestAnimationFrame(animate);
@@ -2779,8 +2610,10 @@
     lastAnimationTime = now;
 
     activityMarkers.forEach((markerObj) => {
-      if (markerObj.mixer) markerObj.mixer.update(deltaTime); // Update camp pulse mixer
+      // Update mixer only if it exists (for camp/sb scale pulse)
+      if (markerObj.mixer) markerObj.mixer.update(deltaTime);
 
+      // Get references to visual components
       const glowSprite = markerObj.group?.children.find(
         (c) =>
           c.isSprite &&
@@ -2789,12 +2622,12 @@
       );
       const secondaryGlow = markerObj.secondaryGlow;
       const activity = markerObj.activityData;
-      const lineMat = markerObj.lineMaterial; // --- Define Default Flash Colors (used if userData is missing) ---
+      const lineMat = markerObj.lineMaterial;
 
-      const defaultCampFlash = CAMP_FLASH_COLOR; // 0xff0000
-      const defaultSmartbombFlash = SMARTBOMB_FLASH_COLOR; // 0xff4444
-      const defaultRouteFlash = ROUTE_FLASH_COLOR; // 0xffffff
-      // --- Retrieve HEX colors from userData, providing type-specific defaults ---
+      // --- Retrieve Colors (Same as before) ---
+      const defaultCampFlash = CAMP_FLASH_COLOR;
+      const defaultSmartbombFlash = SMARTBOMB_FLASH_COLOR;
+      const defaultRouteFlash = ROUTE_FLASH_COLOR; // White
 
       const flashColorHex =
         markerObj.group?.userData?.flashColor ||
@@ -2804,144 +2637,145 @@
             ? defaultSmartbombFlash
             : defaultRouteFlash);
 
+      // Use the 'baseColor' stored in userData, which should be the BRIGHT static color
+      // if using the updated createOrUpdateMultiSystemRouteMarker
       const baseColorHex =
         markerObj.group?.userData?.baseColor ||
+        // Fallbacks (should ideally not be needed if userData is set correctly)
         (markerObj.type === "camp"
           ? CAMP_COLOR
           : markerObj.type === "smartbomb"
             ? SMARTBOMB_COLOR
             : markerObj.type === "roaming_camp"
-              ? ROAMING_CAMP_COLOR
+              ? BRIGHT_ROAMING_CAMP_COLOR // Use bright fallback
               : markerObj.type === "battle"
-                ? BATTLE_COLOR
-                : ROAM_COLOR); // Base defaults
-      // Retrieve base glow size if available (for scale animation)
+                ? BRIGHT_BATTLE_COLOR // Use bright fallback
+                : BRIGHT_ROAM_COLOR); // Use bright fallback
 
-      const baseGlowSize = markerObj.group?.userData?.baseGlowSize || 10; // Default size if not found
-      // --- Determine Secondary Glow base opacity ---
+      const baseGlowSize = markerObj.group?.userData?.baseGlowSize || 10;
 
-      let secondaryBaseOpacity = 0.1; // Default (roam)
-      if (markerObj.type === "smartbomb" || markerObj.type === "roaming_camp") {
-        secondaryBaseOpacity = 0.15;
-      } else if (markerObj.type === "battle") {
-        secondaryBaseOpacity = 0.2;
-      } // --- Handle Flashing State ---
+      // Determine Secondary Glow base opacity (using the static bright version)
+      let secondaryBaseOpacity = 0.8; // High base opacity for bright secondary glow
 
+      // --- Handle Flashing State (Same as before) ---
       if (markerObj.flashEndTime > 0 && markerObj.flashEndTime > now) {
-        // FLASH STATE - Glows: Explosion Fade-In / Lines: Color Change
-
-        // Calculate progress of the flash (0.0 at start, 1.0 at end)
+        // FLASH STATE ACTIVE
         const timeSinceFlashStart =
           FLASH_DURATION - (markerObj.flashEndTime - now);
         const flashProgress = Math.min(
           1.0,
           Math.max(0.0, timeSinceFlashStart / FLASH_DURATION)
-        ); // +++ CHANGE: Apply easing function for smoother animation +++
-        // Use ease-out cubic for a more "fluid" effect
+        );
+        const easedProgress = 1 - Math.pow(1 - flashProgress, 3); // Ease-out cubic
 
-        const easedProgress = 1 - Math.pow(1 - flashProgress, 3); // +++ END CHANGE +++
-        // Apply effect to Primary visual (Glow or Line)
+        // Apply flash effect to primary visual (Glow or Line)
         if (glowSprite) {
-          // Camp/SB Flash - Explosion Fade-In with Scale
+          // Camp/SB flash effect
           const normalGlowOpacity = Math.min(
             0.8,
             (activity?.probability || 0) / 100
           );
-
-          glowSprite.material.color.set(flashColorHex); // Set flash color
-          // +++ CHANGE: Use eased progress for opacity +++
-
-          glowSprite.material.opacity = normalGlowOpacity * easedProgress; // +++ END CHANGE +++
-          // +++ CHANGE: Add scale animation during flash +++
-          // Expand rapidly, then maybe settle slightly back. Adjust multiplier as needed.
-          const targetScale = baseGlowSize * (1 + easedProgress * 1.5); // Expand up to 2.5x base size
-          glowSprite.scale.set(targetScale, targetScale, targetScale); // Stop the base pulse mixer during flash to avoid conflict
+          glowSprite.material.color.set(flashColorHex);
+          glowSprite.material.opacity = normalGlowOpacity * easedProgress; // Fade in
+          const targetScale = baseGlowSize * (1 + easedProgress * 1.5); // Scale pulse
+          glowSprite.scale.set(targetScale, targetScale, targetScale);
+          // Stop base pulse mixer during flash
           if (
             markerObj.mixer &&
             markerObj.mixer.clipAction("pulse")?.isRunning()
           ) {
             markerObj.mixer.clipAction("pulse").stop();
-          } // +++ END CHANGE +++
+          }
         } else if (lineMat) {
-          // Route Line Flash - Simple Color Change (Keep existing behavior)
-          lineMat.color.set(flashColorHex); // Set flash color (White)
-          lineMat.opacity = 1.0; // Keep base opacity
-        } // Apply effect to secondary glow (Explosion Fade-In)
-
-        if (secondaryGlow) {
-          // +++ CHANGE: Use eased progress for secondary glow opacity +++
-          secondaryGlow.material.opacity = secondaryBaseOpacity * easedProgress; // +++ END CHANGE +++
+          // Route Line flash effect
+          lineMat.color.set(flashColorHex); // Set to flash color (usually white)
+          lineMat.opacity = 1.0; // Ensure full opacity during flash
         }
-      } // --- Handle Normal State / Pulse ---
+
+        // Apply flash effect to secondary glow (fade in opacity)
+        if (secondaryGlow) {
+          // Use the high base opacity defined above for the bright static version
+          secondaryGlow.material.opacity = secondaryBaseOpacity * easedProgress;
+        }
+      }
+      // --- Handle Normal State (NO Flash) ---
       else {
         // Reset flash timer if it just ended
         if (markerObj.flashEndTime > 0 && markerObj.flashEndTime <= now) {
-          markerObj.flashEndTime = 0; // +++ CHANGE: Restart pulse mixer if it was stopped for flash +++
+          markerObj.flashEndTime = 0;
+          // Restart pulse mixer for camps/sb if it was stopped
           if (glowSprite && markerObj.mixer) {
             const action = markerObj.mixer.clipAction("pulse");
             if (action && !action.isRunning()) {
-              action.reset().play(); // Reset and play the base pulse
-            } // Also reset scale to base immediately after flash ends
+              action.reset().play();
+            }
+            // Reset scale immediately after flash ends
             glowSprite.scale.set(baseGlowSize, baseGlowSize, baseGlowSize);
-          } // +++ END CHANGE +++
-        } // Apply normal state / pulse animation
+          }
+        }
 
+        // Apply normal state visuals
         if (glowSprite) {
-          // Camp/SB (Mixer handles scale pulse)
-          glowSprite.material.color.set(baseColorHex); // Set back to base color
+          // Camp/SB normal state
+          glowSprite.material.color.set(baseColorHex); // Base color
           glowSprite.material.opacity = Math.min(
             0.8,
             (activity?.probability || 0) / 100
           ); // Base opacity
-          // Base pulse scale is handled by the mixer if running
+          // Scale pulsing is handled by the mixer if running
         } else if (lineMat) {
-          // Route Line Pulse (Roam/RC/Battle)
+          // Route Line normal state (Roam/RC/Battle)
+          // --- COLOR PULSING LOGIC IS NOW COMMENTED OUT ---
+          // This allows the static bright color set during creation to show.
+          lineMat.color.set(baseColorHex); // Set static bright color
+          lineMat.opacity = 0.9; // Keep high opacity (matching creation)
 
-          // +++ CHANGE: Special bright pulse for Roaming Camps +++
-          if (markerObj.type === "roaming_camp") {
-            const pulseSpeed = 5; // Faster pulse for RC
-            const brightPulseColor = new THREE.Color(0xffffff); // Pulse to pure white
-            const pulseFactor = (Math.sin(now * pulseSpeed) + 1) / 2; // Oscillates 0-1 faster
+          /* --- OLD PULSING LOGIC (COMMENTED OUT) ---
+                if (markerObj.type === "roaming_camp") {
+                    const pulseSpeed = 5;
+                    const brightPulseColor = new THREE.Color(0xffffff);
+                    const pulseFactor = (Math.sin(now * pulseSpeed) + 1) / 2;
+                    lineMat.opacity = 1.0;
+                    lineMat.color.lerpColors(
+                        new THREE.Color(baseColorHex),
+                        brightPulseColor,
+                        pulseFactor * 1.0
+                    );
+                } else { // Roam/Battle
+                    const pulseSpeed = 3;
+                    const brightPulseColor = new THREE.Color(0xffffff);
+                    const pulseFactor = (Math.sin(now * pulseSpeed) + 1) / 2;
+                    lineMat.opacity = 1.0;
+                    lineMat.color.lerpColors(
+                        new THREE.Color(baseColorHex),
+                        brightPulseColor,
+                        pulseFactor * 0.7
+                    );
+                }
+                */ // --- END OF COMMENTED OUT PULSING LOGIC ---
+        }
 
-            lineMat.opacity = 1.0; // Always fully opaque
-            // Lerp color aggressively towards white
-
-            lineMat.color.lerpColors(
-              new THREE.Color(baseColorHex),
-              brightPulseColor,
-              pulseFactor * 1.0 // Make it reach full white intensity at peak
-            );
-          } else {
-            // --- Original Route Line PULSE color logic (for roam/battle) ---
-            const pulseSpeed = 3;
-            const brightPulseColor = new THREE.Color(0xffffff);
-            const pulseFactor = (Math.sin(now * pulseSpeed) + 1) / 2;
-
-            lineMat.opacity = 1.0; // Lerp color between base and slightly brighter for pulse effect
-
-            lineMat.color.lerpColors(
-              new THREE.Color(baseColorHex),
-              brightPulseColor,
-              pulseFactor * 0.7 // Less intense pulse than RC (adjust factor 0.0-1.0)
-            );
-          } // +++ END CHANGE +++
-        } // Pulse secondary glow opacity normally
-
+        // Apply normal state to secondary glow (allow slight pulse if desired)
         if (secondaryGlow) {
-          const pulseFactorSec = (Math.sin(now * 2.5) + 1) / 2; // Gentle pulse
+          // Pulse the high base opacity slightly for a subtle effect
+          const pulseFactorSec = (Math.sin(now * 2.5) + 1) / 2; // Gentle pulse 0-1
           secondaryGlow.material.opacity =
-            secondaryBaseOpacity + pulseFactorSec * 0.15; // Pulse base opacity slightly
+            secondaryBaseOpacity - pulseFactorSec * 0.1; // Pulse between 0.7 and 0.8
+          // Or just set static opacity:
+          // secondaryGlow.material.opacity = secondaryBaseOpacity; // e.g., 0.8 static
         }
       }
     }); // End loop through activityMarkers
+
     // Update user location marker animation
+    if (userLocationMarker.mixer) userLocationMarker.mixer.update(deltaTime);
 
-    if (userLocationMarker.mixer) userLocationMarker.mixer.update(deltaTime); // Ensure region labels remain visible
-
+    // Ensure region labels remain visible
     regionLabelCache.forEach((cacheEntry) => {
       if (cacheEntry.label) cacheEntry.label.visible = true;
-    }); // Update controls and render the scene
+    });
 
+    // Update controls and render the scene
     if (controls) controls.update();
     if (renderer && camera) renderer.render(scene, camera);
     if (labelRenderer && camera) labelRenderer.render(scene, camera);
