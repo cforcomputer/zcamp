@@ -1,4 +1,31 @@
-# EVE Content Finder
+# New goal:
+## Simplification (assume kills are not real time)
+### Delete
+  - Remove minigame
+  - Remove profiles
+  - Remove starmap with live updates
+  - Remove the content find filter
+  - Remove leaderboard
+  - Remove discord webhook alerts
+  - Remove redis (we only need one db)
+  - Remove active battles (5 min)
+  - Cloudflare blocking screen
+### Keep
+  - Roaming gangs
+  - Gate camps
+  - Pathfinding
+  - Salvage sites
+  - TTS alerts
+  - Postgresql (for future ML)
+  - Setting destination ingame
+### Add
+  - Improved pathfinding algo for destination maker (from paper: Breaking the Sorting Barrier for Directed Single-Source Shortest Paths) else Dijkstra’s
+  - TTS alert if disconnected
+  - TTS Action summary readout when jumping in system + toggle to turn off.
+  - ML model that remembers players who participated in a 99% positive gatecamp, gives higher rating later.
+  - Switch to nextjs for cleaner look, remove custom ui blocks(?) -- test for fun
+
+Model can still work if the people dying link their kb losses with no delay? ask. 
 
 ## Installation instructions (development server)
 
@@ -81,17 +108,8 @@ PUBLIC_URL="{full domain name} https://where.zcamp.lol"
 
 `node .\server\server.js`
 
-Tech stack:
 
-- LibSQL (Turso free tier)
-- NodeJS
-- Redis (serve and retrieve, free tier Redis cloud)
-- RedisQ (Zkillboard feed, from zKillboard)
-- Svelte frontend with shadn/UI
-- ThreeJS for visualizations
-- Coolify on Hetzner for deployment
-
-## Interesting usecases ( real time )
+### Other ideas (old)
 
 - Viewing fighter lossmails in real time to locate active ratting carriers
 - Finding belt ratters who die to mordus legion NPCs
@@ -111,19 +129,6 @@ Tech stack:
 - Find regions with highest daily probability of pvp engagements
 - Find systems with highest ratting activity by NPC deaths
 - Many more
-
-### Send alerts to your discord channel based on your filtered results
-
-- Only get alerts for what makes it through your filters
-- Easily copy and paste your single discord webhook into the app. It's like a discord bot with zero setup!
-- Also use it as a normal killfeed for your corporation, just make you keep it running in a browser tab.
-
-### Save your filter settings as preset profiles to your account
-
-- Pick up where you left off, or save many profiles to rapidly change your presets to hunt for different things.
-
-### TODO
-
 - Add additional options for the tts messages. Allow the user to enable roaming gang warnings, and high risk system warnings, also potentially nearby roam warnings (example, if a gang kills someone in your region). It should warn you of the location of the combat activity and tell you what the composition is of the activity if occurred in the last 3 minutes.
 - Give the "AI" voice a name, like TARA.
 - Reduce the time decay for smartbomb camps and highlight them as blue, allow the user to filter by smartbomb camps.
@@ -134,21 +139,6 @@ Tech stack:
 - Add a filter for gangs that is a dropdown to show currently active regions, user can also type it in to filter the dropdown to select what they want.
 - Add an option to send alerts if there is a gang in a specific region.
 - Exclude kills where the attacker is only a structure: https://zkillboard.com/kill/126528882/ https://zkillboard.com/related/30001159/202504232200/ 
-- --- Prob Calc for Activity: 30001159-Stargate (EX6-AO) (Current Class: roaming_camp) ---
-Ignoring secondary pod kill 126528730 for probability.
-Ignoring secondary pod kill 126528809 for probability.
-Ignoring secondary pod kill 126528882 for probability.
-Starting probability calculation with 3 relevant kills.
-Activity age (based on relevant kills): 22.7 minutes
-Threat ship score capped at 50% (was 122.0%)
-Threat ship contribution: +50.0%
-Raw probability (capped at 95%): 50.0%
-Final normalized probability: 50%
-https://zkillboard.com/related/30001252/202504232200/
-devils hill should not have counted in the total.
-
-#### Next thing
-
 - Model complex relationships for camps over 7 days. If a system is repeatedly marked as a camp, record the time of day it first appears, and record when it ends. Create a graph that shows when that system is likely to be camped, and then feed this into the probability calculation. If there is a camp there, it immediately jumps to 95% probability and takes longer to degrade (20 minutes instead of 10). It also has a special mark to show it is a regularly camped system.
 - The tables stores the  frequency of camps for the system over time, but we only fetch the last 7 days. This way we continue to accumulate data over time and can use it to visualize popular camp locations over time by specific groups (should also record the corp/alliance name of the campers and the ship types)
 - If recording the ship types (We want to show this anyways in the composition instead of probability debug), then we can use the composition to better model against other camps to increase accuracy.
