@@ -23,7 +23,8 @@
   - TTS alert if disconnected
   - TTS Action summary readout when jumping in system + toggle to turn off.
   - ML model that remembers players who participated in a 99% positive gatecamp, gives higher rating later.
-  - Switch to nextjs for cleaner look, remove custom ui blocks(?) -- test for fun
+  - Switch to shadecn for cleaner look, remove custom ui blocks(?) -- test for fun
+  - Switch to history table in Postgresql so last kms are saved after a restart/crash.
 
 Model can still work if the people dying link their kb losses with no delay? ask. 
 
