@@ -145,3 +145,25 @@ logs
 *.log
 
 key.json
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Node
+frontend/node_modules/
+frontend/dist/
+
+# Environment
+.env
+
+# Docker
+pgdata/
+
+# IDE
+.vscode/
+.idea/
+
+# personal notes
+CONFIDENTIAL_NOTES.md

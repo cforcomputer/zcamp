@@ -3,3 +3,4 @@ Dockerfile
 node_modules
 .env
 *db
+CONFIDENTIAL_NOTES.md

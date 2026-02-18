@@ -1,39 +1,19 @@
-FROM node:20-slim
+# Dockerfile.backend
+# Python backend for the zKill Activity Tracker
+FROM python:3.12-slim
 
-# Create app directory
-WORKDIR /usr/src/app
+WORKDIR /app
 
-# Install dependencies including PostgreSQL development files
-RUN apt-get update && apt-get install -y \
-    wget \
-    curl \
-    python3 \
-    make \
-    g++ \
-    libpq-dev \  
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
+# Install dependencies first (cached layer)
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy package files
-COPY package*.json ./
-COPY postcss.config.cjs ./
-COPY tailwind.config.js ./
-COPY rollup.config.mjs ./
+# Copy application source
+COPY server.py .
+COPY activity_manager.py .
 
-ENV NODE_PG_FORCE_NATIVE=0
-
-# Install ALL dependencies 
-RUN npm install
-
-# Copy application code
-COPY . .
-
-# Build the application
-RUN npm run build
-
-# Document the port the app uses
 EXPOSE 8080
 
-# Start the app
-# Replace the current CMD line
-CMD [ "node", "--no-warnings", "--experimental-specifier-resolution=node", "build/server.js" ]
+# Run with uvicorn; --reload for dev (mount volumes), remove for prod
+# PORT is read from .env via docker-compose env_file
+CMD ["sh", "-c", "uvicorn server:app --host 0.0.0.0 --port ${PORT:-8080} --reload"]
