@@ -126,8 +126,27 @@ function useWebSocket() {
           return;
         }
         const msg: WSMessage = JSON.parse(event.data);
-        if (msg.type === "activityUpdate" && Array.isArray(msg.data))
+        if (msg.type === "activityUpdate" && Array.isArray(msg.data)) {
+          console.log(
+            "[WS] Activity update:",
+            JSON.stringify(msg.data[0], null, 2),
+          );
+          if (msg.data[0]?.kills?.[0]) {
+            console.log(
+              "[WS] First kill shipCategories:",
+              JSON.stringify(msg.data[0].kills[0].shipCategories, null, 2),
+            );
+            console.log(
+              "[WS] First kill attackers sample:",
+              JSON.stringify(
+                msg.data[0].kills[0].killmail?.attackers?.slice(0, 3),
+                null,
+                2,
+              ),
+            );
+          }
           setActivities(msg.data);
+        }
       } catch {
         /* ignore parse errors */
       }
@@ -227,31 +246,45 @@ function getLastKillUrl(activity: ActivityData): string | null {
 
 // ─── Ship Composition ──────────────────────────────────────────────────────
 
-/** Build a ship type frequency map from all attackers across kills */
+/** Build a ship type frequency map from shipCategories data */
 function getShipComposition(
   activity: ActivityData,
-): { name: string; count: number }[] {
-  const ships: Record<number, { name: string; count: number }> = {};
+): { name: string; category: string; count: number }[] {
+  // Collect ship info from shipCategories across all kills
+  const shipInfo: Record<number, { name: string; category: string }> = {};
+  const shipCharacters: Record<number, Set<string>> = {};
 
   for (const kill of activity.kills) {
-    const attackerCats = kill.shipCategories?.attackers ?? {};
-    const attackers = kill.killmail?.attackers ?? [];
+    const attackerCats = kill.shipCategories?.attackers;
+    if (!Array.isArray(attackerCats)) continue;
 
-    for (const att of attackers) {
-      if (!att.character_id || !att.ship_type_id) continue;
-      const tid = att.ship_type_id;
-      if (tid === 670) continue; // Skip capsules
-
-      if (!ships[tid]) {
-        const catInfo = attackerCats[String(tid)];
-        const name = catInfo?.name ?? `Type ${tid}`;
-        ships[tid] = { name, count: 0 };
-      }
-      ships[tid].count++;
+    for (const cat of attackerCats as {
+      shipTypeId: number;
+      category: string;
+      name: string;
+      tier: string;
+    }[]) {
+      if (!cat.shipTypeId || !cat.name) continue;
+      shipInfo[cat.shipTypeId] = { name: cat.name, category: cat.category };
+      // Track per-kill presence as a proxy for unique pilots
+      if (!shipCharacters[cat.shipTypeId])
+        shipCharacters[cat.shipTypeId] = new Set();
+      shipCharacters[cat.shipTypeId].add(`${kill.killID}-${cat.shipTypeId}`);
     }
   }
 
-  return Object.values(ships).sort((a, b) => b.count - a.count);
+  // Use metrics.shipCounts if available (more accurate counts from backend)
+  const shipCounts = (activity.metrics as any)?.shipCounts as
+    | Record<string, number>
+    | undefined;
+
+  return Object.entries(shipInfo)
+    .map(([tid, info]) => ({
+      name: info.name,
+      category: info.category,
+      count: shipCounts?.[tid] ?? shipCharacters[Number(tid)]?.size ?? 1,
+    }))
+    .sort((a, b) => b.count - a.count);
 }
 
 // ─── Components ─────────────────────────────────────────────────────────────
@@ -351,17 +384,53 @@ function StatusDot({ status }: { status: string }) {
   );
 }
 
-/** Expandable ship composition popover */
+/** Category color for ship types */
+const CATEGORY_COLORS: Record<string, string> = {
+  frigate: "text-green-400",
+  destroyer: "text-green-300",
+  cruiser: "text-blue-400",
+  battlecruiser: "text-blue-300",
+  battleship: "text-purple-400",
+  capital: "text-red-400",
+  supercapital: "text-red-300",
+  industrial: "text-yellow-400",
+  mining: "text-yellow-300",
+};
+
+/** Expandable ship composition popover — renders above the table scroll area */
 function ShipCompRow({ activity }: { activity: ActivityData }) {
   const [open, setOpen] = useState(false);
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const popRef = useRef<HTMLDivElement>(null);
   const ships = useMemo(() => getShipComposition(activity), [activity]);
   const charCount =
     activity.metrics?.partyMetrics?.characters ?? activity.members?.length ?? 0;
   const corpCount = activity.composition?.numCorps ?? 0;
 
+  // Position the popup relative to the button using fixed positioning
+  const [pos, setPos] = useState({ top: 0, left: 0 });
+  useEffect(() => {
+    if (!open || !btnRef.current) return;
+    const rect = btnRef.current.getBoundingClientRect();
+    setPos({ top: rect.bottom + 4, left: rect.left });
+  }, [open]);
+
+  // Close on outside click
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (btnRef.current?.contains(e.target as Node)) return;
+      if (popRef.current?.contains(e.target as Node)) return;
+      setOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [open]);
+
   return (
-    <td className="px-3 py-3 relative">
+    <td className="px-3 py-3">
       <button
+        ref={btnRef}
         onClick={() => setOpen(!open)}
         className="text-left hover:text-gray-100 transition-colors group"
       >
@@ -373,26 +442,35 @@ function ShipCompRow({ activity }: { activity: ActivityData }) {
           <span className="text-xs text-gray-500">{corpCount} corps</span>
         </div>
       </button>
-      {open && ships.length > 0 && (
-        <div className="absolute z-20 top-full left-0 mt-1 bg-surface-2 border border-surface-3 rounded-lg shadow-xl p-3 min-w-[200px] max-h-[300px] overflow-y-auto">
+      {open && (
+        <div
+          ref={popRef}
+          className="fixed z-50 bg-surface-2 border border-surface-3 rounded-lg shadow-2xl p-3 min-w-[260px] max-h-[360px] overflow-y-auto"
+          style={{ top: pos.top, left: pos.left }}
+        >
           <div className="text-[10px] font-mono text-gray-500 uppercase tracking-wider mb-2">
-            Ship Composition
+            Ship Composition ({ships.reduce((s, x) => s + x.count, 0)} pilots)
           </div>
-          {ships.map((s, i) => (
-            <div
-              key={i}
-              className="flex items-center justify-between py-0.5 text-xs"
-            >
-              <span className="text-gray-300 font-mono truncate mr-3">
-                {s.name}
-              </span>
-              <span className="text-gray-500 font-mono flex-shrink-0">
-                ×{s.count}
-              </span>
+          {ships.length > 0 ? (
+            ships.map((s, i) => (
+              <div
+                key={i}
+                className="flex items-center justify-between py-0.5 text-xs gap-3"
+              >
+                <span
+                  className={`font-mono truncate ${CATEGORY_COLORS[s.category] ?? "text-gray-300"}`}
+                >
+                  {s.name}
+                </span>
+                <span className="text-gray-500 font-mono flex-shrink-0">
+                  ×{s.count}
+                </span>
+              </div>
+            ))
+          ) : (
+            <div className="text-xs text-gray-600 italic">
+              No ship data available
             </div>
-          ))}
-          {ships.length === 0 && (
-            <div className="text-xs text-gray-600">No ship data</div>
           )}
         </div>
       )}

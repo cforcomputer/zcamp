@@ -1,36 +1,17 @@
 # docker-compose.yml
 # Usage:
-#   Development:  docker compose up --build
-#   Production:   docker compose --profile prod up --build
+#   docker compose up --build
 #
 # Uses an EXTERNAL PostgreSQL server (configured in .env).
-# No local database container needed.
+# Single container: Python backend serves the built React frontend.
 
 services:
-  # ─── Python Backend ───────────────────────────────────────────────────
-  backend:
+  zcamp:
     build:
       context: .
-      dockerfile: Dockerfile.backend
+      dockerfile: Dockerfile
+    image: wrighttech/zcamp:latest
     restart: unless-stopped
     ports:
       - "${PORT:-8080}:${PORT:-8080}"
     env_file: .env
-    volumes:
-      # Mount source for live reload in development
-      - ./server.py:/app/server.py
-      - ./activity_manager.py:/app/activity_manager.py
-
-  # ─── React Frontend (dev server with Vite) ────────────────────────────
-  frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile.frontend
-    restart: unless-stopped
-    ports:
-      - "5173:5173"
-    volumes:
-      - ./frontend/src:/app/src
-      - ./frontend/index.html:/app/index.html
-    depends_on:
-      - backend

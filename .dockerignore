@@ -1,6 +1,20 @@
-.git
-Dockerfile
-node_modules
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Node
+frontend/node_modules/
+frontend/dist/
+
+# Environment and config
 .env
-*db
-CONFIDENTIAL_NOTES.md
+.git/
+.gitignore
+
+# Development files
+*.md
+reset_database.py
+docker-compose.yml
+Dockerfile.backend
+frontend/Dockerfile.frontend

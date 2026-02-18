@@ -889,20 +889,23 @@ class ActivityManager:
         chars: set = set()
         corps: set = set()
         allis: set = set()
-        ship_counts: dict[int, int] = {}
+        ship_chars: dict[int, set] = {}  # ship_type_id → set of unique character_ids
 
         for kill in kills:
             km = kill.get("killmail", {})
             for a in km.get("attackers", []):
-                if a.get("character_id"):
-                    chars.add(a["character_id"])
+                cid = a.get("character_id")
+                if cid:
+                    chars.add(cid)
                 if a.get("corporation_id"):
                     corps.add(a["corporation_id"])
                 if a.get("alliance_id"):
                     allis.add(a["alliance_id"])
                 st = a.get("ship_type_id")
-                if st:
-                    ship_counts[st] = ship_counts.get(st, 0) + 1
+                if st and cid:
+                    if st not in ship_chars:
+                        ship_chars[st] = set()
+                    ship_chars[st].add(cid)
             v = km.get("victim", {})
             if v.get("character_id"):
                 chars.add(v["character_id"])
@@ -910,6 +913,8 @@ class ActivityManager:
                 corps.add(v["corporation_id"])
             if v.get("alliance_id"):
                 allis.add(v["alliance_id"])
+
+        ship_counts = {st: len(cids) for st, cids in ship_chars.items()}
 
         total_val = sum(k.get("zkb", {}).get("totalValue", 0) for k in kills)
         pod_count = sum(
