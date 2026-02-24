@@ -1,5 +1,4 @@
-@import url("https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,100..1000;1,9..40,100..1000&family=JetBrains+Mono:wght@300;400;500;600&display=swap");
-
+@import url("https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600&display=swap");
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -8,24 +7,71 @@
     * {
         box-sizing: border-box;
     }
-
     body {
-        @apply bg-surface-0 text-gray-200 font-sans antialiased;
+        @apply bg-surface-0 text-gray-200 antialiased;
+        font-family: "JetBrains Mono", "Fira Code", monospace;
         margin: 0;
         min-height: 100vh;
+        font-size: 11px;
+        line-height: 1.4;
     }
-
     ::-webkit-scrollbar {
-        width: 6px;
-        height: 6px;
+        width: 4px;
+        height: 4px;
     }
     ::-webkit-scrollbar-track {
-        @apply bg-surface-1;
+        background: #0a0a0f;
     }
     ::-webkit-scrollbar-thumb {
-        @apply bg-surface-3 rounded-full;
+        background: #222233;
+        border-radius: 2px;
     }
     ::-webkit-scrollbar-thumb:hover {
-        @apply bg-gray-600;
+        background: #334455;
+    }
+}
+
+@layer components {
+    /* ─── Terminal table cells ─── */
+    .tc-header {
+        @apply text-[9px] font-mono font-medium uppercase tracking-widest;
+        color: #445566;
+        padding: 4px 8px;
+        white-space: nowrap;
+        border-bottom: 1px solid #1a1a26;
+    }
+    .tc-cell {
+        padding: 3px 8px;
+        white-space: nowrap;
+        vertical-align: middle;
+    }
+    .tc-row {
+        border-bottom: 1px solid #11111a;
+        transition: background 0.1s;
+    }
+    .tc-row:hover {
+        background: rgba(255, 255, 255, 0.015);
+    }
+
+    /* ─── Filter buttons (dense pill style) ─── */
+    .tc-filter-btn {
+        @apply text-[9px] font-mono uppercase tracking-wider;
+        padding: 2px 6px;
+        color: #556677;
+        background: transparent;
+        border: 1px solid transparent;
+        border-radius: 2px;
+        cursor: pointer;
+        transition: all 0.15s;
+        white-space: nowrap;
+    }
+    .tc-filter-btn:hover {
+        color: #99aabb;
+        background: rgba(255, 255, 255, 0.03);
+    }
+    .tc-filter-active {
+        color: #ccd0dd !important;
+        background: #1a1a26 !important;
+        border-color: #222233 !important;
     }
 }

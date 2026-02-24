@@ -29,12 +29,11 @@ from typing import Any
 
 import asyncpg
 import httpx
+from activity_manager import ActivityManager
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from starlette.websockets import WebSocketState
-
-from activity_manager import ActivityManager
 
 # ─── Logging ────────────────────────────────────────────────────────────────
 
@@ -165,6 +164,11 @@ async def lifespan(app: FastAPI):
     # 5. Activity manager
     activity_manager = ActivityManager()
 
+    # Give the activity manager access to system connectivity for adjacency checks
+    from activity_manager import set_system_connectivity
+
+    set_system_connectivity(system_connectivity)
+
     # 6. Background tasks
     poll_task = asyncio.create_task(poll_redisq_loop())
     update_task = asyncio.create_task(activity_update_loop())
@@ -251,6 +255,113 @@ async def init_database():
                 celestialIndex  INTEGER,
                 orbitIndex      INTEGER
             );
+
+            -- ═══════════════════════════════════════════════════════════
+            -- Phase 1: Activity Timeline & Data Collection for ML
+            -- ═══════════════════════════════════════════════════════════
+
+            -- Complete activity sessions (camps, roams, battles) with full metadata
+            -- This is the primary training data source for future ML models
+            CREATE TABLE IF NOT EXISTS activity_sessions (
+                id                  SERIAL PRIMARY KEY,
+                session_id          TEXT UNIQUE NOT NULL,
+                classification      TEXT NOT NULL,
+                verified_class      TEXT,             -- human-corrected label (Phase 2)
+                confidence          REAL DEFAULT 0,   -- algorithm confidence 0-1
+                annotation_note     TEXT,             -- free-text note from annotator
+                annotated_at        TIMESTAMPTZ,      -- when the annotation was made
+                split_points        JSONB,            -- [{kill_index, classification, note}] for split annotations
+
+                -- Spatial context
+                start_system_id     INTEGER,
+                start_system_name   TEXT,
+                start_region        TEXT,
+                end_system_id       INTEGER,
+                end_system_name     TEXT,
+                end_region          TEXT,
+                systems_visited     INTEGER DEFAULT 1,
+                system_path         JSONB,            -- ordered list of {id, name, region, time}
+
+                -- Temporal context
+                start_time          TIMESTAMPTZ NOT NULL,
+                end_time            TIMESTAMPTZ NOT NULL,
+                duration_minutes    REAL DEFAULT 0,
+                day_of_week         SMALLINT,         -- 0=Mon, 6=Sun
+                hour_of_day         SMALLINT,         -- 0-23 UTC
+
+                -- Activity metrics
+                kill_count          INTEGER DEFAULT 0,
+                pod_kills           INTEGER DEFAULT 0,
+                total_value         DOUBLE PRECISION DEFAULT 0,
+                avg_value_per_kill  DOUBLE PRECISION DEFAULT 0,
+                max_probability     INTEGER DEFAULT 0,
+
+                -- Group composition
+                member_ids          JSONB,            -- array of character IDs
+                member_count        INTEGER DEFAULT 0,
+                corp_ids            JSONB,            -- array of corp IDs
+                corp_count          INTEGER DEFAULT 0,
+                alliance_ids        JSONB,            -- array of alliance IDs
+                alliance_count      INTEGER DEFAULT 0,
+
+                -- Ship composition snapshot
+                ship_composition    JSONB,            -- {shipTypeId: {name, category, count}}
+                victim_types        JSONB,            -- {shipTypeId: {name, category, count}}
+
+                -- Location details
+                stargate_name       TEXT,
+                nearest_celestial   TEXT,
+
+                -- Transition context (what happened before/after this session)
+                prev_session_id     TEXT,
+                next_session_id     TEXT,
+                prev_classification TEXT,
+
+                -- Raw kill IDs for reference
+                kill_ids            JSONB,            -- array of killmail IDs
+
+                created_at          TIMESTAMPTZ DEFAULT NOW()
+            );
+            CREATE INDEX IF NOT EXISTS idx_sessions_time ON activity_sessions(start_time);
+            CREATE INDEX IF NOT EXISTS idx_sessions_class ON activity_sessions(classification);
+            CREATE INDEX IF NOT EXISTS idx_sessions_region ON activity_sessions(start_region);
+
+            -- Classification transitions within a session
+            -- Tracks when an activity changes type (camp→roam→camp)
+            CREATE TABLE IF NOT EXISTS session_transitions (
+                id              SERIAL PRIMARY KEY,
+                session_id      TEXT NOT NULL REFERENCES activity_sessions(session_id),
+                from_class      TEXT NOT NULL,
+                to_class        TEXT NOT NULL,
+                transition_time TIMESTAMPTZ NOT NULL,
+                system_id       INTEGER,
+                system_name     TEXT,
+                kill_id         BIGINT,             -- the kill that triggered the transition
+                created_at      TIMESTAMPTZ DEFAULT NOW()
+            );
+            CREATE INDEX IF NOT EXISTS idx_transitions_session ON session_transitions(session_id);
+
+            -- Per-player activity involvement
+            -- Enables player behavioral profiling (Phase 3)
+            CREATE TABLE IF NOT EXISTS player_activity (
+                id              SERIAL PRIMARY KEY,
+                character_id    BIGINT NOT NULL,
+                session_id      TEXT NOT NULL REFERENCES activity_sessions(session_id),
+                classification  TEXT NOT NULL,
+                ship_type_ids   JSONB,              -- ships this player used
+                system_ids      JSONB,              -- systems this player was seen in
+                region          TEXT,
+                start_time      TIMESTAMPTZ NOT NULL,
+                end_time        TIMESTAMPTZ NOT NULL,
+                duration_minutes REAL DEFAULT 0,
+                kill_count      INTEGER DEFAULT 0,  -- kills this player participated in
+                day_of_week     SMALLINT,
+                hour_of_day     SMALLINT,
+                created_at      TIMESTAMPTZ DEFAULT NOW()
+            );
+            CREATE INDEX IF NOT EXISTS idx_player_activity_char ON player_activity(character_id);
+            CREATE INDEX IF NOT EXISTS idx_player_activity_time ON player_activity(start_time);
+            CREATE INDEX IF NOT EXISTS idx_player_activity_char_time ON player_activity(character_id, start_time);
         """)
     log.info("Database schema initialized")
 
@@ -1020,9 +1131,265 @@ async def activity_update_loop():
 
 
 async def save_expired_activity(activity: dict):
-    """Persist a completed activity to the database."""
+    """
+    Persist a completed crew session to the database.
+
+    `activity` is the serialized crew dict from _serialize_crew(), which
+    maintains backwards compatibility with the old format while adding
+    crew-specific fields.
+    """
     try:
+        start_ts = activity.get("startTime") or activity.get("firstKillTime", 0)
+        end_ts = activity.get("lastActivity", 0) or start_ts
+        start_dt = (
+            datetime.fromtimestamp(start_ts / 1000, tz=timezone.utc)
+            if start_ts
+            else datetime.now(timezone.utc)
+        )
+        end_dt = (
+            datetime.fromtimestamp(end_ts / 1000, tz=timezone.utc)
+            if end_ts
+            else start_dt
+        )
+        duration_min = (end_ts - start_ts) / 60_000 if end_ts > start_ts else 0
+
+        systems = activity.get("systems", [])
+        first_sys = systems[0] if systems else {}
+        last_sys = systems[-1] if systems else {}
+
+        members = activity.get("members", [])
+        if isinstance(members, set):
+            members = list(members)
+
+        # ── Build ship composition from kills ──
+        ship_comp = {}
+        ship_counts = activity.get("metrics", {}).get("shipCounts", {})
+        for kill in activity.get("kills", []):
+            for cat in (kill.get("shipCategories") or {}).get("attackers", []):
+                sid = str(cat.get("shipTypeId", ""))
+                if sid and sid not in ship_comp:
+                    ship_comp[sid] = {
+                        "name": cat.get("name"),
+                        "category": cat.get("category"),
+                        "count": ship_counts.get(sid, 1),
+                    }
+
+        # ── Build victim type summary ──
+        victim_types: dict = {}
+        for kill in activity.get("kills", []):
+            vic = (kill.get("shipCategories") or {}).get("victim")
+            if isinstance(vic, dict):
+                vt = str(
+                    kill.get("killmail", {}).get("victim", {}).get("ship_type_id", "")
+                )
+                if vt and vt not in victim_types:
+                    victim_types[vt] = {
+                        "name": vic.get("name"),
+                        "category": vic.get("category"),
+                        "count": 0,
+                    }
+                if vt in victim_types:
+                    victim_types[vt]["count"] += 1
+
+        # ── Corp and alliance IDs ──
+        comp = activity.get("composition", {})
+        # In crew-centric format, these come from member tracking
+        corp_ids = (
+            list(
+                {
+                    m.get("corp_id") or m
+                    for m in (activity.get("members", []))
+                    if isinstance(m, dict) and m.get("corp_id")
+                }
+            )
+            if isinstance(
+                activity.get("members", [None])[0] if activity.get("members") else None,
+                dict,
+            )
+            else []
+        )
+
+        # Fallback: extract from kills if not available from members
+        if not corp_ids:
+            corp_set: set[int] = set()
+            alliance_set: set[int] = set()
+            for kill in activity.get("kills", []):
+                for a in kill.get("killmail", {}).get("attackers", []):
+                    if a.get("corporation_id"):
+                        corp_set.add(a["corporation_id"])
+                    if a.get("alliance_id"):
+                        alliance_set.add(a["alliance_id"])
+            corp_ids = list(corp_set)
+            alliance_ids = list(alliance_set)
+        else:
+            alliance_ids = []
+
+        kill_ids = [
+            k.get("killID") for k in activity.get("kills", []) if k.get("killID")
+        ]
+        session_id = activity["id"]
+
+        # ── Crew-specific fields ──
+        anchor_corp_id = activity.get("anchorCorpId")
+        anchor_alliance_id = activity.get("anchorAllianceId")
+        active_members_at_end = activity.get("activeMembers", 0)
+        idle_members_at_end = activity.get("idleMembers", 0)
+        departed_members_at_end = activity.get("departedMembers", 0)
+        prev_session_id = activity.get("prev_session_id")
+
+        # Build member states snapshot for ML training
+        # This captures WHO was active/idle/departed when the session ended
+        member_states = {}
+        per_member_ships = activity.get("perMemberShips", {})
+        for mid in members:
+            mid_str = str(mid)
+            member_states[mid_str] = {
+                "ships": per_member_ships.get(mid_str, []),
+            }
+
         async with db_pool.acquire() as conn:
+            # ── Save to activity_sessions ──
+            await conn.execute(
+                """
+                INSERT INTO activity_sessions (
+                    session_id, classification, confidence,
+                    start_system_id, start_system_name, start_region,
+                    end_system_id, end_system_name, end_region,
+                    systems_visited, system_path,
+                    start_time, end_time, duration_minutes, day_of_week, hour_of_day,
+                    kill_count, pod_kills, total_value, avg_value_per_kill, max_probability,
+                    member_ids, member_count, corp_ids, corp_count, alliance_ids, alliance_count,
+                    ship_composition, victim_types, stargate_name, nearest_celestial,
+                    kill_ids,
+                    anchor_corp_id, anchor_alliance_id,
+                    active_members_at_end, idle_members_at_end, departed_members_at_end,
+                    member_states, prev_session_id
+                )
+                VALUES (
+                    $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,
+                    $11,$12,$13,$14,$15,$16,$17,$18,$19,$20,
+                    $21,$22,$23,$24,$25,$26,$27,$28,$29,$30,
+                    $31,$32,$33,$34,$35,$36,$37,$38,$39
+                )
+                ON CONFLICT (session_id) DO NOTHING
+                """,
+                session_id,  # $1
+                activity.get("classification", "unknown"),  # $2
+                activity.get("maxProbability", 0) / 100.0,  # $3
+                first_sys.get("id"),  # $4
+                first_sys.get("name"),  # $5
+                first_sys.get("region"),  # $6
+                last_sys.get("id"),  # $7
+                last_sys.get("name"),  # $8
+                last_sys.get("region"),  # $9
+                activity.get("systemsVisited", 1),  # $10
+                json.dumps(systems),  # $11
+                start_dt,  # $12
+                end_dt,  # $13
+                duration_min,  # $14
+                start_dt.weekday(),  # $15
+                start_dt.hour,  # $16
+                len(activity.get("kills", [])),  # $17
+                activity.get("metrics", {}).get("podKills", 0),  # $18
+                activity.get("totalValue", 0),  # $19
+                activity.get("metrics", {}).get("avgValuePerKill", 0),  # $20
+                activity.get("maxProbability", 0),  # $21
+                json.dumps(members),  # $22
+                len(members),  # $23
+                json.dumps(corp_ids),  # $24
+                len(corp_ids),  # $25
+                json.dumps(alliance_ids),  # $26
+                len(alliance_ids),  # $27
+                json.dumps(ship_comp),  # $28
+                json.dumps(victim_types),  # $29
+                activity.get("stargateName"),  # $30
+                None,  # $31 nearest_celestial
+                json.dumps(kill_ids),  # $32
+                anchor_corp_id,  # $33
+                anchor_alliance_id,  # $34
+                active_members_at_end,  # $35
+                idle_members_at_end,  # $36
+                departed_members_at_end,  # $37
+                json.dumps(member_states),  # $38
+                prev_session_id,  # $39
+            )
+
+            # ── Save transitions ──
+            for tr in activity.get("transitions", []):
+                tr_time = datetime.fromtimestamp(tr["time"] / 1000, tz=timezone.utc)
+                await conn.execute(
+                    """
+                    INSERT INTO session_transitions (
+                        session_id, from_class, to_class, transition_time,
+                        system_id, system_name, kill_id
+                    )
+                    VALUES ($1, $2, $3, $4, $5, $6, $7)
+                    """,
+                    session_id,
+                    tr["from"],
+                    tr["to"],
+                    tr_time,
+                    tr.get("systemId"),
+                    tr.get("systemName"),
+                    tr.get("killId"),
+                )
+
+            # ── Save per-player activity ──
+            for cid in members:
+                cid_str = str(cid)
+                ship_ids = per_member_ships.get(cid_str, [])
+                if isinstance(ship_ids, set):
+                    ship_ids = list(ship_ids)
+
+                # Count kills this player participated in
+                player_kills = 0
+                player_systems: set[int] = set()
+                for kill in activity.get("kills", []):
+                    km = kill.get("killmail", {})
+                    for a in km.get("attackers", []):
+                        if a.get("character_id") == cid:
+                            player_kills += 1
+                            sys_id = km.get("solar_system_id")
+                            if sys_id:
+                                player_systems.add(sys_id)
+                            break
+
+                await conn.execute(
+                    """
+                    INSERT INTO player_activity (
+                        character_id, session_id, classification, ship_type_ids,
+                        system_ids, region, start_time, end_time, duration_minutes,
+                        kill_count, day_of_week, hour_of_day
+                    )
+                    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+                    """,
+                    cid,
+                    session_id,
+                    activity.get("classification", "unknown"),
+                    json.dumps(ship_ids),
+                    json.dumps(list(player_systems)),
+                    last_sys.get("region"),
+                    start_dt,
+                    end_dt,
+                    duration_min,
+                    player_kills,
+                    start_dt.weekday(),
+                    start_dt.hour,
+                )
+
+            # ── Link previous session if this crew replaced another ──
+            if prev_session_id:
+                await conn.execute(
+                    """
+                    UPDATE activity_sessions
+                    SET next_session_id = $1
+                    WHERE session_id = $2
+                    """,
+                    session_id,
+                    prev_session_id,
+                )
+
+            # ── Legacy expired_activities table ──
             await conn.execute(
                 """
                 INSERT INTO expired_activities
@@ -1031,35 +1398,43 @@ async def save_expired_activity(activity: dict):
                      total_value, kill_count, details)
                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
                 ON CONFLICT (activity_id) DO NOTHING
-            """,
-                activity["id"],
+                """,
+                session_id,
                 activity.get("classification", "unknown"),
                 activity.get("systemId"),
                 activity.get("stargateName"),
                 activity.get("maxProbability", 0),
-                datetime.fromtimestamp(
-                    activity.get("startTime", 0) / 1000, tz=timezone.utc
-                )
-                if activity.get("startTime")
-                else None,
-                datetime.fromtimestamp(
-                    activity.get("lastActivity", 0) / 1000, tz=timezone.utc
-                )
-                if activity.get("lastActivity")
-                else None,
+                start_dt,
+                end_dt,
                 datetime.now(timezone.utc),
                 activity.get("totalValue", 0),
                 len(activity.get("kills", [])),
                 json.dumps(
                     {
-                        "members": list(activity.get("members", set())),
-                        "systems": activity.get("systems", []),
+                        "members": members,
+                        "systems": systems,
                         "systemsVisited": activity.get("systemsVisited", 1),
+                        "anchorCorpId": anchor_corp_id,
+                        "anchorAllianceId": anchor_alliance_id,
+                        "activeAtEnd": active_members_at_end,
+                        "idleAtEnd": idle_members_at_end,
+                        "departedAtEnd": departed_members_at_end,
                     }
                 ),
             )
+
+        log.info(
+            f"Saved session {session_id}: {activity.get('classification')} "
+            f"({len(members)} members [{active_members_at_end}A/{idle_members_at_end}I/{departed_members_at_end}D], "
+            f"{len(activity.get('kills', []))} kills, "
+            f"{len(activity.get('transitions', []))} transitions"
+            f"{f', prev={prev_session_id}' if prev_session_id else ''})"
+        )
     except Exception as e:
-        log.error(f"Failed to save expired activity {activity.get('id')}: {e}")
+        log.error(f"Failed to save session {activity.get('id')}: {e}")
+        import traceback
+
+        traceback.print_exc()
 
 
 # ─── Cleanup Loop ──────────────────────────────────────────────────────────
@@ -1189,6 +1564,446 @@ async def health():
         "map_systems": len(map_cache_by_system),
         "ship_types_cached": len(ship_type_cache),
     }
+
+
+# ─── Phase 1: Timeline & Session APIs ───────────────────────────────────────
+
+
+@app.get("/api/sessions")
+async def get_sessions(
+    limit: int = 50,
+    offset: int = 0,
+    classification: str | None = None,
+    region: str | None = None,
+    hours: int = 24,
+):
+    """Get recent activity sessions for timeline display."""
+    try:
+        async with db_pool.acquire() as conn:
+            conditions = ["start_time > NOW() - ($1 || ' hours')::interval"]
+            params: list = [str(hours)]
+            idx = 2
+
+            if classification:
+                conditions.append(f"classification = ${idx}")
+                params.append(classification)
+                idx += 1
+            if region:
+                conditions.append(f"(start_region = ${idx} OR end_region = ${idx})")
+                params.append(region)
+                idx += 1
+
+            where = " AND ".join(conditions)
+            params.extend([limit, offset])
+
+            rows = await conn.fetch(
+                f"""
+                SELECT session_id, classification, verified_class, confidence,
+                       start_system_name, start_region, end_system_name, end_region,
+                       systems_visited, system_path,
+                       start_time, end_time, duration_minutes, day_of_week, hour_of_day,
+                       kill_count, pod_kills, total_value, max_probability,
+                       member_count, corp_count, alliance_count,
+                       ship_composition, victim_types, stargate_name,
+                       kill_ids, member_ids
+                FROM activity_sessions
+                WHERE {where}
+                ORDER BY start_time DESC
+                LIMIT ${idx} OFFSET ${idx + 1}
+            """,
+                *params,
+            )
+
+            return [dict(r) for r in rows]
+    except Exception as e:
+        log.error(f"Error fetching sessions: {e}")
+        return []
+
+
+@app.get("/api/sessions/{session_id}")
+async def get_session_detail(session_id: str):
+    """Get a single session with transitions."""
+    try:
+        async with db_pool.acquire() as conn:
+            session = await conn.fetchrow(
+                "SELECT * FROM activity_sessions WHERE session_id = $1", session_id
+            )
+            if not session:
+                return {"error": "Session not found"}
+
+            transitions = await conn.fetch(
+                "SELECT * FROM session_transitions WHERE session_id = $1 ORDER BY transition_time",
+                session_id,
+            )
+
+            return {
+                "session": dict(session),
+                "transitions": [dict(t) for t in transitions],
+            }
+    except Exception as e:
+        log.error(f"Error fetching session detail: {e}")
+        return {"error": str(e)}
+
+
+@app.get("/api/sessions/stats/summary")
+async def get_session_stats(hours: int = 24):
+    """Aggregated session statistics for the timeline header."""
+    try:
+        async with db_pool.acquire() as conn:
+            stats = await conn.fetchrow(
+                """
+                SELECT
+                    COUNT(*) as total_sessions,
+                    COUNT(*) FILTER (WHERE classification = 'camp') as camps,
+                    COUNT(*) FILTER (WHERE classification = 'smartbomb') as smartbombs,
+                    COUNT(*) FILTER (WHERE classification = 'roam') as roams,
+                    COUNT(*) FILTER (WHERE classification = 'battle') as battles,
+                    COUNT(*) FILTER (WHERE classification = 'roaming_camp') as roaming_camps,
+                    COALESCE(SUM(kill_count), 0) as total_kills,
+                    COALESCE(SUM(total_value), 0) as total_value,
+                    COALESCE(AVG(duration_minutes), 0) as avg_duration,
+                    COUNT(DISTINCT start_region) as regions_active
+                FROM activity_sessions
+                WHERE start_time > NOW() - ($1 || ' hours')::interval
+            """,
+                str(hours),
+            )
+            return dict(stats) if stats else {}
+    except Exception as e:
+        log.error(f"Error fetching session stats: {e}")
+        return {}
+
+
+@app.get("/api/player/{character_id}/profile")
+async def get_player_profile(character_id: int, days: int = 30):
+    """Player behavioral profile: activity patterns, preferred ships/regions/times."""
+    try:
+        async with db_pool.acquire() as conn:
+            # Activity breakdown
+            activity_rows = await conn.fetch(
+                """
+                SELECT classification, COUNT(*) as count,
+                       SUM(kill_count) as total_kills,
+                       AVG(duration_minutes) as avg_duration
+                FROM player_activity
+                WHERE character_id = $1
+                  AND start_time > NOW() - ($2 || ' days')::interval
+                GROUP BY classification
+                ORDER BY count DESC
+            """,
+                character_id,
+                str(days),
+            )
+
+            # Time-of-day distribution
+            hourly = await conn.fetch(
+                """
+                SELECT hour_of_day, COUNT(*) as count
+                FROM player_activity
+                WHERE character_id = $1
+                  AND start_time > NOW() - ($2 || ' days')::interval
+                GROUP BY hour_of_day
+                ORDER BY hour_of_day
+            """,
+                character_id,
+                str(days),
+            )
+
+            # Day-of-week distribution
+            daily = await conn.fetch(
+                """
+                SELECT day_of_week, COUNT(*) as count
+                FROM player_activity
+                WHERE character_id = $1
+                  AND start_time > NOW() - ($2 || ' days')::interval
+                GROUP BY day_of_week
+                ORDER BY day_of_week
+            """,
+                character_id,
+                str(days),
+            )
+
+            # Region preferences
+            regions = await conn.fetch(
+                """
+                SELECT region, COUNT(*) as count
+                FROM player_activity
+                WHERE character_id = $1
+                  AND start_time > NOW() - ($2 || ' days')::interval
+                  AND region IS NOT NULL
+                GROUP BY region
+                ORDER BY count DESC
+                LIMIT 10
+            """,
+                character_id,
+                str(days),
+            )
+
+            # Recent sessions
+            recent = await conn.fetch(
+                """
+                SELECT pa.session_id, pa.classification, pa.start_time, pa.end_time,
+                       pa.duration_minutes, pa.kill_count, pa.region, pa.ship_type_ids,
+                       s.total_value, s.member_count
+                FROM player_activity pa
+                JOIN activity_sessions s ON s.session_id = pa.session_id
+                WHERE pa.character_id = $1
+                  AND pa.start_time > NOW() - ($2 || ' days')::interval
+                ORDER BY pa.start_time DESC
+                LIMIT 20
+            """,
+                character_id,
+                str(days),
+            )
+
+            return {
+                "characterId": character_id,
+                "activityBreakdown": [dict(r) for r in activity_rows],
+                "hourlyDistribution": [dict(r) for r in hourly],
+                "dailyDistribution": [dict(r) for r in daily],
+                "regionPreferences": [dict(r) for r in regions],
+                "recentSessions": [dict(r) for r in recent],
+            }
+    except Exception as e:
+        log.error(f"Error fetching player profile: {e}")
+        return {"error": str(e)}
+
+
+@app.get("/api/regions/activity")
+async def get_region_activity(hours: int = 24):
+    """Active gangs/camps per region — foundation for the regions page."""
+    try:
+        # Combine live activities + recent sessions
+        live = activity_manager.get_active_activities() if activity_manager else []
+        region_live: dict = {}
+        for act in live:
+            region = (act.get("lastSystem") or {}).get("region") or "Unknown"
+            if region not in region_live:
+                region_live[region] = {
+                    "camps": 0,
+                    "roams": 0,
+                    "battles": 0,
+                    "other": 0,
+                    "totalValue": 0,
+                }
+            cls = act.get("classification", "activity")
+            if cls in ("camp", "smartbomb", "roaming_camp"):
+                region_live[region]["camps"] += 1
+            elif cls == "roam":
+                region_live[region]["roams"] += 1
+            elif cls == "battle":
+                region_live[region]["battles"] += 1
+            else:
+                region_live[region]["other"] += 1
+            region_live[region]["totalValue"] += act.get("totalValue", 0)
+
+        async with db_pool.acquire() as conn:
+            # Recent sessions per region
+            rows = await conn.fetch(
+                """
+                SELECT COALESCE(end_region, start_region, 'Unknown') as region,
+                       classification, COUNT(*) as count,
+                       SUM(total_value) as total_value,
+                       SUM(kill_count) as kill_count
+                FROM activity_sessions
+                WHERE start_time > NOW() - ($1 || ' hours')::interval
+                GROUP BY COALESCE(end_region, start_region, 'Unknown'), classification
+                ORDER BY count DESC
+            """,
+                str(hours),
+            )
+
+        region_history: dict = {}
+        for r in rows:
+            reg = r["region"]
+            if reg not in region_history:
+                region_history[reg] = {
+                    "sessions": 0,
+                    "kills": 0,
+                    "value": 0,
+                    "byType": {},
+                }
+            region_history[reg]["sessions"] += r["count"]
+            region_history[reg]["kills"] += r["kill_count"] or 0
+            region_history[reg]["value"] += r["total_value"] or 0
+            region_history[reg]["byType"][r["classification"]] = r["count"]
+
+        return {"live": region_live, "history": region_history}
+    except Exception as e:
+        log.error(f"Error fetching region activity: {e}")
+        return {"live": {}, "history": {}}
+
+
+# ─── Annotation API (Phase 2: Label Correction) ─────────────────────────────
+
+
+@app.get("/api/annotations/pending")
+async def get_pending_annotations(limit: int = 50, offset: int = 0):
+    """Get sessions that haven't been annotated yet, ordered by recency."""
+    try:
+        async with db_pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT session_id, classification, verified_class, confidence,
+                       annotation_note, annotated_at, split_points,
+                       start_system_name, start_region, end_system_name, end_region,
+                       systems_visited, system_path,
+                       start_time, end_time, duration_minutes, day_of_week, hour_of_day,
+                       kill_count, pod_kills, total_value, avg_value_per_kill, max_probability,
+                       member_ids, member_count, corp_ids, corp_count, alliance_ids, alliance_count,
+                       ship_composition, victim_types, stargate_name, kill_ids
+                FROM activity_sessions
+                WHERE verified_class IS NULL
+                ORDER BY start_time DESC
+                LIMIT $1 OFFSET $2
+            """,
+                limit,
+                offset,
+            )
+            return [dict(r) for r in rows]
+    except Exception as e:
+        log.error(f"Error fetching pending annotations: {e}")
+        return []
+
+
+@app.get("/api/annotations/all")
+async def get_all_annotations(
+    limit: int = 200, offset: int = 0, annotated_only: bool = False
+):
+    """Get all sessions with optional filter for annotated-only."""
+    try:
+        async with db_pool.acquire() as conn:
+            where = "WHERE verified_class IS NOT NULL" if annotated_only else ""
+            rows = await conn.fetch(
+                f"""
+                SELECT session_id, classification, verified_class, confidence,
+                       annotation_note, annotated_at, split_points,
+                       start_system_name, start_region, end_system_name, end_region,
+                       systems_visited, system_path,
+                       start_time, end_time, duration_minutes, day_of_week, hour_of_day,
+                       kill_count, pod_kills, total_value, avg_value_per_kill, max_probability,
+                       member_ids, member_count, corp_ids, corp_count, alliance_ids, alliance_count,
+                       ship_composition, victim_types, stargate_name, kill_ids
+                FROM activity_sessions
+                {where}
+                ORDER BY start_time DESC
+                LIMIT $1 OFFSET $2
+            """,
+                limit,
+                offset,
+            )
+            return [dict(r) for r in rows]
+    except Exception as e:
+        log.error(f"Error fetching annotations: {e}")
+        return []
+
+
+@app.post("/api/annotations/{session_id}/verify")
+async def verify_session(session_id: str, body: dict = {}):
+    """Confirm or correct a session's classification."""
+    verified = body.get("verified_class")
+    note = body.get("note", "")
+    if not verified:
+        return {"error": "verified_class is required"}
+    try:
+        async with db_pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE activity_sessions
+                SET verified_class = $1, annotation_note = $2, annotated_at = NOW()
+                WHERE session_id = $3
+            """,
+                verified,
+                note,
+                session_id,
+            )
+            # Also update player_activity classification if corrected
+            if verified:
+                await conn.execute(
+                    """
+                    UPDATE player_activity SET classification = $1 WHERE session_id = $2
+                """,
+                    verified,
+                    session_id,
+                )
+        return {"ok": True, "session_id": session_id, "verified_class": verified}
+    except Exception as e:
+        log.error(f"Error verifying session {session_id}: {e}")
+        return {"error": str(e)}
+
+
+@app.post("/api/annotations/{session_id}/split")
+async def split_session(session_id: str, body: dict = {}):
+    """Mark split points within a session where the activity type changed."""
+    split_points = body.get("split_points", [])
+    note = body.get("note", "")
+    try:
+        async with db_pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE activity_sessions
+                SET split_points = $1, annotation_note = $2, annotated_at = NOW()
+                WHERE session_id = $3
+            """,
+                json.dumps(split_points),
+                note,
+                session_id,
+            )
+        return {"ok": True, "session_id": session_id}
+    except Exception as e:
+        log.error(f"Error splitting session {session_id}: {e}")
+        return {"error": str(e)}
+
+
+@app.get("/api/annotations/export")
+async def export_training_data():
+    """Export all annotated sessions as training data for ML."""
+    try:
+        async with db_pool.acquire() as conn:
+            sessions = await conn.fetch("""
+                SELECT s.*, array_agg(DISTINCT t.from_class || '→' || t.to_class) FILTER (WHERE t.id IS NOT NULL) as transition_labels
+                FROM activity_sessions s
+                LEFT JOIN session_transitions t ON t.session_id = s.session_id
+                WHERE s.verified_class IS NOT NULL
+                GROUP BY s.id
+                ORDER BY s.start_time
+            """)
+            players = await conn.fetch("""
+                SELECT pa.*
+                FROM player_activity pa
+                JOIN activity_sessions s ON s.session_id = pa.session_id
+                WHERE s.verified_class IS NOT NULL
+                ORDER BY pa.start_time
+            """)
+        return {
+            "sessions": [dict(r) for r in sessions],
+            "player_activities": [dict(r) for r in players],
+            "export_time": datetime.now(timezone.utc).isoformat(),
+            "total_annotated": len(sessions),
+        }
+    except Exception as e:
+        log.error(f"Error exporting training data: {e}")
+        return {"error": str(e)}
+
+
+@app.get("/api/annotations/stats")
+async def annotation_stats():
+    """Get annotation progress statistics."""
+    try:
+        async with db_pool.acquire() as conn:
+            stats = await conn.fetchrow("""
+                SELECT
+                    COUNT(*) as total_sessions,
+                    COUNT(*) FILTER (WHERE verified_class IS NOT NULL) as annotated,
+                    COUNT(*) FILTER (WHERE verified_class IS NULL) as pending,
+                    COUNT(*) FILTER (WHERE verified_class != classification) as corrections,
+                    COUNT(*) FILTER (WHERE split_points IS NOT NULL AND split_points != 'null') as splits
+                FROM activity_sessions
+            """)
+        return dict(stats) if stats else {}
+    except Exception as e:
+        log.error(f"Error fetching annotation stats: {e}")
+        return {}
 
 
 # ─── Static File Serving (production: serves the built React app) ──────────

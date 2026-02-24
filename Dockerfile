@@ -31,6 +31,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy backend source
 COPY backend/server.py .
 COPY backend/activity_manager.py .
+COPY backend/constants.py .
 
 # Copy built frontend from stage 1
 # server.py serves this via StaticFiles(directory="frontend/dist", html=True)
