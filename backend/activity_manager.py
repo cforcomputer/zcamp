@@ -681,7 +681,7 @@ class ActivityManager:
         if self._has_smartbombs([killmail]):
             crew.has_smartbombs = True
 
-        # 4. Compute probability FIRST (classification depends on it)
+        # 4. Compute camp probability FIRST (classification depends on it)
         crew.probability = self._calculate_camp_probability(crew)
 
         # 5. Derive classification from behavior + probability
@@ -696,6 +696,10 @@ class ActivityManager:
                 system_name,
                 killmail.get("killID"),
             )
+
+        # 6. Now compute full confidence score based on actual classification
+        #    Camp types keep the camp probability; non-camp types get their own score.
+        crew.probability = self._calculate_confidence(crew)
 
     def update_activities(self) -> bool:
         """
@@ -734,11 +738,12 @@ class ActivityManager:
                 )
                 continue
 
-            # Update probability (decay over time)
+            # Update probability (decay over time) and classification
             prev_prob = crew.probability
             prev_class = crew.classification
             crew.probability = self._calculate_camp_probability(crew)
             crew.classification = self._derive_classification(crew)
+            crew.probability = self._calculate_confidence(crew)
 
             if crew.probability != prev_prob or crew.classification != prev_class:
                 changed = True
@@ -1492,6 +1497,237 @@ class ActivityManager:
 
         crew.max_probability = max(crew.max_probability, pct)
         return pct
+
+    def _calculate_confidence(self, crew: Crew) -> int:
+        """
+        Calculate confidence in the current classification (0-95%).
+
+        For camp types (camp, solo_camp, smartbomb, roaming_camp), this
+        uses the existing camp probability which is already computed.
+
+        For non-camp types, confidence is derived from signals appropriate
+        to that classification:
+
+          roam/gang:    kill count, system spread, attacker consistency,
+                        member count, temporal spread
+          battle:       participant count, multi-side engagement, kill volume
+          solo_roam:    kill count, system spread, temporal spread
+          activity:     always low (it's the "unknown" bucket)
+
+        In the future, the ML model will replace this with its own
+        confidence value for every activity.
+        """
+        cls = crew.classification
+
+        # Camp types: already have camp probability
+        if cls in ("camp", "solo_camp", "smartbomb", "roaming_camp"):
+            return crew.probability  # already computed by _calculate_camp_probability
+
+        now = _now_ms()
+        kills = crew.kills
+        n_kills = len(kills)
+        n_systems = len(crew.visited_system_ids)
+        active_members = [
+            m for m in crew.members.values() if m.status in ("active", "idle")
+        ]
+        n_members = len(active_members)
+
+        if n_kills == 0:
+            return 0
+
+        minutes_since = (now - crew.last_kill_at) / 60_000
+        base = 0.0
+
+        if cls == "battle":
+            # ── Battle confidence ──
+            # High confidence when many participants from multiple corps/alliances
+            # are engaged in a short time window
+            n_corps = len({m.corp_id for m in active_members if m.corp_id})
+            n_alliances = len({m.alliance_id for m in active_members if m.alliance_id})
+
+            # Participant count is the primary signal (threshold is 40)
+            if n_members >= 80:
+                base += 0.50
+            elif n_members >= 40:
+                base += 0.35
+            elif n_members >= 20:
+                base += 0.20
+
+            # Multiple corps/alliances = more likely a real battle
+            if n_alliances >= 3:
+                base += 0.20
+            elif n_alliances >= 2:
+                base += 0.10
+
+            # Kill volume
+            if n_kills >= 20:
+                base += 0.20
+            elif n_kills >= 10:
+                base += 0.15
+            elif n_kills >= 5:
+                base += 0.10
+            elif n_kills >= 2:
+                base += 0.05
+
+        elif cls == "roam":
+            # ── Gang/roam confidence ──
+            # Confidence grows with: kill count, system spread, member count,
+            # attacker consistency across kills, temporal spread
+
+            # Kill count — more kills = more certain it's a real gang
+            if n_kills >= 8:
+                base += 0.25
+            elif n_kills >= 5:
+                base += 0.20
+            elif n_kills >= 3:
+                base += 0.15
+            elif n_kills >= 2:
+                base += 0.10
+            else:
+                base += 0.05
+
+            # System spread — gangs move
+            if n_systems >= 5:
+                base += 0.20
+            elif n_systems >= 3:
+                base += 0.15
+            elif n_systems >= 2:
+                base += 0.10
+
+            # Member count — bigger gang = more certain
+            if n_members >= 10:
+                base += 0.15
+            elif n_members >= 5:
+                base += 0.10
+            elif n_members >= 3:
+                base += 0.08
+            elif n_members >= 2:
+                base += 0.05
+
+            # Attacker consistency — same people on multiple kills
+            if n_kills >= 2:
+                consistency = self._measure_attacker_consistency(crew)
+                base += min(0.25, consistency * 0.25)
+
+            # Temporal spread — kills spread over time (not a single burst)
+            if n_kills >= 2:
+                times = sorted([_kill_time_ms(k) for k in kills])
+                span_min = (times[-1] - times[0]) / 60_000
+                if span_min >= 30:
+                    base += 0.10
+                elif span_min >= 10:
+                    base += 0.05
+
+        elif cls == "solo_roam":
+            # ── Solo roam confidence ──
+            # A single solo kill is low confidence; multiple solo kills
+            # across systems is clearly a solo roam
+
+            if n_kills >= 5:
+                base += 0.25
+            elif n_kills >= 3:
+                base += 0.20
+            elif n_kills >= 2:
+                base += 0.15
+            else:
+                base += 0.05  # 1 kill = very uncertain
+
+            # System spread
+            if n_systems >= 4:
+                base += 0.20
+            elif n_systems >= 2:
+                base += 0.15
+
+            # Temporal spread
+            if n_kills >= 2:
+                times = sorted([_kill_time_ms(k) for k in kills])
+                span_min = (times[-1] - times[0]) / 60_000
+                if span_min >= 20:
+                    base += 0.15
+                elif span_min >= 5:
+                    base += 0.08
+
+            # Consistent single attacker across kills
+            if n_kills >= 2:
+                attackers_per_kill = []
+                for k in kills:
+                    aids = {
+                        a.get("character_id")
+                        for a in k.get("killmail", {}).get("attackers", [])
+                        if a.get("character_id")
+                    }
+                    attackers_per_kill.append(aids)
+                # Check if same person across kills
+                if all(len(s) == 1 for s in attackers_per_kill):
+                    all_chars = set()
+                    for s in attackers_per_kill:
+                        all_chars |= s
+                    if len(all_chars) == 1:
+                        base += 0.20  # definitely one person roaming
+
+        else:
+            # ── Activity (fallback) confidence ──
+            # Always low — this is the "we don't know" bucket
+            # 1 kill = minimal confidence, more kills = slightly higher
+            # but never high (if we were confident, it would be something else)
+            if n_kills >= 3:
+                base += 0.10
+            elif n_kills >= 2:
+                base += 0.05
+            else:
+                base += 0.02
+
+        # ── Decay (applies to all non-camp types) ──
+        decay_start_min = DECAY_START_MS / 60_000
+        if minutes_since > decay_start_min:
+            decay_pct = min(1.0, (minutes_since - decay_start_min) * DECAY_RATE_PER_MIN)
+            base *= 1 - decay_pct
+
+        # ── Cap and threshold ──
+        base = max(0.0, min(OVERALL_PROB_CAP, base))
+        pct = round(base * 100)
+        if pct < MIN_PROB_THRESHOLD:
+            return 0
+
+        crew.max_probability = max(crew.max_probability, pct)
+        return pct
+
+    def _measure_attacker_consistency(self, crew: Crew) -> float:
+        """
+        Measure how consistent the attacker composition is across kills.
+        Returns 0.0 (no overlap) to 1.0 (same people on every kill).
+        """
+        kills = crew.kills
+        if len(kills) < 2:
+            return 0.0
+
+        # Get attacker sets for last N kills
+        recent = kills[-6:] if len(kills) > 6 else kills
+        attacker_sets = []
+        for k in recent:
+            aids = {
+                a.get("character_id")
+                for a in k.get("killmail", {}).get("attackers", [])
+                if a.get("character_id") and a.get("ship_type_id") != CAPSULE_ID
+            }
+            if aids:
+                attacker_sets.append(aids)
+
+        if len(attacker_sets) < 2:
+            return 0.0
+
+        # Average pairwise Jaccard similarity
+        total_sim = 0.0
+        pairs = 0
+        for i in range(len(attacker_sets)):
+            for j in range(i + 1, len(attacker_sets)):
+                intersection = len(attacker_sets[i] & attacker_sets[j])
+                union = len(attacker_sets[i] | attacker_sets[j])
+                if union > 0:
+                    total_sim += intersection / union
+                    pairs += 1
+
+        return total_sim / pairs if pairs > 0 else 0.0
 
     # ── Detection Helpers ───────────────────────────────────────────────
 

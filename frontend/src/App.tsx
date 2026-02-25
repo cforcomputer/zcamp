@@ -450,15 +450,33 @@ function FlashCell({
   );
 }
 
-function ProbCell({ value, delta }: { value: number; delta: number }) {
+function ProbCell({
+  value,
+  delta,
+  classification,
+}: {
+  value: number;
+  delta: number;
+  classification?: string;
+}) {
   const w = Math.min(100, value);
-  const color =
-    value >= 70
+  const isCamp = ["camp", "solo_camp", "smartbomb", "roaming_camp"].includes(
+    classification ?? "",
+  );
+  const color = isCamp
+    ? value >= 70
       ? "#ff4444"
       : value >= 40
         ? "#ff8844"
         : value >= 15
           ? "#ffcc33"
+          : "#334455"
+    : value >= 60
+      ? "#22aaff"
+      : value >= 30
+        ? "#4488aa"
+        : value >= 10
+          ? "#446688"
           : "#334455";
   return (
     <div className="flex items-center gap-1" style={{ minWidth: 110 }}>
@@ -629,6 +647,7 @@ function SystemsPopover({ activity }: { activity: ActivityData }) {
           ? "#ffcc33"
           : "#ff4444";
   const secLabel = (s: number | null) => (s == null ? "?" : s.toFixed(1));
+  const lastIdx = systems.length - 1;
 
   if (!isMulti)
     return (
@@ -671,22 +690,36 @@ function SystemsPopover({ activity }: { activity: ActivityData }) {
           >
             ROUTE &mdash; {systems.length} systems
           </div>
-          {systems.map((s, i) => (
-            <div key={i} className="flex items-center gap-2 py-0.5">
-              <span
-                className="w-[28px] text-right flex-shrink-0 font-semibold"
-                style={{ color: secColor(s.security) }}
-              >
-                {secLabel(s.security)}
-              </span>
-              <span className="text-gray-200 truncate flex-1">{s.name}</span>
-              {s.region && (
-                <span className="text-gray-600 flex-shrink-0 truncate max-w-[100px]">
-                  {s.region}
+          {systems.map((s, i) => {
+            const isCurrent = i === lastIdx;
+            const label = isCurrent ? "c" : String(i + 1);
+            return (
+              <div key={i} className="flex items-center gap-2 py-0.5">
+                <span
+                  className="w-[14px] text-right flex-shrink-0 text-[9px]"
+                  style={{ color: isCurrent ? "#22aaff" : "#445566" }}
+                >
+                  {label}
                 </span>
-              )}
-            </div>
-          ))}
+                <span
+                  className="w-[28px] text-right flex-shrink-0 font-semibold"
+                  style={{ color: secColor(s.security) }}
+                >
+                  {secLabel(s.security)}
+                </span>
+                <span
+                  className={`truncate flex-1 ${isCurrent ? "text-gray-100" : "text-gray-200"}`}
+                >
+                  {s.name}
+                </span>
+                {s.region && (
+                  <span className="text-gray-600 flex-shrink-0 truncate max-w-[100px]">
+                    {s.region}
+                  </span>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
     </td>
@@ -868,7 +901,7 @@ function LivePage({ activities }: { activities: ActivityData[] }) {
               <th className="tc-header text-left">LOC</th>
               <SH field="kills" label="K" right />
               <SH field="value" label="ISK" right />
-              <SH field="probability" label="PROB" />
+              <SH field="probability" label="CONF" />
               <th className="tc-header text-left">COMP</th>
               <SH field="duration" label="DUR" right />
               <SH field="lastKill" label="LAST" right />
@@ -924,7 +957,11 @@ function LivePage({ activities }: { activities: ActivityData[] }) {
                     </div>
                   </FlashCell>
                   <FlashCell flash={fl.prob}>
-                    <ProbCell value={a.probability} delta={d.prob} />
+                    <ProbCell
+                      value={a.probability}
+                      delta={d.prob}
+                      classification={a.classification}
+                    />
                   </FlashCell>
                   <ShipPopover activity={a} />
                   <td className="tc-cell text-right">
