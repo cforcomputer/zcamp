@@ -15,6 +15,21 @@ Key changes from previous version:
   - Duration reflects crew lifetime, not location lifetime
   - Crew dissolution detection (members logging off)
 
+Crew merging:
+  When a killmail's attackers match members from TWO OR MORE existing
+  crews, this reveals they are actually one fleet.  The smaller crew(s)
+  are absorbed into the largest:
+    - Kill histories are merged (deduplicated, chronologically sorted)
+    - Member states are combined (keeping most recent data)
+    - Spatial history, gate-kill counts, and flags are unified
+    - A merge transition is recorded for lineage tracking
+    - The donor crew's ID is linked as prev_session_id
+
+Solo camp detection:
+  A solo interdictor or heavy interdictor killing at a stargate is
+  classified as "solo_camp" rather than "solo_roam".  This uses the
+  same probability pipeline as normal camps.
+
 Patch notes (gate-kill ratio fix):
   - Pod kills that follow a ship kill from the same victim are no longer
     counted in the gate-kill ratio (neither numerator nor denominator).
@@ -58,6 +73,22 @@ from constants import (
 )
 
 log = logging.getLogger("activity_manager")
+
+# ─── Interdictor / Heavy Interdictor Ship IDs ──────────────────────────────
+# Used for solo_camp detection: a single dictor/hictor killing on a gate
+# is almost certainly a camp, not a solo roam.
+INTERDICTOR_SHIP_IDS: frozenset[int] = frozenset(
+    {
+        22456,  # Sabre
+        22464,  # Flycatcher
+        22452,  # Heretic
+        22460,  # Eris
+        12013,  # Broadsword (HIC)
+        11995,  # Onyx (HIC)
+        12021,  # Phobos (HIC)
+        12017,  # Devoter (HIC)
+    }
+)
 
 # ─── Crew-Centric Constants ────────────────────────────────────────────────
 
@@ -556,7 +587,7 @@ class ActivityManager:
             timeout = (
                 CAMP_TIMEOUT_MS
                 if crew.classification
-                in ("camp", "smartbomb", "roaming_camp", "battle")
+                in ("camp", "solo_camp", "smartbomb", "roaming_camp", "battle")
                 else ROAM_TIMEOUT_MS
             )
             if now - crew.last_activity_at <= timeout:
@@ -570,10 +601,11 @@ class ActivityManager:
         Main entry point: process a new killmail.
 
         1. Extract attacker identifiers
-        2. Find matching crew (or create new one)
-        3. Update crew state
-        4. Derive classification from behavior
-        5. Update metrics and probability
+        2. Find ALL matching crews (not just best)
+        3. If multiple crews match → merge them (fleet revealed)
+        4. Update crew state
+        5. Derive classification from behavior
+        6. Update metrics and probability
         """
         now = _now_ms()
         kill_time = _kill_time_ms(killmail)
@@ -590,16 +622,37 @@ class ActivityManager:
         if not attacker_ids:
             return  # NPC kill or no valid player attackers
 
-        # 2. Find matching crew
-        crew_id, confidence = self._find_matching_crew(
+        # 2. Find ALL matching crews
+        matches = self._find_all_matching_crews(
             attacker_ids, corp_ids, alliance_ids, system_id, kill_time
         )
 
-        if crew_id and crew_id in self._crews:
-            crew = self._crews[crew_id]
-            log.debug(f"Kill matched crew {crew_id} (confidence={confidence:.2f})")
+        if len(matches) >= 2:
+            # ── MERGE: this kill bridges two or more separate crews ──
+            # Sort by kill count descending — largest crew absorbs the others
+            matches.sort(key=lambda m: len(self._crews[m[0]].kills), reverse=True)
+            primary_id = matches[0][0]
+            primary = self._crews[primary_id]
+
+            for donor_id, _ in matches[1:]:
+                donor = self._crews.get(donor_id)
+                if donor:
+                    self._merge_crews(primary, donor, kill_time, system_name)
+                    del self._crews[donor_id]
+
+            crew = primary
+            log.info(
+                f"Merged {len(matches)} crews into {crew.id} "
+                f"({crew.total_member_count} members, {len(crew.kills)} kills) "
+                f"via kill in {system_name}"
+            )
+
+        elif len(matches) == 1:
+            crew = self._crews[matches[0][0]]
+            log.debug(f"Kill matched crew {crew.id} (confidence={matches[0][1]:.2f})")
+
         else:
-            # Create new crew
+            # No match — create new crew
             crew = Crew(
                 crew_id=_generate_crew_id(),
                 system_id=system_id,
@@ -657,7 +710,7 @@ class ActivityManager:
             timeout = (
                 CAMP_TIMEOUT_MS
                 if crew.classification
-                in ("camp", "smartbomb", "roaming_camp", "battle")
+                in ("camp", "solo_camp", "smartbomb", "roaming_camp", "battle")
                 else ROAM_TIMEOUT_MS
             )
 
@@ -776,6 +829,198 @@ class ActivityManager:
             return best_id, best_score
 
         return None, 0.0
+
+    def _find_all_matching_crews(
+        self,
+        attacker_ids: set[int],
+        corp_ids: set[int],
+        alliance_ids: set[int],
+        system_id: int,
+        kill_time: int,
+    ) -> list[tuple[str, float]]:
+        """
+        Find ALL crews that overlap with this kill's attackers above threshold.
+
+        This is the key to merge detection: if a kill has attackers from
+        Crew-A and Crew-B, both will appear in the result, signaling
+        that the two crews are actually one fleet.
+
+        Returns list of (crew_id, score) sorted by score descending.
+        """
+        results: list[tuple[str, float]] = []
+
+        for cid, crew in self._crews.items():
+            score = 0.0
+
+            # 1. Character overlap
+            active_member_ids = {
+                mid for mid, m in crew.members.items() if m.status in ("active", "idle")
+            }
+            if active_member_ids and attacker_ids:
+                overlap = active_member_ids & attacker_ids
+                if overlap:
+                    char_score = len(overlap) / len(attacker_ids)
+                    score += char_score * CHAR_OVERLAP_WEIGHT
+                    if len(active_member_ids) > 0:
+                        reverse_score = len(overlap) / len(active_member_ids)
+                        score += reverse_score * 0.10
+
+            # 2. Corp/alliance match
+            if crew.anchor_alliance_id and alliance_ids:
+                if crew.anchor_alliance_id in alliance_ids:
+                    score += CORP_ALLIANCE_WEIGHT
+                elif crew.anchor_corp_ids & corp_ids:
+                    score += CORP_ALLIANCE_WEIGHT * 0.60
+            elif crew.anchor_corp_id and corp_ids:
+                if crew.anchor_corp_id in corp_ids:
+                    score += CORP_ALLIANCE_WEIGHT * 0.80
+
+            # 3. Spatial proximity
+            if crew.current_system_id == system_id:
+                score += SPATIAL_WEIGHT
+            elif _is_adjacent_system(crew.current_system_id, system_id):
+                score += SPATIAL_WEIGHT * 0.50
+
+            # 4. Temporal recency
+            time_since = kill_time - crew.last_kill_at
+            if time_since < 10 * 60_000:
+                score += TEMPORAL_WEIGHT
+            elif time_since < 30 * 60_000:
+                score += TEMPORAL_WEIGHT * 0.50
+            elif time_since > 120 * 60_000:
+                score -= 0.15
+
+            if score >= MATCH_THRESHOLD:
+                results.append((cid, score))
+
+        results.sort(key=lambda x: -x[1])
+        return results
+
+    def _merge_crews(
+        self,
+        primary: Crew,
+        donor: Crew,
+        merge_time: int,
+        merge_system_name: str,
+    ):
+        """
+        Absorb `donor` crew into `primary` crew.
+
+        - Donor's kills are merged (deduplicated by killID) in chronological order
+        - Donor's members are absorbed (keeping the more recent state)
+        - Spatial history is merged
+        - Classification flags (smartbombs, gate kills) are combined
+        - A merge transition is recorded
+
+        After this call, the caller should delete the donor from self._crews.
+        """
+        # ── Record the merge as a transition on the primary crew ──
+        prev_class = primary.classification
+        primary.transitions.append(
+            {
+                "from": f"merge({donor.id}:{donor.classification})",
+                "to": primary.classification,
+                "time": merge_time,
+                "systemId": primary.current_system_id,
+                "systemName": merge_system_name,
+                "killId": None,
+            }
+        )
+
+        # ── Merge kills (dedup by killID, sort chronologically) ──
+        existing_kill_ids = {k.get("killID") for k in primary.kills}
+        new_kills = [k for k in donor.kills if k.get("killID") not in existing_kill_ids]
+        if new_kills:
+            primary.kills.extend(new_kills)
+            primary.kills.sort(key=lambda k: _kill_time_ms(k))
+            # Recalculate total value from merged kill list
+            primary.total_value = sum(
+                k.get("zkb", {}).get("totalValue", 0) for k in primary.kills
+            )
+
+        # ── Merge members ──
+        for cid, donor_m in donor.members.items():
+            if cid in primary.members:
+                # Keep whichever has the more recent last_seen
+                pm = primary.members[cid]
+                if donor_m.last_seen > pm.last_seen:
+                    pm.last_seen = donor_m.last_seen
+                    pm.status = donor_m.status
+                pm.kill_count += donor_m.kill_count
+                pm.ship_type_ids |= donor_m.ship_type_ids
+                pm.first_seen = min(pm.first_seen, donor_m.first_seen)
+                if donor_m.corp_id:
+                    pm.corp_id = donor_m.corp_id
+                if donor_m.alliance_id:
+                    pm.alliance_id = donor_m.alliance_id
+            else:
+                primary.members[cid] = donor_m
+
+        # ── Merge per-member ships ──
+        for cid_str, ships in donor.per_member_ships.items():
+            if cid_str in primary.per_member_ships:
+                primary.per_member_ships[cid_str] |= ships
+            else:
+                primary.per_member_ships[cid_str] = set(ships)
+
+        # ── Merge spatial history ──
+        existing_sys_times = {(s["id"], s["time"]) for s in primary.systems_visited}
+        for sv in donor.systems_visited:
+            if (sv["id"], sv["time"]) not in existing_sys_times:
+                primary.systems_visited.append(sv)
+        primary.systems_visited.sort(key=lambda s: s["time"])
+        primary.visited_system_ids |= donor.visited_system_ids
+
+        # ── Merge flags ──
+        if donor.has_smartbombs:
+            primary.has_smartbombs = True
+        primary.gate_kill_count += donor.gate_kill_count
+        if donor.stargate_name and not primary.stargate_name:
+            primary.stargate_name = donor.stargate_name
+
+        # ── Merge timing ──
+        primary.created_at = min(primary.created_at, donor.created_at)
+        primary.last_kill_at = max(primary.last_kill_at, donor.last_kill_at)
+        primary.last_activity_at = max(primary.last_activity_at, donor.last_activity_at)
+        primary.max_probability = max(primary.max_probability, donor.max_probability)
+
+        # ── Merge transitions ──
+        primary.transitions.extend(donor.transitions)
+        primary.transitions.sort(key=lambda t: t.get("time", 0))
+
+        # ── Link donor as previous session (for DB lineage) ──
+        if not primary.prev_session_id and len(donor.kills) >= CREW_MIN_KILLS_TO_SAVE:
+            primary.prev_session_id = donor.id
+
+        # ── Re-derive gate ratio after merge ──
+        # Recount effective gate kills from full merged kill list
+        primary.gate_kill_count = 0
+        for k in primary.kills:
+            if self._is_gate_camp_kill(k):
+                victim_ship = (
+                    k.get("killmail", {}).get("victim", {}).get("ship_type_id")
+                )
+                is_pod = victim_ship == CAPSULE_ID
+                if not is_pod:
+                    primary.gate_kill_count += 1
+                else:
+                    earlier = [
+                        ek
+                        for ek in primary.kills
+                        if _kill_time_ms(ek) < _kill_time_ms(k)
+                    ]
+                    if not _is_followup_pod(k, earlier):
+                        primary.gate_kill_count += 1
+
+        effective_kills = self._count_effective_kills(primary)
+        if effective_kills > 0 and primary.gate_kill_count < (effective_kills / 2):
+            primary.stargate_name = None
+
+        log.info(
+            f"Merged crew {donor.id} ({len(donor.kills)} kills, "
+            f"{donor.total_member_count} members) into {primary.id} "
+            f"→ {primary.total_member_count} members, {len(primary.kills)} kills"
+        )
 
     # ── Kill Processing ─────────────────────────────────────────────────
 
@@ -958,17 +1203,20 @@ class ActivityManager:
         Derive what the crew is doing from behavioral signals.
 
         Key rule: "camp" REQUIRES kills at a stargate (or station).
-        Kills at moons, belts, or random celestials are never camps —
-        they're activity, roams, or battles.
+        Smartbomb detection is specifically for smartbomb CAMPS at gates.
+
+        Pod kills where the victim had no earlier ship loss from the same
+        character are a strong gate camp signal (e.g. bubbled gate).
 
         Priority:
-          1. smartbomb    — smartbomb weapons detected + at a gate
+          1. smartbomb    — smartbomb weapons detected at a gate
           2. battle       — many participants from multiple sides
-          3. solo_roam    — every kill had exactly 1 player attacker
-          4. roaming_camp — moved systems but now camping at a gate
-          5. camp         — stationary at a gate with camp signals
-          6. roam         — moving between systems
-          7. activity     — fallback (includes moon/belt kills)
+          3. solo_camp    — solo interdictor/HIC killing at a gate
+          4. solo_roam    — every kill had exactly 1 player attacker (not camping)
+          5. roaming_camp — moved systems but now camping at a gate
+          6. camp         — stationary at a gate with camp signals
+          7. roam         — moving between systems
+          8. activity     — fallback (includes moon/belt kills)
         """
         prob = crew.probability
         systems_count = len(crew.visited_system_ids)
@@ -978,8 +1226,9 @@ class ActivityManager:
 
         # Gate check: a camp requires majority of kills at a stargate
         is_at_gate = bool(crew.stargate_name)
+        is_solo = bool(crew.kills and all(_attacker_count(k) == 1 for k in crew.kills))
 
-        # 1. Smartbomb — must be at a gate
+        # 1. Smartbomb CAMP — requires gate context (this detects SB camps, not random SB use)
         if crew.has_smartbombs and is_at_gate and self._is_stationary_recent(crew):
             return "smartbomb"
 
@@ -987,26 +1236,39 @@ class ActivityManager:
         if participants >= BATTLE_PARTICIPANT_THRESHOLD:
             return "battle"
 
-        # 3. Solo roam
-        if crew.kills and all(_attacker_count(k) == 1 for k in crew.kills):
+        # 3. Solo camp — a solo interdictor or HIC killing at a gate
+        #    Dictors bubble gates; if they're killing people at a gate, it's a camp.
+        if is_solo and is_at_gate and self._has_interdictor_attacker(crew):
+            return "solo_camp"
+
+        # 4. Solo roam — not at a gate (or no dictor), just roaming solo
+        if is_solo:
             return "solo_roam"
 
-        # 4 & 5: Camp classifications REQUIRE a gate
+        # 5 & 6: Camp classifications REQUIRE a gate
         if is_at_gate and prob >= 5:
-            # 4. Roaming camp — traveled but now camping at a gate
+            # 5. Roaming camp — traveled but now camping at a gate
             if systems_count > 1 and self._is_stationary_recent(crew):
                 return "roaming_camp"
 
-            # 5. Camp — stationary at a gate
+            # 6. Camp — stationary at a gate
             if systems_count == 1 or self._is_stationary_recent(crew):
                 return "camp"
 
-        # 6. Roam — multi-system movement
+        # 7. Roam — multi-system movement
         if systems_count > 1:
             return "roam"
 
-        # 7. Fallback — single system, not at a gate (moon kills, belt rats, etc.)
+        # 8. Fallback — single system, not at a gate (moon kills, belt rats, etc.)
         return "activity"
+
+    def _has_interdictor_attacker(self, crew: Crew) -> bool:
+        """Check if any active/idle member is flying an interdictor or HIC."""
+        for m in crew.members.values():
+            if m.status in ("active", "idle"):
+                if m.ship_type_ids & INTERDICTOR_SHIP_IDS:
+                    return True
+        return False
 
     def _is_stationary_recent(self, crew: Crew) -> bool:
         """Check if the crew's recent kills are all in the same system."""
@@ -1022,10 +1284,13 @@ class ActivityManager:
         """
         Calculate camp probability for a crew.
 
-        IMPORTANT: Camp probability is ONLY for gate camps. If the crew's
-        kills are not primarily at a stargate, probability is 0.
-        Non-gate activities (moon, belt, random) get classified as
-        "activity" or "roam" with no camp probability.
+        Camp probability is ONLY for gate camps. If the crew's kills are
+        not primarily at a stargate, probability is 0.
+
+        CRITICAL FIX: Threat ships are scored from ALL relevant kills
+        (including pod-victim kills) because the ATTACKER's ship type
+        is the signal, not the victim's. A Flycatcher killing a pod
+        at a gate is still a Flycatcher on a gate.
         """
         # No gate = no camp probability
         if not crew.stargate_name:
@@ -1034,7 +1299,7 @@ class ActivityManager:
         all_kills = crew.kills
         now = _now_ms()
 
-        # Stage 1: filter
+        # Stage 1: filter out irrelevant kills
         kills_for_prob = []
         for kill in all_kills:
             zkb = kill.get("zkb", {})
@@ -1063,16 +1328,13 @@ class ActivityManager:
         if not kills_for_prob:
             return 0
 
-        gate_kills = (
-            [k for k in kills_for_prob if self._is_gate_camp_kill(k)]
-            if crew.stargate_name
-            else []
-        )
-        if crew.stargate_name and not gate_kills:
+        gate_kills = [k for k in kills_for_prob if self._is_gate_camp_kill(k)]
+        if not gate_kills:
             return 0
 
-        relevant = gate_kills if crew.stargate_name else kills_for_prob
+        relevant = gate_kills
 
+        # Split by VICTIM type (for burst penalty, consistency, etc.)
         ship_kills = sorted(
             [
                 k
@@ -1094,7 +1356,7 @@ class ActivityManager:
         minutes_since = (now - crew.last_kill_at) / 60_000
         base = 0.0
 
-        # Stage 2: burst penalty
+        # Stage 2: burst penalty (only meaningful for ship kills)
         if len(ship_kills) > 1:
             kill_times = [_kill_time_ms(k) for k in ship_kills]
             camp_age = (now - crew.created_at) / 60_000
@@ -1105,15 +1367,16 @@ class ActivityManager:
             if camp_age <= 15 and has_burst:
                 base -= BURST_PENALTY
 
-        # Stage 3: threat ships
-        if ship_kills:
-            threat_score = 0.0
-            for kill in ship_kills:
-                for attacker in kill.get("killmail", {}).get("attackers", []):
-                    st = attacker.get("ship_type_id")
-                    if st and st in THREAT_SHIPS:
-                        threat_score += THREAT_SHIPS[st]
-            base += min(THREAT_SCORE_CAP, threat_score)
+        # Stage 3: threat ships — scored from ALL relevant kills
+        # The ATTACKER's ship matters, not the victim's type.
+        # A Flycatcher killing a pod is still a Flycatcher on a gate.
+        threat_score = 0.0
+        for kill in relevant:
+            for attacker in kill.get("killmail", {}).get("attackers", []):
+                st = attacker.get("ship_type_id")
+                if st and st in THREAT_SHIPS:
+                    threat_score += THREAT_SHIPS[st]
+        base += min(THREAT_SCORE_CAP, threat_score)
 
         # Stage 4: smartbomb bonus
         if crew.has_smartbombs:

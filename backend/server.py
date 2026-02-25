@@ -1787,7 +1787,7 @@ async def get_region_activity(hours: int = 24):
                     "totalValue": 0,
                 }
             cls = act.get("classification", "activity")
-            if cls in ("camp", "smartbomb", "roaming_camp"):
+            if cls in ("camp", "solo_camp", "smartbomb", "roaming_camp"):
                 region_live[region]["camps"] += 1
             elif cls == "roam":
                 region_live[region]["roams"] += 1
